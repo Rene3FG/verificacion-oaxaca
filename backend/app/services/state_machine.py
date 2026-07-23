@@ -1,0 +1,133 @@
+"""Máquina de estados del expediente (`verificaciones.estado`).
+
+Regla central del proyecto: NINGÚN módulo debe hacer UPDATE directo sobre
+`estado`. Toda transición pasa por `transition()`, que valida contra
+ALLOWED_TRANSITIONS y dos efectos son atómicos con el cambio de estado:
+1. escribir el nuevo estado en `verificaciones`
+2. escribir la fila correspondiente en `event_log`
+
+Ver Regla de negocio #11 ("prohibido saltar flujo") y la sección
+"Reglas que deben quedar explícitas para desarrollo" #19 del proyecto.
+"""
+
+import datetime
+import uuid
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.enums import EstadoVerificacion as E
+from app.models.event_log import EventLog
+from app.models.verificacion import Verificacion
+
+TERMINAL_STATES = {E.CERRADO, E.CANCELADO}
+
+ERROR_STATES = {E.ERROR_INTEGRACION, E.IMPRESION_FALLIDA, E.FOLIO_ERROR}
+
+# Estados desde los que un supervisor puede cancelar el expediente
+# (regla de negocio: no se cancela nada ya cerrado o ya impreso).
+CANCELABLE_FROM = {
+    E.CREADO,
+    E.DATOS_SIOX_CONSULTADOS,
+    E.DATOS_SIOX_IMPORTADOS,
+    E.DATOS_CAPTURADOS_MANUALMENTE,
+    E.DATOS_NORMALIZADOS,
+    E.INSPECCION_VISUAL_PENDIENTE,
+    E.INSPECCION_VISUAL_APROBADA,
+    E.OBD_NO_APLICA,
+    E.OBD_PENDIENTE,
+    E.OBD_SOLICITADO,
+    E.OBD_RECIBIDO,
+    E.LISTO_PARA_PRUEBA,
+    E.PRUEBA_CONFIGURADA,
+    E.ERROR_INTEGRACION,
+}
+
+ALLOWED_TRANSITIONS: dict[E, set[E]] = {
+    E.CREADO: {E.DATOS_SIOX_CONSULTADOS, E.DATOS_CAPTURADOS_MANUALMENTE},
+    E.DATOS_SIOX_CONSULTADOS: {
+        E.DATOS_SIOX_IMPORTADOS,
+        E.DATOS_CAPTURADOS_MANUALMENTE,
+        E.ERROR_INTEGRACION,
+    },
+    E.DATOS_SIOX_IMPORTADOS: {E.DATOS_NORMALIZADOS},
+    E.DATOS_CAPTURADOS_MANUALMENTE: {E.DATOS_NORMALIZADOS},
+    E.DATOS_NORMALIZADOS: {E.INSPECCION_VISUAL_PENDIENTE},
+    E.INSPECCION_VISUAL_PENDIENTE: {
+        E.INSPECCION_VISUAL_APROBADA,
+        E.INSPECCION_VISUAL_RECHAZADA,
+    },
+    # Regla de negocio #3: rechazo visual salta OBD y prueba, va directo a
+    # impresión (certificado de rechazo, que también consume folio externo).
+    E.INSPECCION_VISUAL_RECHAZADA: {E.PENDIENTE_IMPRESION},
+    E.INSPECCION_VISUAL_APROBADA: {E.OBD_NO_APLICA, E.OBD_PENDIENTE},
+    E.OBD_NO_APLICA: {E.LISTO_PARA_PRUEBA},
+    E.OBD_PENDIENTE: {E.OBD_SOLICITADO},
+    E.OBD_SOLICITADO: {E.OBD_RECIBIDO, E.ERROR_INTEGRACION},
+    E.OBD_RECIBIDO: {E.LISTO_PARA_PRUEBA},
+    E.LISTO_PARA_PRUEBA: {E.PRUEBA_CONFIGURADA},
+    E.PRUEBA_CONFIGURADA: {E.PRUEBA_EN_PROCESO},
+    E.PRUEBA_EN_PROCESO: {E.PRUEBA_FINALIZADA},
+    E.PRUEBA_FINALIZADA: {E.PENDIENTE_IMPRESION},
+    E.PENDIENTE_IMPRESION: {E.FOLIO_SOLICITADO},
+    E.FOLIO_SOLICITADO: {E.FOLIO_ASIGNADO, E.FOLIO_ERROR},
+    E.FOLIO_ASIGNADO: {E.IMPRESO, E.IMPRESION_FALLIDA},
+    E.IMPRESO: {E.CERRADO},
+    # Reintentos desde estados de error: vuelven al paso que falló.
+    E.ERROR_INTEGRACION: {
+        E.DATOS_SIOX_CONSULTADOS,
+        E.OBD_SOLICITADO,
+    },
+    E.FOLIO_ERROR: {E.FOLIO_SOLICITADO},
+    E.IMPRESION_FALLIDA: {E.FOLIO_ASIGNADO},
+}
+
+
+class TransitionNotAllowed(Exception):
+    pass
+
+
+async def transition(
+    db: AsyncSession,
+    verificacion: Verificacion,
+    nuevo_estado: E,
+    *,
+    usuario_id: uuid.UUID | None,
+    modulo: str,
+    evento: str,
+    detalle: dict | None = None,
+    cancelacion: bool = False,
+) -> Verificacion:
+    estado_anterior = verificacion.estado
+
+    if cancelacion:
+        if estado_anterior not in CANCELABLE_FROM or nuevo_estado != E.CANCELADO:
+            raise TransitionNotAllowed(
+                f"No se puede cancelar un expediente en estado {estado_anterior}"
+            )
+    else:
+        permitidos = ALLOWED_TRANSITIONS.get(estado_anterior, set())
+        if nuevo_estado not in permitidos:
+            raise TransitionNotAllowed(
+                f"Transición {estado_anterior} -> {nuevo_estado} no permitida"
+            )
+
+    verificacion.estado = nuevo_estado
+    db.add(verificacion)
+
+    db.add(
+        EventLog(
+            verificacion_id=verificacion.id,
+            evento=evento,
+            estado_anterior=estado_anterior,
+            estado_nuevo=nuevo_estado,
+            usuario_id=usuario_id,
+            modulo=modulo,
+            detalle_json=detalle,
+        )
+    )
+
+    if nuevo_estado == E.CERRADO:
+        verificacion.cerrado_at = datetime.datetime.now(datetime.timezone.utc)
+
+    await db.flush()
+    return verificacion

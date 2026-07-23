@@ -1,0 +1,87 @@
+import datetime
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_db
+from app.models.workstation import StationSession, UserStationPermission, Workstation
+from app.schemas.estacion import StationSessionRead, WorkstationRead
+
+router = APIRouter(prefix="/api/estaciones", tags=["estaciones"])
+
+
+@router.get("/{device_identifier}", response_model=WorkstationRead)
+async def detectar_estacion(
+    device_identifier: str, db: AsyncSession = Depends(get_db)
+) -> Workstation:
+    result = await db.execute(
+        select(Workstation).where(
+            Workstation.device_identifier == device_identifier,
+            Workstation.is_active.is_(True),
+        )
+    )
+    estacion = result.scalar_one_or_none()
+    if estacion is None:
+        raise HTTPException(
+            status_code=404, detail="Esta computadora no está configurada como estación."
+        )
+    return estacion
+
+
+class LoginRequest(BaseModel):
+    user_id: uuid.UUID
+    workstation_id: uuid.UUID
+    ip_address: str | None = None
+    device_fingerprint: str | None = None
+
+
+@router.post("/login", response_model=StationSessionRead)
+async def iniciar_sesion(
+    payload: LoginRequest, db: AsyncSession = Depends(get_db)
+) -> StationSession:
+    estacion = await db.get(Workstation, payload.workstation_id)
+    if estacion is None:
+        raise HTTPException(status_code=404, detail="Estación no encontrada")
+
+    permiso = await db.execute(
+        select(UserStationPermission).where(
+            UserStationPermission.user_id == payload.user_id,
+            UserStationPermission.station_type == estacion.station_type,
+            UserStationPermission.center_id == estacion.center_id,
+            UserStationPermission.can_operate.is_(True),
+        )
+    )
+    if permiso.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=403, detail="No tienes permiso para operar esta estación."
+        )
+
+    sesion = StationSession(
+        user_id=payload.user_id,
+        workstation_id=estacion.id,
+        station_type=estacion.station_type,
+        center_id=estacion.center_id,
+        line_id=estacion.line_id,
+        login_at=datetime.datetime.now(datetime.timezone.utc),
+        ip_address=payload.ip_address,
+        device_fingerprint=payload.device_fingerprint,
+        status="activa",
+    )
+    db.add(sesion)
+    await db.commit()
+    await db.refresh(sesion)
+    return sesion
+
+
+@router.post("/logout/{session_id}")
+async def cerrar_sesion(session_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict:
+    sesion = await db.get(StationSession, session_id)
+    if sesion is None:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    sesion.logout_at = datetime.datetime.now(datetime.timezone.utc)
+    sesion.status = "cerrada"
+    await db.commit()
+    return {"status": "cerrada"}
