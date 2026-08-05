@@ -7,6 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
+from app.models.access_event import AccessEvent
+from app.models.enums import AccessEventResultado
 from app.models.workstation import StationSession, UserStationPermission, Workstation
 from app.schemas.estacion import StationSessionRead, WorkstationRead
 
@@ -44,9 +46,19 @@ async def iniciar_sesion(
 ) -> StationSession:
     estacion = await db.get(Workstation, payload.workstation_id)
     if estacion is None:
+        db.add(
+            AccessEvent(
+                user_id=payload.user_id,
+                workstation_id=payload.workstation_id,
+                resultado=AccessEventResultado.DENEGADO,
+                motivo="Estación no encontrada",
+                ip_address=payload.ip_address,
+            )
+        )
+        await db.commit()
         raise HTTPException(status_code=404, detail="Estación no encontrada")
 
-    permiso = await db.execute(
+    permisos = await db.execute(
         select(UserStationPermission).where(
             UserStationPermission.user_id == payload.user_id,
             UserStationPermission.station_type == estacion.station_type,
@@ -54,7 +66,31 @@ async def iniciar_sesion(
             UserStationPermission.can_operate.is_(True),
         )
     )
-    if permiso.scalar_one_or_none() is None:
+    # HU-001: line_id NULL en el permiso = "todas las líneas del centro"
+    # (supervisor). Un permiso de línea específica solo sirve para esa línea.
+    permiso_valido = next(
+        (
+            p
+            for p in permisos.scalars().all()
+            if p.line_id is None or p.line_id == estacion.line_id
+        ),
+        None,
+    )
+
+    if permiso_valido is None:
+        db.add(
+            AccessEvent(
+                user_id=payload.user_id,
+                workstation_id=estacion.id,
+                station_type=estacion.station_type,
+                center_id=estacion.center_id,
+                line_id=estacion.line_id,
+                resultado=AccessEventResultado.DENEGADO,
+                motivo="Sin permiso para operar esta estación/línea",
+                ip_address=payload.ip_address,
+            )
+        )
+        await db.commit()
         raise HTTPException(
             status_code=403, detail="No tienes permiso para operar esta estación."
         )
@@ -71,6 +107,20 @@ async def iniciar_sesion(
         status="activa",
     )
     db.add(sesion)
+    await db.flush()
+
+    db.add(
+        AccessEvent(
+            user_id=payload.user_id,
+            workstation_id=estacion.id,
+            station_type=estacion.station_type,
+            center_id=estacion.center_id,
+            line_id=estacion.line_id,
+            resultado=AccessEventResultado.PERMITIDO,
+            session_id=sesion.id,
+            ip_address=payload.ip_address,
+        )
+    )
     await db.commit()
     await db.refresh(sesion)
     return sesion
