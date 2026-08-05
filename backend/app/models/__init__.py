@@ -1,3 +1,4 @@
+from app.models.access_event import AccessEvent
 from app.models.catalogos import (
     CatalogoSimple,
     CatEstadoVerificacion,
@@ -18,6 +19,7 @@ from app.models.verificacion import Verificacion
 from app.models.workstation import StationSession, UserStationPermission, Workstation
 
 __all__ = [
+    "AccessEvent",
     "CatalogoSimple",
     "CatEstadoVerificacion",
     "CatParametroSistema",

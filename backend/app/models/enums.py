@@ -94,3 +94,8 @@ class SyncStatus(str, enum.Enum):
     SYNCING = "syncing"
     SYNCED = "synced"
     ERROR = "error"
+
+
+class AccessEventResultado(str, enum.Enum):
+    PERMITIDO = "PERMITIDO"
+    DENEGADO = "DENEGADO"
