@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import get_db
+from app.api.deps import SessionContext, get_current_session, get_db
 from app.models.enums import EstadoVerificacion, FuenteDatos
 from app.models.event_log import EventLog
 from app.models.vehiculo import Vehiculo
@@ -17,11 +17,19 @@ router = APIRouter(prefix="/api/expedientes", tags=["expedientes"])
 
 @router.post("", response_model=ExpedienteRead, status_code=201)
 async def crear_expediente(
-    payload: ExpedienteCreate, db: AsyncSession = Depends(get_db)
+    payload: ExpedienteCreate,
+    session: SessionContext = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db),
 ) -> Verificacion:
     """Regla de negocio #1: nada opera sin expediente. Se crea con la placa
     capturada; el vehículo asociado se resuelve/crea después vía SIOX o
-    captura manual (ver /api/siox)."""
+    captura manual (ver /api/siox). centro_id/linea_id/operador_id salen de
+    la sesión de la estación de Captura, nunca del payload."""
+
+    if session.center_id is None or session.line_id is None:
+        raise HTTPException(
+            status_code=400, detail="La sesión no tiene centro o línea asociada."
+        )
 
     vehiculo = Vehiculo(placa=payload.placa, fuente_datos=FuenteDatos.MANUAL)
     db.add(vehiculo)
@@ -30,9 +38,9 @@ async def crear_expediente(
     verificacion = Verificacion(
         vehiculo_id=vehiculo.id,
         placa=payload.placa,
-        centro_id=payload.centro_id,
-        linea_id=payload.linea_id,
-        operador_id=payload.operador_id,
+        centro_id=session.center_id,
+        linea_id=session.line_id,
+        operador_id=session.user_id,
         estado=EstadoVerificacion.CREADO,
     )
     db.add(verificacion)
@@ -46,7 +54,7 @@ async def crear_expediente(
             evento="expediente_creado",
             estado_anterior=None,
             estado_nuevo=EstadoVerificacion.CREADO,
-            usuario_id=payload.operador_id,
+            usuario_id=session.user_id,
             modulo="captura",
         )
     )

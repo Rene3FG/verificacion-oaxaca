@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import get_db
+from app.api.deps import SessionContext, assert_linea_permitida, get_current_session, get_db
 from app.models.enums import EstadoPrintJob, EstadoVerificacion
 from app.models.print_job import PrintJob
 from app.models.verificacion import Verificacion
@@ -18,10 +18,19 @@ router = APIRouter(prefix="/api/impresion", tags=["impresion"])
 
 @router.get("/cola", response_model=list[ExpedienteCompleto])
 async def cola_impresion(
-    linea_id: int | None = None, db: AsyncSession = Depends(get_db)
+    linea_id: int | None = None,
+    session: SessionContext = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db),
 ) -> list[Verificacion]:
     """Impresión es central: sin filtro recibe expedientes de TODAS las
-    líneas (regla del modelo de estaciones)."""
+    líneas que la estación tiene permitidas (`allowed_line_ids`), nunca de
+    todas las líneas del sistema. El filtro `?linea_id=` solo puede
+    estrechar ese conjunto, jamás ampliarlo: si pide una línea fuera de
+    `allowed_line_ids` la cola simplemente sale vacía, nunca expone otra
+    línea."""
+
+    lineas_permitidas = session.lineas_visibles()
+    lineas_query = {linea_id} & lineas_permitidas if linea_id is not None else lineas_permitidas
 
     query = select(Verificacion).options(selectinload(Verificacion.vehiculo)).where(
         Verificacion.estado.in_(
@@ -31,10 +40,9 @@ async def cola_impresion(
                 EstadoVerificacion.FOLIO_ASIGNADO,
                 EstadoVerificacion.IMPRESION_FALLIDA,
             ]
-        )
+        ),
+        Verificacion.linea_id.in_(lineas_query),
     )
-    if linea_id is not None:
-        query = query.where(Verificacion.linea_id == linea_id)
 
     result = await db.execute(query.order_by(Verificacion.created_at))
     return list(result.scalars().all())
@@ -44,7 +52,7 @@ async def cola_impresion(
 async def imprimir_certificado(
     expediente_id: uuid.UUID,
     print_job_id: uuid.UUID,
-    usuario_id: uuid.UUID | None = None,
+    session: SessionContext = Depends(get_current_session),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Regla de negocio #7: sin folio externo confirmado NO se imprime
@@ -54,6 +62,7 @@ async def imprimir_certificado(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.linea_id)
     if verificacion.folio_externo is None:
         raise HTTPException(
             status_code=409,
@@ -74,7 +83,7 @@ async def imprimir_certificado(
         db,
         verificacion,
         EstadoVerificacion.IMPRESO,
-        usuario_id=usuario_id,
+        usuario_id=session.user_id,
         modulo="impresion",
         evento="certificado_impreso",
     )
@@ -82,7 +91,7 @@ async def imprimir_certificado(
         db,
         verificacion,
         EstadoVerificacion.CERRADO,
-        usuario_id=usuario_id,
+        usuario_id=session.user_id,
         modulo="impresion",
         evento="expediente_cerrado",
     )

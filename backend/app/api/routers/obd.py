@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import SessionContext, assert_linea_permitida, get_current_session, get_db
 from app.models.enums import EstadoVerificacion, ResultadoPruebaEnum
 from app.models.resultado_obd_sbd import ResultadoObdSbd
 from app.models.verificacion import Verificacion
@@ -20,7 +20,7 @@ async def evaluar_obd(
     tipo_vehiculo: str,
     combustible: str,
     modelo: int,
-    usuario_id: uuid.UUID | None = None,
+    session: SessionContext = Depends(get_current_session),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Regla de negocio #4: determina si OBD/SBD aplica, según parámetro
@@ -29,6 +29,7 @@ async def evaluar_obd(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.linea_id)
 
     aplica = await obd_aplica(
         db,
@@ -50,7 +51,7 @@ async def evaluar_obd(
         db,
         verificacion,
         nuevo_estado,
-        usuario_id=usuario_id,
+        usuario_id=session.user_id,
         modulo="obd",
         evento="obd_evaluado",
         detalle={"aplica": aplica},
@@ -62,7 +63,7 @@ async def evaluar_obd(
             db,
             verificacion,
             EstadoVerificacion.LISTO_PARA_PRUEBA,
-            usuario_id=usuario_id,
+            usuario_id=session.user_id,
             modulo="obd",
             evento="obd_no_aplica_continua",
         )
@@ -76,24 +77,24 @@ class ObdResultadoInput(BaseModel):
     codigos_error: dict | None = None
     datos_raw: dict | None = None
     equipo_id: uuid.UUID | None = None
-    operador_id: uuid.UUID | None = None
 
 
 @router.post("/solicitar/{expediente_id}")
 async def solicitar_obd(
     expediente_id: uuid.UUID,
-    usuario_id: uuid.UUID | None = None,
+    session: SessionContext = Depends(get_current_session),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.linea_id)
 
     await state_machine.transition(
         db,
         verificacion,
         EstadoVerificacion.OBD_SOLICITADO,
-        usuario_id=usuario_id,
+        usuario_id=session.user_id,
         modulo="obd",
         evento="obd_solicitado",
     )
@@ -105,17 +106,19 @@ async def solicitar_obd(
 async def guardar_resultado_obd(
     expediente_id: uuid.UUID,
     payload: ObdResultadoInput,
+    session: SessionContext = Depends(get_current_session),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.linea_id)
 
     await state_machine.transition(
         db,
         verificacion,
         EstadoVerificacion.OBD_RECIBIDO,
-        usuario_id=payload.operador_id,
+        usuario_id=session.user_id,
         modulo="obd",
         evento="obd_resultado_guardado",
         detalle={"resultado": payload.resultado},
@@ -124,7 +127,7 @@ async def guardar_resultado_obd(
         db,
         verificacion,
         EstadoVerificacion.LISTO_PARA_PRUEBA,
-        usuario_id=payload.operador_id,
+        usuario_id=session.user_id,
         modulo="obd",
         evento="enviado_a_prueba",
     )

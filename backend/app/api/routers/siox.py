@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import SessionContext, assert_linea_permitida, get_current_session, get_db
 from app.core.config import settings
 from app.models.enums import EstadoVerificacion
 from app.models.integration_log import (
@@ -28,12 +28,13 @@ STATUS_MAP = {
 @router.post("/consultar/{expediente_id}")
 async def consultar_siox(
     expediente_id: uuid.UUID,
-    usuario_id: uuid.UUID | None = None,
+    session: SessionContext = Depends(get_current_session),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.linea_id)
 
     resultado = await consultar_placa(verificacion.placa)
 
@@ -46,7 +47,7 @@ async def consultar_siox(
             response_raw=resultado.raw,
             response_normalized=resultado.normalized,
             status=STATUS_MAP[resultado.status],
-            consultado_por=usuario_id,
+            consultado_por=session.user_id,
         )
     )
     db.add(
@@ -67,7 +68,7 @@ async def consultar_siox(
             db,
             verificacion,
             EstadoVerificacion.DATOS_SIOX_CONSULTADOS,
-            usuario_id=usuario_id,
+            usuario_id=session.user_id,
             modulo="captura",
             evento="siox_consultado",
             detalle={"status": resultado.status},
@@ -78,7 +79,7 @@ async def consultar_siox(
             db,
             verificacion,
             EstadoVerificacion.DATOS_SIOX_IMPORTADOS,
-            usuario_id=usuario_id,
+            usuario_id=session.user_id,
             modulo="captura",
             evento="datos_siox_importados",
         )
@@ -92,7 +93,7 @@ async def consultar_siox(
 @router.post("/captura-manual/{expediente_id}")
 async def captura_manual(
     expediente_id: uuid.UUID,
-    usuario_id: uuid.UUID | None = None,
+    session: SessionContext = Depends(get_current_session),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Si SIOX no responde o faltan datos, captura manual asistida —
@@ -101,12 +102,13 @@ async def captura_manual(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.linea_id)
 
     await state_machine.transition(
         db,
         verificacion,
         EstadoVerificacion.DATOS_CAPTURADOS_MANUALMENTE,
-        usuario_id=usuario_id,
+        usuario_id=session.user_id,
         modulo="captura",
         evento="captura_manual",
     )
