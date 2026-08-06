@@ -3,9 +3,9 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import SessionContext, assert_linea_permitida, get_current_session, get_db
+from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
 from app.core.config import settings
-from app.models.enums import EstadoVerificacion
+from app.models.enums import EstadoVerificacion, StationType
 from app.models.integration_log import (
     IntegrationDirection,
     IntegrationLog,
@@ -28,7 +28,7 @@ STATUS_MAP = {
 @router.post("/consultar/{expediente_id}")
 async def consultar_siox(
     expediente_id: uuid.UUID,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.CAPTURA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     verificacion = await db.get(Verificacion, expediente_id)
@@ -93,7 +93,7 @@ async def consultar_siox(
 @router.post("/captura-manual/{expediente_id}")
 async def captura_manual(
     expediente_id: uuid.UUID,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.CAPTURA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Si SIOX no responde o faltan datos, captura manual asistida —
