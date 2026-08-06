@@ -9,7 +9,13 @@ from app.db.session import get_db
 from app.models.enums import StationType
 from app.models.workstation import StationSession, Workstation
 
-__all__ = ["get_db", "get_current_session", "SessionContext", "assert_linea_permitida"]
+__all__ = [
+    "get_db",
+    "get_current_session",
+    "SessionContext",
+    "assert_linea_permitida",
+    "requiere_estacion",
+]
 
 
 @dataclass
@@ -56,6 +62,25 @@ async def get_current_session(
         is_centralized=estacion.is_centralized,
         allowed_line_ids=estacion.allowed_line_ids,
     )
+
+
+def requiere_estacion(tipo: StationType):
+    """Dependencia que restringe un endpoint a un tipo de estación
+    (p.ej. Captura). Reemplaza a `get_current_session` en la firma del
+    router: una estación de Prueba o Impresión recibe 403 en vez de poder
+    operar flujos que no le corresponden."""
+
+    async def checker(
+        session: SessionContext = Depends(get_current_session),
+    ) -> SessionContext:
+        if session.station_type != tipo:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Esta operación requiere una estación de tipo {tipo.value}.",
+            )
+        return session
+
+    return checker
 
 
 def assert_linea_permitida(session: SessionContext, linea_id: int) -> None:

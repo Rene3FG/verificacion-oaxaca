@@ -5,8 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import SessionContext, get_current_session, get_db
-from app.models.enums import EstadoVerificacion, FuenteDatos
+from app.api.deps import SessionContext, get_db, requiere_estacion
+from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
 from app.models.event_log import EventLog
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
@@ -18,13 +18,14 @@ router = APIRouter(prefix="/api/expedientes", tags=["expedientes"])
 @router.post("", response_model=ExpedienteRead, status_code=201)
 async def crear_expediente(
     payload: ExpedienteCreate,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.CAPTURA)),
     db: AsyncSession = Depends(get_db),
 ) -> Verificacion:
     """Regla de negocio #1: nada opera sin expediente. Se crea con la placa
     capturada; el vehículo asociado se resuelve/crea después vía SIOX o
     captura manual (ver /api/siox). centro_id/linea_id/operador_id salen de
-    la sesión de la estación de Captura, nunca del payload."""
+    la sesión de la estación de Captura, nunca del payload. Solo una
+    estación de tipo Captura puede abrir expedientes (HU-019)."""
 
     if session.center_id is None or session.line_id is None:
         raise HTTPException(
