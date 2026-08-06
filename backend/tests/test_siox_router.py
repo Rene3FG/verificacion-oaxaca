@@ -1,6 +1,8 @@
-from app.models.enums import EstadoVerificacion, StationType
+from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
+from app.models.event_log import EventLog
 from app.models.integration_log import IntegrationLog
 from app.models.siox_consulta import EstadoSioxConsulta, SioxConsulta
+from app.models.vehiculo import Vehiculo
 from app.services.siox_client import SioxConsultaResultado
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa
 
@@ -55,6 +57,64 @@ async def test_consultar_exitosa_transiciona_a_datos_siox_importados(
         IntegrationLog.__table__.select().where(IntegrationLog.verificacion_id == expediente.id)
     )).mappings().one()
     assert log["integration_name"] == "SIOX"
+
+
+async def test_consultar_exitosa_actualiza_vehiculo_y_marca_fuente_siox(
+    client, db_session, monkeypatch
+):
+    """HU-012: la respuesta normalizada se mapea a las columnas del
+    vehículo y su fuente_datos pasa a SIOX; estatus/version/motor no tienen
+    columna propia y solo quedan en siox_consultas."""
+
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+
+    _mock_consultar_placa(
+        monkeypatch,
+        SioxConsultaResultado(
+            status="EXITOSA",
+            raw={"html": "<div>...</div>"},
+            normalized={
+                "placa": expediente.placa,
+                "niv": "3N1CN8AE1PL835483",
+                "marca": "NISSAN MEXICANA, S.A. DE C.V.",
+                "linea": "VERSA",
+                "modelo": 2023,
+                "tipo_vehiculo": "AUTOMOVIL",
+                "estatus": "ACTIVO",
+                "version": "SR CVT 1.6 LTS",
+                "motor": "HR16",
+            },
+        ),
+    )
+
+    resp = await client.post(
+        f"/api/siox/consultar/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert resp.status_code == 200
+
+    vehiculo = await db_session.get(Vehiculo, expediente.vehiculo_id)
+    assert vehiculo.niv == "3N1CN8AE1PL835483"
+    assert vehiculo.marca == "NISSAN MEXICANA, S.A. DE C.V."
+    assert vehiculo.linea == "VERSA"
+    assert vehiculo.modelo == 2023
+    assert vehiculo.tipo_vehiculo == "AUTOMOVIL"
+    assert vehiculo.fuente_datos == FuenteDatos.SIOX
+
+    evento = (await db_session.execute(
+        EventLog.__table__.select().where(
+            EventLog.verificacion_id == expediente.id,
+            EventLog.evento == "datos_siox_importados",
+        )
+    )).mappings().one()
+    assert set(evento["detalle_json"]["campos_actualizados"]) == {
+        "niv",
+        "marca",
+        "linea",
+        "modelo",
+        "tipo_vehiculo",
+    }
 
 
 async def test_consultar_sin_datos_no_bloquea_y_permite_captura_manual(

@@ -5,13 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
 from app.core.config import settings
-from app.models.enums import EstadoVerificacion, StationType
+from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
 from app.models.integration_log import (
     IntegrationDirection,
     IntegrationLog,
     IntegrationStatus,
 )
 from app.models.siox_consulta import EstadoSioxConsulta, SioxConsulta
+from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
 from app.services import state_machine
 from app.services.siox_client import consultar_placa
@@ -23,6 +24,11 @@ STATUS_MAP = {
     "SIN_DATOS": EstadoSioxConsulta.SIN_DATOS,
     "ERROR": EstadoSioxConsulta.ERROR,
 }
+
+# HU-012: campos de la respuesta normalizada de SIOX que tienen columna
+# propia en Vehiculo. estatus/version/motor no tienen columna y quedan solo
+# en siox_consultas.response_normalized.
+VEHICULO_FIELDS = {"niv", "marca", "linea", "modelo", "tipo_vehiculo"}
 
 
 @router.post("/consultar/{expediente_id}")
@@ -75,6 +81,20 @@ async def consultar_siox(
         )
 
     if resultado.status == "EXITOSA":
+        # HU-012: mapear la respuesta normalizada a los campos del vehículo
+        # y marcar su origen, para que el resto del flujo (inspección,
+        # impresión) sepa que estos datos vienen de SIOX y no de captura.
+        vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
+        campos_actualizados = {
+            campo: valor
+            for campo, valor in (resultado.normalized or {}).items()
+            if campo in VEHICULO_FIELDS and valor is not None
+        }
+        for campo, valor in campos_actualizados.items():
+            setattr(vehiculo, campo, valor)
+        vehiculo.fuente_datos = FuenteDatos.SIOX
+        db.add(vehiculo)
+
         await state_machine.transition(
             db,
             verificacion,
@@ -82,6 +102,7 @@ async def consultar_siox(
             usuario_id=session.user_id,
             modulo="captura",
             evento="datos_siox_importados",
+            detalle={"campos_actualizados": sorted(campos_actualizados)},
         )
     # Si status es SIN_DATOS o ERROR, el operador debe usar
     # /api/siox/captura-manual/{expediente_id} (regla: nunca bloquear).
