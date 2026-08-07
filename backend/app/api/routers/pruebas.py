@@ -7,8 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import SessionContext, assert_linea_permitida, get_current_session, get_db
-from app.models.enums import EstadoVerificacion, ResultadoFinal, ResultadoPruebaEnum, TipoPrueba
+from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
+from app.models.enums import (
+    EstadoVerificacion,
+    ResultadoFinal,
+    ResultadoPruebaEnum,
+    StationType,
+    TipoPrueba,
+)
 from app.models.event_log import EventLog
 from app.models.resultado_prueba import ResultadoPrueba
 from app.models.verificacion import Verificacion
@@ -30,7 +36,7 @@ async def _obtener_expediente_de_la_linea(
 
 @router.get("/cola", response_model=list[ExpedienteCompleto])
 async def cola_prueba(
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
 ) -> list[Verificacion]:
     """La estación de Prueba solo ve expedientes de su línea (regla del
@@ -59,7 +65,7 @@ async def configurar_prueba(
     tipo_prueba: TipoPrueba,
     cambio_manual: bool = False,
     motivo: str | None = None,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Regla de negocio #5/#9: gasolina -> dinámica por default, cambiable a
@@ -103,7 +109,7 @@ def _cambio_tipo_prueba_event(verificacion_id, usuario_id, motivo, tipo_prueba):
 @router.post("/iniciar/{expediente_id}")
 async def iniciar_prueba(
     expediente_id: uuid.UUID,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
@@ -131,7 +137,7 @@ class ResultadoPruebaInput(BaseModel):
 async def guardar_resultado_prueba(
     expediente_id: uuid.UUID,
     payload: ResultadoPruebaInput,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)

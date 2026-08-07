@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import SessionContext, assert_linea_permitida, get_current_session, get_db
-from app.models.enums import EstadoFolioAssignment, EstadoFolioRequest, EstadoVerificacion
+from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
+from app.models.enums import EstadoFolioAssignment, EstadoFolioRequest, EstadoVerificacion, StationType
 from app.models.folio_assignment import FolioAssignment
 from app.models.folio_request import FolioRequest
 from app.models.integration_log import (
@@ -35,7 +35,7 @@ async def solicitar_folio(
     tipo_certificado: str,
     tipo_vehiculo: str | None = None,
     print_job_id: uuid.UUID | None = None,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.IMPRESION)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Idempotente (regla #12): un expediente cerrado solo puede tener un

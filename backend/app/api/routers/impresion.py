@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import SessionContext, assert_linea_permitida, get_current_session, get_db
-from app.models.enums import EstadoPrintJob, EstadoVerificacion
+from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
+from app.models.enums import EstadoPrintJob, EstadoVerificacion, StationType
 from app.models.print_job import PrintJob
 from app.models.verificacion import Verificacion
 from app.schemas.verificacion import ExpedienteCompleto
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/impresion", tags=["impresion"])
 @router.get("/cola", response_model=list[ExpedienteCompleto])
 async def cola_impresion(
     linea_id: int | None = None,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.IMPRESION)),
     db: AsyncSession = Depends(get_db),
 ) -> list[Verificacion]:
     """Impresión es central: sin filtro recibe expedientes de TODAS las
@@ -52,7 +52,7 @@ async def cola_impresion(
 async def imprimir_certificado(
     expediente_id: uuid.UUID,
     print_job_id: uuid.UUID,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.IMPRESION)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Regla de negocio #7: sin folio externo confirmado NO se imprime
