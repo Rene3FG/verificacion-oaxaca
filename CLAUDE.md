@@ -49,7 +49,7 @@ cd backend && source .venv/bin/activate && python -m pytest -q
 `db_session` (cada test corre en un SAVEPOINT que se revierte al final, no
 deja datos entre pruebas).
 
-Estado actual: **31 pruebas, todas pasan.**
+Estado actual: **38 pruebas, todas pasan.**
 
 ## Etapa 1 — hecho
 
@@ -83,7 +83,7 @@ de accesos (`access_events`).
 
 ```
 CREADO → DATOS_SIOX_CONSULTADOS → DATOS_SIOX_IMPORTADOS ─┐
-      └─────────────────────────→ DATOS_CAPTURADOS_MANUALMENTE ─┴→ DATOS_NORMALIZADOS
+      └─────────────────────────→ DATOS_CAPTURADOS_MANUALMENTE ─┴→ DATOS_NORMALIZADOS → INSPECCION_VISUAL_PENDIENTE
 ```
 
 `DATOS_SIOX_CONSULTADOS` es el estado intermedio tanto si SIOX respondió con
@@ -91,40 +91,39 @@ datos como si no; desde ahí, `SIN_DATOS`/`ERROR` habilitan captura manual
 (`DATOS_CAPTURADOS_MANUALMENTE`) sin pasar por un estado de error — el
 expediente nunca se traba por una falla de SIOX.
 
+`DATOS_SIOX_IMPORTADOS`/`DATOS_CAPTURADOS_MANUALMENTE` → `DATOS_NORMALIZADOS`
+→ `INSPECCION_VISUAL_PENDIENTE` es una **confirmación manual** del operador
+de Captura vía `POST /api/expedientes/{id}/normalizar` (decisión de negocio
+2026-08-07, ver más abajo) — no es automática.
+
 ### Nota sobre `requiere_estacion`
 
 Aplicado en `expedientes.py` (Captura), `siox.py` (Captura), `pruebas.py`
-(Prueba), `impresion.py` (Impresión) y `folios.py` (Impresión — la
-solicitud de folio se dispara desde la misma estación que imprime).
-`inspeccion.py` y `obd.py` siguen **sin** `requiere_estacion` a propósito:
-el modelo de estaciones solo tiene 3 tipos físicos (`CAPTURA`, `PRUEBA`,
-`IMPRESION`, ver `seed.py`) y no está definido en qué estación se hace la
-inspección visual ni la evaluación OBD/SBD — decisión de producto pendiente,
-no técnica. Cuando se defina, ambos routers ya siguen el mismo patrón que
-los demás: reemplazar `get_current_session` por
-`requiere_estacion(StationType.X)`.
+(Prueba), `impresion.py` (Impresión), `folios.py` (Impresión — la
+solicitud de folio se dispara desde la misma estación que imprime),
+`inspeccion.py` (Prueba) y `obd.py` (Prueba). Las dos últimas se definieron
+el 2026-08-07: el modelo de estaciones solo tiene 3 tipos físicos (`CAPTURA`,
+`PRUEBA`, `IMPRESION`, ver `seed.py`); se decidió que inspección visual y
+OBD/SBD corren en la misma estación física donde después se hace la prueba
+dinámica/estática/opacidad, junto al equipo de prueba.
 
-### Gap real encontrado (2026-08-06): la cadena se rompe después de importar/capturar
+### Resuelto (2026-08-07): la cadena que se rompía después de importar/capturar
 
-Revisando el código para evaluar qué falta de Etapa 2, se encontró que
-**ningún endpoint transiciona `DATOS_SIOX_IMPORTADOS` /
-`DATOS_CAPTURADOS_MANUALMENTE` → `DATOS_NORMALIZADOS` → `INSPECCION_VISUAL_PENDIENTE`**,
-aunque el estado `DATOS_NORMALIZADOS` y esa transición sí existen en
-`ALLOWED_TRANSITIONS` (`state_machine.py`). En la práctica esto significa
-que `POST /api/inspeccion/{id}` es hoy inalcanzable para un expediente que
-pasó por el flujo real: llamarlo sobre un expediente en
-`DATOS_SIOX_IMPORTADOS` lanzaría `TransitionNotAllowed` (sin capturar, se
-volvería un 500) porque `INSPECCION_VISUAL_APROBADA`/`RECHAZADA` solo son
-transiciones válidas desde `INSPECCION_VISUAL_PENDIENTE`. Ni `inspeccion.py`
-ni `obd.py` tienen pruebas hoy — nadie ha ejercitado este camino end-to-end
-todavía, por eso no se detectó antes.
+El 2026-08-06 se encontró que ningún endpoint transicionaba
+`DATOS_SIOX_IMPORTADOS`/`DATOS_CAPTURADOS_MANUALMENTE` → `DATOS_NORMALIZADOS`
+→ `INSPECCION_VISUAL_PENDIENTE`, dejando `POST /api/inspeccion/{id}`
+inalcanzable en la práctica. Se decidió que ese paso es una **confirmación
+manual** del operador de Captura (no automática): revisa/corrige los datos
+importados o capturados y confirma explícitamente antes de mandar el
+expediente a Inspección Visual.
 
-Falta decidir (producto, no código): ¿la normalización a
-`DATOS_NORMALIZADOS` es automática justo después de importar/capturar, o es
-un paso explícito donde el operador confirma/corrige los datos antes de
-seguir? Esa decisión define si el fix va dentro de `siox.py`/
-`expedientes.py` o si es un endpoint nuevo tipo
-`POST /api/expedientes/{id}/normalizar`.
+Implementado como `POST /api/expedientes/{id}/normalizar`
+(`requiere_estacion(StationType.CAPTURA)`): valida que el expediente esté en
+`DATOS_SIOX_IMPORTADOS` o `DATOS_CAPTURADOS_MANUALMENTE` (409 si no), y hace
+las dos transiciones (`DATOS_NORMALIZADOS` → `INSPECCION_VISUAL_PENDIENTE`)
+en una sola llamada. `tests/test_estacion_guard.py::test_flujo_completo_captura_a_inspeccion_visual`
+cubre el camino end-to-end completo (SIOX exitoso → normalizar → inspección
+visual) que antes era imposible.
 
 Otros dos hallazgos menores de la misma revisión, sin resolver:
 - `Verificacion.combustible_validado` se **lee** en `pruebas.py` al guardar

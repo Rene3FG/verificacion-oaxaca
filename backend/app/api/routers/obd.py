@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import SessionContext, assert_linea_permitida, get_current_session, get_db
-from app.models.enums import EstadoVerificacion, ResultadoPruebaEnum
+from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
+from app.models.enums import EstadoVerificacion, ResultadoPruebaEnum, StationType
 from app.models.resultado_obd_sbd import ResultadoObdSbd
 from app.models.verificacion import Verificacion
 from app.services import state_machine
@@ -20,7 +20,7 @@ async def evaluar_obd(
     tipo_vehiculo: str,
     combustible: str,
     modelo: int,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Regla de negocio #4: determina si OBD/SBD aplica, según parámetro
@@ -82,7 +82,7 @@ class ObdResultadoInput(BaseModel):
 @router.post("/solicitar/{expediente_id}")
 async def solicitar_obd(
     expediente_id: uuid.UUID,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     verificacion = await db.get(Verificacion, expediente_id)
@@ -106,7 +106,7 @@ async def solicitar_obd(
 async def guardar_resultado_obd(
     expediente_id: uuid.UUID,
     payload: ObdResultadoInput,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     verificacion = await db.get(Verificacion, expediente_id)

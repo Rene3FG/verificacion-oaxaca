@@ -92,3 +92,79 @@ async def test_folios_solicitar_desde_impresion_no_es_403(client, db_session):
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp.status_code == 200
+
+
+async def test_inspeccion_desde_captura_responde_403(client, db_session):
+    """Decisión 2026-08-07: Inspección Visual corre en estación de Prueba."""
+
+    sesion = await _sesion(db_session, station_type=StationType.CAPTURA)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/inspeccion/{expediente.id}",
+        json={"resultado": "APROBADA", "checklist_json": {}},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
+
+
+async def test_obd_evaluar_desde_impresion_responde_403(client, db_session):
+    """Decisión 2026-08-07: OBD/SBD corre en estación de Prueba."""
+
+    sesion = await _sesion(
+        db_session,
+        station_type=StationType.IMPRESION,
+        line_id=None,
+        is_centralized=True,
+        allowed_line_ids=[1],
+    )
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.INSPECCION_VISUAL_APROBADA
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/obd/evaluar/{expediente.id}",
+        params={"tipo_vehiculo": "vehiculo", "combustible": "gasolina", "modelo": 2023},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
+
+
+async def test_flujo_completo_captura_a_inspeccion_visual(client, db_session):
+    """Regresión del gap encontrado el 2026-08-06: antes de agregar
+    /normalizar, este camino completo (SIOX exitoso -> confirmar
+    normalización -> inspección visual) era imposible: registrar_inspeccion
+    lanzaba TransitionNotAllowed porque nada dejaba el expediente en
+    INSPECCION_VISUAL_PENDIENTE."""
+
+    captura = await _sesion(db_session, station_type=StationType.CAPTURA)
+    prueba = await _sesion(db_session, station_type=StationType.PRUEBA)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.DATOS_SIOX_IMPORTADOS
+    )
+    await db_session.commit()
+
+    resp_normalizar = await client.post(
+        f"/api/expedientes/{expediente.id}/normalizar",
+        headers={"X-Session-Id": str(captura.id)},
+    )
+    assert resp_normalizar.status_code == 200
+    assert (
+        resp_normalizar.json()["estado"]
+        == EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE.value
+    )
+
+    resp_inspeccion = await client.post(
+        f"/api/inspeccion/{expediente.id}",
+        json={"resultado": "APROBADA", "checklist_json": {"luces": "ok"}},
+        headers={"X-Session-Id": str(prueba.id)},
+    )
+    assert resp_inspeccion.status_code == 200
+    assert (
+        resp_inspeccion.json()["estado_expediente"]
+        == EstadoVerificacion.INSPECCION_VISUAL_APROBADA.value
+    )

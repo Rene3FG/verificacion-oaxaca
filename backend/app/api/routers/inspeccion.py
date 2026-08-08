@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import SessionContext, assert_linea_permitida, get_current_session, get_db
-from app.models.enums import EstadoVerificacion, ResultadoInspeccionVisual
+from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
+from app.models.enums import EstadoVerificacion, ResultadoInspeccionVisual, StationType
 from app.models.inspeccion_visual import InspeccionVisual
 from app.models.verificacion import Verificacion
 from app.services import state_machine
@@ -23,7 +23,7 @@ class InspeccionVisualCreate(BaseModel):
 async def registrar_inspeccion(
     expediente_id: uuid.UUID,
     payload: InspeccionVisualCreate,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     verificacion = await db.get(Verificacion, expediente_id)

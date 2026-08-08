@@ -1,5 +1,5 @@
 from app.models.enums import EstadoVerificacion, StationType
-from tests.conftest import crear_estacion, crear_sesion_activa
+from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa
 
 
 async def test_crear_expediente_hereda_centro_y_linea_de_la_sesion(client, db_session):
@@ -69,3 +69,82 @@ async def test_crear_expediente_desde_estacion_de_prueba_responde_403(client, db
 async def test_crear_expediente_sin_session_id_responde_401(client, db_session):
     resp = await client.post("/api/expedientes", json={"placa": "ABC123"})
     assert resp.status_code in (401, 422)
+
+
+async def _sesion_captura(db_session, *, line_id: int = 1):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=line_id
+    )
+    return await crear_sesion_activa(db_session, estacion=estacion)
+
+
+async def test_normalizar_desde_datos_siox_importados_llega_a_inspeccion_pendiente(
+    client, db_session
+):
+    """Decisión 2026-08-07: la normalización es una confirmación manual del
+    operador de Captura, no automática."""
+
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.DATOS_SIOX_IMPORTADOS
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/expedientes/{expediente.id}/normalizar",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["estado"] == EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE.value
+
+
+async def test_normalizar_desde_datos_capturados_manualmente_llega_a_inspeccion_pendiente(
+    client, db_session
+):
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.DATOS_CAPTURADOS_MANUALMENTE
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/expedientes/{expediente.id}/normalizar",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["estado"] == EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE.value
+
+
+async def test_normalizar_desde_estado_no_valido_responde_409(client, db_session):
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.CREADO
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/expedientes/{expediente.id}/normalizar",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 409
+
+
+async def test_normalizar_desde_estacion_de_prueba_responde_403(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.DATOS_SIOX_IMPORTADOS
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/expedientes/{expediente.id}/normalizar",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 403

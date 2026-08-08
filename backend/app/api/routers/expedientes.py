@@ -5,12 +5,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import SessionContext, get_db, requiere_estacion
+from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
 from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
 from app.models.event_log import EventLog
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
 from app.schemas.verificacion import ExpedienteCompleto, ExpedienteCreate, ExpedienteRead
+from app.services import state_machine
+
+ESTADOS_NORMALIZABLES = {
+    EstadoVerificacion.DATOS_SIOX_IMPORTADOS,
+    EstadoVerificacion.DATOS_CAPTURADOS_MANUALMENTE,
+}
 
 router = APIRouter(prefix="/api/expedientes", tags=["expedientes"])
 
@@ -58,6 +64,51 @@ async def crear_expediente(
             usuario_id=session.user_id,
             modulo="captura",
         )
+    )
+    await db.commit()
+    await db.refresh(verificacion)
+    return verificacion
+
+
+@router.post("/{expediente_id}/normalizar", response_model=ExpedienteRead)
+async def normalizar_expediente(
+    expediente_id: uuid.UUID,
+    session: SessionContext = Depends(requiere_estacion(StationType.CAPTURA)),
+    db: AsyncSession = Depends(get_db),
+) -> Verificacion:
+    """Confirmación manual (decisión de negocio 2026-08-07): la normalización
+    de los datos importados por SIOX o capturados a mano NO es automática —
+    el operador de Captura revisa/corrige y confirma explícitamente antes de
+    mandar el expediente a Inspección Visual. Sin este paso, el expediente
+    se quedaba varado en DATOS_SIOX_IMPORTADOS/DATOS_CAPTURADOS_MANUALMENTE y
+    /api/inspeccion era inalcanzable."""
+
+    verificacion = await db.get(Verificacion, expediente_id)
+    if verificacion is None:
+        raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.linea_id)
+
+    if verificacion.estado not in ESTADOS_NORMALIZABLES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"No se puede normalizar un expediente en estado {verificacion.estado}",
+        )
+
+    await state_machine.transition(
+        db,
+        verificacion,
+        EstadoVerificacion.DATOS_NORMALIZADOS,
+        usuario_id=session.user_id,
+        modulo="captura",
+        evento="datos_normalizados_confirmados",
+    )
+    await state_machine.transition(
+        db,
+        verificacion,
+        EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE,
+        usuario_id=session.user_id,
+        modulo="captura",
+        evento="enviado_a_inspeccion_visual",
     )
     await db.commit()
     await db.refresh(verificacion)
