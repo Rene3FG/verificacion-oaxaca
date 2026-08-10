@@ -117,8 +117,17 @@ async def crear_expediente(
     centro_id: str = "OAX-01",
     estado: EstadoVerificacion = EstadoVerificacion.CREADO,
     placa: str | None = None,
+    tipo_vehiculo: str | None = None,
+    combustible: str | None = None,
+    modelo: int | None = None,
 ) -> Verificacion:
-    vehiculo = Vehiculo(placa=placa or f"TST{uuid.uuid4().hex[:4].upper()}", fuente_datos=FuenteDatos.MANUAL)
+    vehiculo = Vehiculo(
+        placa=placa or f"TST{uuid.uuid4().hex[:4].upper()}",
+        fuente_datos=FuenteDatos.MANUAL,
+        tipo_vehiculo=tipo_vehiculo,
+        combustible=combustible,
+        modelo=modelo,
+    )
     db_session.add(vehiculo)
     await db_session.flush()
 
