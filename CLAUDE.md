@@ -125,11 +125,11 @@ en una sola llamada. `tests/test_estacion_guard.py::test_flujo_completo_captura_
 cubre el camino end-to-end completo (SIOX exitoso → normalizar → inspección
 visual) que antes era imposible.
 
-Otros dos hallazgos menores de la misma revisión, sin resolver:
-- `Verificacion.combustible_validado` se **lee** en `pruebas.py` al guardar
-  el resultado de la prueba, pero ningún endpoint lo **escribe** — siempre
-  es `None` en la práctica.
-- `POST /api/obd/evaluar/{id}` pide `tipo_vehiculo`/`combustible`/`modelo`
-  como parámetros que debe mandar el caller, en vez de leerlos del
-  `Vehiculo` ya poblado por HU-012 — inconsistente con la regla de negocio
-  #6 ("el expediente completo, nunca solo placa/datos sueltos").
+Hallazgos menores de la revisión 2026-08-07 — **resueltos 2026-08-10**:
+- `Verificacion.combustible_validado` ahora se escribe en `POST
+  /api/obd/evaluar/{id}` al momento de evaluar, tomando el valor directamente
+  del `Vehiculo` normalizado. `pruebas.py` ya lo lee correctamente.
+- `POST /api/obd/evaluar/{id}` ya no acepta `tipo_vehiculo`/`combustible`/
+  `modelo` del caller — los lee del `Vehiculo` via `selectinload`. Devuelve
+  422 si el vehículo no tiene esos campos (expediente no normalizado).
+  3 pruebas nuevas en `tests/test_obd.py` cubren el comportamiento.
