@@ -1,39 +1,11 @@
 import uuid
 
 from app.models.enums import StationType
-from app.models.workstation import UserStationPermission
-from tests.conftest import crear_estacion, crear_permiso, crear_sesion_activa, crear_usuario
+from tests.conftest import crear_estacion, crear_permiso, crear_sesion_activa, crear_sesion_supervisor
 
 
 async def _sesion_supervisor(db_session, *, center_id: str = "OAX-01"):
-    """Cualquier estación física sirve: lo que importa es que el usuario
-    tenga can_supervise=True en algún UserStationPermission (ver
-    requiere_supervisor)."""
-
-    usuario = await crear_usuario(db_session)
-    await crear_permiso(
-        db_session,
-        user_id=usuario.id,
-        station_type=StationType.CAPTURA,
-        center_id=center_id,
-        line_id=None,
-    )
-    permiso = (
-        await db_session.execute(
-            UserStationPermission.__table__.select().where(
-                UserStationPermission.user_id == usuario.id
-            )
-        )
-    ).mappings().one()
-    await db_session.execute(
-        UserStationPermission.__table__.update()
-        .where(UserStationPermission.id == permiso["id"])
-        .values(can_supervise=True)
-    )
-    estacion = await crear_estacion(
-        db_session, station_type=StationType.CAPTURA, center_id=center_id, line_id=1
-    )
-    return await crear_sesion_activa(db_session, estacion=estacion, user_id=usuario.id)
+    return await crear_sesion_supervisor(db_session, center_id=center_id)
 
 
 async def _sesion_operador(db_session, *, center_id: str = "OAX-01"):

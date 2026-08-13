@@ -1,11 +1,18 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
+from app.api.deps import (
+    SessionContext,
+    assert_linea_permitida,
+    get_db,
+    requiere_estacion,
+    requiere_supervisor,
+)
 from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
 from app.models.event_log import EventLog
 from app.models.vehiculo import Vehiculo
@@ -124,6 +131,70 @@ async def normalizar_expediente(
         usuario_id=session.user_id,
         modulo="captura",
         evento="enviado_a_inspeccion_visual",
+    )
+    await db.commit()
+    await db.refresh(verificacion)
+    return verificacion
+
+
+class ReasignarLineaRequest(BaseModel):
+    nueva_linea_id: int
+    motivo: str = Field(min_length=1)
+
+
+@router.post("/{expediente_id}/reasignar-linea", response_model=ExpedienteRead)
+async def reasignar_linea(
+    expediente_id: uuid.UUID,
+    payload: ReasignarLineaRequest,
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> Verificacion:
+    """HU-114: reasignar la línea de un expediente. Solo supervisor
+    (requiere_supervisor, no atado a un tipo de estación física), motivo
+    obligatorio, y bloqueada si ya hay resultado de prueba o folio
+    asignado — en ese punto el expediente ya está demasiado avanzado para
+    moverlo de línea sin invalidar trabajo hecho."""
+
+    verificacion = await db.get(Verificacion, expediente_id)
+    if verificacion is None:
+        raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    if session.center_id is not None and verificacion.centro_id != session.center_id:
+        raise HTTPException(
+            status_code=403,
+            detail="No puedes reasignar expedientes de otro centro.",
+        )
+    if verificacion.resultado_final is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede reasignar: el expediente ya tiene resultado de prueba.",
+        )
+    if verificacion.folio_externo is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede reasignar: el expediente ya tiene folio asignado.",
+        )
+    if payload.nueva_linea_id == verificacion.linea_id:
+        raise HTTPException(
+            status_code=409, detail="El expediente ya está en esa línea."
+        )
+
+    linea_anterior = verificacion.linea_id
+    verificacion.linea_id = payload.nueva_linea_id
+    db.add(verificacion)
+    db.add(
+        EventLog(
+            verificacion_id=verificacion.id,
+            evento="linea_reasignada",
+            estado_anterior=verificacion.estado,
+            estado_nuevo=verificacion.estado,
+            usuario_id=session.user_id,
+            modulo="supervision",
+            detalle_json={
+                "linea_anterior": linea_anterior,
+                "linea_nueva": payload.nueva_linea_id,
+                "motivo": payload.motivo,
+            },
+        )
     )
     await db.commit()
     await db.refresh(verificacion)

@@ -101,6 +101,7 @@ async def crear_permiso(
     station_type: StationType,
     center_id: str,
     line_id: int | None,
+    can_supervise: bool = False,
 ) -> UserStationPermission:
     permiso = UserStationPermission(
         user_id=user_id,
@@ -108,6 +109,7 @@ async def crear_permiso(
         center_id=center_id,
         line_id=line_id,
         can_operate=True,
+        can_supervise=can_supervise,
     )
     db_session.add(permiso)
     await db_session.flush()
@@ -128,6 +130,32 @@ async def crear_sesion_activa(
     db_session.add(sesion)
     await db_session.flush()
     return sesion
+
+
+async def crear_sesion_supervisor(
+    db_session: AsyncSession,
+    *,
+    center_id: str = "OAX-01",
+    station_type: StationType = StationType.CAPTURA,
+    line_id: int | None = 1,
+) -> StationSession:
+    """Sesión de un usuario con can_supervise=True (ver requiere_supervisor
+    en deps.py) — la estación física de login es incidental, lo que
+    importa es el permiso de supervisor del usuario."""
+
+    usuario = await crear_usuario(db_session)
+    await crear_permiso(
+        db_session,
+        user_id=usuario.id,
+        station_type=station_type,
+        center_id=center_id,
+        line_id=None,
+        can_supervise=True,
+    )
+    estacion = await crear_estacion(
+        db_session, station_type=station_type, center_id=center_id, line_id=line_id
+    )
+    return await crear_sesion_activa(db_session, estacion=estacion, user_id=usuario.id)
 
 
 async def crear_expediente(
