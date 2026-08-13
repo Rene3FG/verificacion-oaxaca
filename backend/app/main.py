@@ -7,6 +7,7 @@ from app.api.routers import (
     impresion,
     inspeccion,
     obd,
+    permisos,
     pruebas,
     siox,
 )
@@ -21,6 +22,7 @@ app.include_router(pruebas.router)
 app.include_router(impresion.router)
 app.include_router(folios.router)
 app.include_router(estaciones.router)
+app.include_router(permisos.router)
 
 
 @app.get("/health")

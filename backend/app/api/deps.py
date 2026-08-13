@@ -3,11 +3,12 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.enums import StationType
-from app.models.workstation import StationSession, Workstation
+from app.models.workstation import StationSession, UserStationPermission, Workstation
 
 __all__ = [
     "get_db",
@@ -15,6 +16,7 @@ __all__ = [
     "SessionContext",
     "assert_linea_permitida",
     "requiere_estacion",
+    "requiere_supervisor",
 ]
 
 
@@ -81,6 +83,29 @@ def requiere_estacion(tipo: StationType):
         return session
 
     return checker
+
+
+async def requiere_supervisor(
+    session: SessionContext = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db),
+) -> SessionContext:
+    """HU-121: administración de permisos (y HU-114, reasignación de línea)
+    no están atadas a un tipo de estación física como Captura/Prueba/
+    Impresión — cualquier estación puede tener sesión abierta un usuario
+    con rol de supervisor. Se valida contra UserStationPermission.can_supervise
+    del usuario de la sesión, sin importar en qué estación física inició."""
+
+    permiso = await db.execute(
+        select(UserStationPermission).where(
+            UserStationPermission.user_id == session.user_id,
+            UserStationPermission.can_supervise.is_(True),
+        )
+    )
+    if permiso.scalars().first() is None:
+        raise HTTPException(
+            status_code=403, detail="Esta operación requiere permiso de supervisor."
+        )
+    return session
 
 
 def assert_linea_permitida(session: SessionContext, linea_id: int) -> None:
