@@ -19,6 +19,15 @@ from app.services import state_machine
 
 router = APIRouter(prefix="/api/folios", tags=["folios"])
 
+# Estados desde los que state_machine permite entrar a FOLIO_SOLICITADO (ver
+# ALLOWED_TRANSITIONS). Pedir un folio fuera de estos estados —p.ej. un
+# segundo tipo de certificado mientras ya hay uno FOLIO_ASIGNADO— antes
+# tiraba un TransitionNotAllowed sin manejar (500); ahora es un 409 claro.
+ESTADOS_SOLICITABLES = {
+    EstadoVerificacion.PENDIENTE_IMPRESION,
+    EstadoVerificacion.FOLIO_ERROR,
+}
+
 
 async def _consultar_sistema_externo_folios(payload: dict) -> dict:
     """PENDIENTE: integración real con el sistema externo de folios (no
@@ -56,6 +65,15 @@ async def solicitar_folio(
     )
     solicitud = existente.scalar_one_or_none()
 
+    if solicitud is None and verificacion.estado not in ESTADOS_SOLICITABLES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No se puede solicitar folio '{tipo_certificado}' con el "
+                f"expediente en estado {verificacion.estado}."
+            ),
+        )
+
     if solicitud is None:
         solicitud = FolioRequest(
             verificacion_id=expediente_id,
@@ -66,6 +84,14 @@ async def solicitar_folio(
         )
         db.add(solicitud)
         await db.flush()
+        # `solicitud.id` es el identificador único idempotente de esta
+        # solicitud (ver docstring de FolioRequest); se manda al sistema
+        # externo para que, el día que exista integración real, un
+        # reintento de red no le haga emitir un folio duplicado.
+        solicitud.request_payload = {
+            "tipo_certificado": tipo_certificado,
+            "solicitud_id": str(solicitud.id),
+        }
 
         await state_machine.transition(
             db,
