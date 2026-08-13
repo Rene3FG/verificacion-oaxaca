@@ -49,7 +49,7 @@ cd backend && source .venv/bin/activate && python -m pytest -q
 `db_session` (cada test corre en un SAVEPOINT que se revierte al final, no
 deja datos entre pruebas).
 
-Estado actual: **52 pruebas, todas pasan.**
+Estado actual: **66 pruebas, todas pasan.**
 
 ## Etapa 1 — hecho
 
@@ -124,6 +124,45 @@ las dos transiciones (`DATOS_NORMALIZADOS` → `INSPECCION_VISUAL_PENDIENTE`)
 en una sola llamada. `tests/test_estacion_guard.py::test_flujo_completo_captura_a_inspeccion_visual`
 cubre el camino end-to-end completo (SIOX exitoso → normalizar → inspección
 visual) que antes era imposible.
+
+## Frontend — Captura (2026-08-13)
+
+`CapturaView.vue` deja de ser un cascarón: cubre el paso de Registro
+(consulta SIOX con historial, datos del vehículo editables, propietario,
+confirmar/normalizar). El stepper visual muestra los 4 pasos conceptuales,
+pero Inspección Visual y OBD/SBD **no viven aquí** — corren en la estación
+de Prueba (decisión 2026-08-07), así que esta vista no los implementa.
+`PruebaView.vue` sigue siendo un cascarón; ahí es donde esos dos pasos
+tendrían que completarse.
+
+## Folios e Impresión — cerrado (2026-08-13)
+
+- **Folios**: `/api/folios/solicitar` ya reutilizaba una `FolioRequest`
+  ASIGNADA previa del mismo tipo (idempotencia real, HU-066/HU-071);
+  quedó cubierto con pruebas (5 reintentos → 1 folio; reintento tras
+  error → 1 asignación). Se agregó `solicitud_id` al payload que se manda
+  al sistema externo (documentado como idempotency key, nunca se enviaba).
+  Bug encontrado y corregido: pedir un segundo `tipo_certificado` con el
+  expediente ya en `FOLIO_ASIGNADO` tiraba `TransitionNotAllowed` sin
+  manejar (500); ahora es 409.
+- **Impresión** (HU-061, HU-062, HU-072 a HU-079):
+  - `POST /api/impresion/tipo-certificado/{id}`: determina
+    `certificado_tipo` (columna que nunca se escribía). Reglas
+    **propuestas** por Claude a falta del documento de diseño del
+    proyecto (no está en el repo) — ver docstring de
+    `app/services/certificado.py`, a confirmar/corregir.
+  - `GET /api/impresion/vista-previa/{id}`: PDF con WeasyPrint, sin tocar
+    estado.
+  - `POST /api/impresion/imprimir/{id}`: ya no pide `print_job_id` (nada
+    lo creaba — el endpoint viejo era imposible de llamar en la
+    práctica); ahora obtiene o crea su propio `PrintJob`. Reintento desde
+    `IMPRESION_FALLIDA` reusa `folio_externo`. Impresora física es un
+    stub inyectable (`app/services/impresora.py`).
+  - `POST /api/impresion/cerrar/{id}`: separado de `/imprimir` (antes una
+    sola llamada hacía `IMPRESO`→`CERRADO` sin condición). Las 5
+    condiciones de cierre también son **propuestas**, a falta del
+    documento de diseño — ver `_condiciones_de_cierre_incumplidas` en
+    `app/api/routers/impresion.py`.
 
 Otro hallazgo menor de la misma revisión, sin resolver:
 - `POST /api/obd/evaluar/{id}` pide `tipo_vehiculo`/`combustible`/`modelo`
