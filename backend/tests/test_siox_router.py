@@ -241,6 +241,46 @@ async def test_captura_manual_transiciona_estado(client, db_session):
     )
 
 
+async def test_captura_manual_con_datos_del_vehiculo(client, db_session):
+    """HU-015: captura-manual acepta los campos del vehículo en el mismo
+    payload, reutilizando la lógica de HU-016."""
+
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/siox/captura-manual/{expediente.id}",
+        json={"marca": "NISSAN", "modelo": 2020, "combustible": "GASOLINA"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    assert (
+        resp.json()["estado_expediente"]
+        == EstadoVerificacion.DATOS_CAPTURADOS_MANUALMENTE.value
+    )
+
+    vehiculo = await db_session.get(Vehiculo, expediente.vehiculo_id)
+    assert vehiculo.marca == "NISSAN"
+    assert vehiculo.modelo == 2020
+    assert vehiculo.combustible == "GASOLINA"
+
+    evento = (
+        await db_session.execute(
+            EventLog.__table__.select().where(
+                EventLog.verificacion_id == expediente.id,
+                EventLog.evento == "datos_vehiculo_captura_manual",
+            )
+        )
+    ).mappings().one()
+    assert set(evento["detalle_json"]["campos_modificados"]) == {
+        "marca",
+        "modelo",
+        "combustible",
+    }
+
+
 async def test_historial_consultas_ordena_mas_reciente_primero(
     client, db_session, monkeypatch
 ):

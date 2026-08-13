@@ -17,8 +17,10 @@ from app.models.siox_consulta import EstadoSioxConsulta, SioxConsulta
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
 from app.schemas.siox import SioxConsultaRead
+from app.schemas.vehiculo import VehiculoUpdate
 from app.services import state_machine
 from app.services.siox_client import consultar_placa
+from app.services.vehiculo import actualizar_datos_vehiculo
 
 router = APIRouter(prefix="/api/siox", tags=["siox"])
 
@@ -168,16 +170,31 @@ async def historial_consultas_siox(
 @router.post("/captura-manual/{expediente_id}")
 async def captura_manual(
     expediente_id: uuid.UUID,
+    payload: VehiculoUpdate | None = None,
     session: SessionContext = Depends(requiere_estacion(StationType.CAPTURA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Si SIOX no responde o faltan datos, captura manual asistida —
-    nunca se bloquea el flujo (regla de negocio SIOX)."""
+    nunca se bloquea el flujo (regla de negocio SIOX). HU-015: acepta los
+    campos del vehículo en el mismo payload, reutilizando la lógica de
+    HU-016 (app.services.vehiculo) en vez de solo cambiar el estado."""
 
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     assert_linea_permitida(session, verificacion.linea_id)
+
+    if payload is not None:
+        vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
+        await actualizar_datos_vehiculo(
+            db,
+            vehiculo,
+            payload.model_dump(exclude_unset=True),
+            verificacion_id=verificacion.id,
+            usuario_id=session.user_id,
+            modulo="captura",
+            evento="datos_vehiculo_captura_manual",
+        )
 
     await state_machine.transition(
         db,
