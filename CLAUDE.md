@@ -49,7 +49,7 @@ cd backend && source .venv/bin/activate && python -m pytest -q
 `db_session` (cada test corre en un SAVEPOINT que se revierte al final, no
 deja datos entre pruebas).
 
-Estado actual: **66 pruebas, todas pasan.**
+Estado actual: **86 pruebas, todas pasan.**
 
 ## Etapa 1 — hecho
 
@@ -163,6 +163,36 @@ tendrían que completarse.
     condiciones de cierre también son **propuestas**, a falta del
     documento de diseño — ver `_condiciones_de_cierre_incumplidas` en
     `app/api/routers/impresion.py`.
+
+## Supervisor/Administrador — primer bloque (2026-08-13)
+
+- **HU-119 (autenticación real)**: modelo `cat_usuarios` (username,
+  password_hash con bcrypt, is_active). `POST /api/estaciones/login`
+  ahora exige username+password válidos contra ese hash — antes
+  aceptaba cualquier UUID como `user_id` sin verificar nada. Mismo 401
+  genérico para usuario inexistente o contraseña incorrecta (no
+  filtrar cuál). Seed crea `operador1`/`operador1` y
+  `supervisor1`/`supervisor1` (dev).
+- **HU-121 (roles y permisos)**: CRUD en `/api/permisos` sobre
+  `UserStationPermission`, antes solo se tocaba por base de datos
+  directa.
+- **Nueva dependencia `requiere_supervisor`** (`app/api/deps.py`): a
+  diferencia de `requiere_estacion`, no depende del tipo de estación
+  física donde se inició sesión — valida `can_supervise=True` en algún
+  `UserStationPermission` del usuario. La usan HU-121, HU-114 y
+  HU-111/117.
+- **HU-114 (reasignación de línea)**: `POST
+  /api/expedientes/{id}/reasignar-linea`, motivo obligatorio, bloqueada
+  si el expediente ya tiene `resultado_final` o `folio_externo`.
+  Acotada al mismo centro de la sesión del supervisor.
+- **HU-111/HU-117 (monitor y bitácora)**: `GET /api/supervision/monitor`
+  (todas las líneas activas del centro, excluye CERRADO/CANCELADO) y
+  `GET /api/supervision/expedientes/{id}/bitacora` (línea de tiempo de
+  `event_log`, todos los módulos).
+
+Pendiente de Prompt 4 (no implementado): nada explícito quedó fuera de
+las 4 historias pedidas, pero el frontend de supervisión/administración
+(pantallas para todo lo anterior) no existe — solo backend.
 
 Otro hallazgo menor de la misma revisión, sin resolver:
 - `POST /api/obd/evaluar/{id}` pide `tipo_vehiculo`/`combustible`/`modelo`
