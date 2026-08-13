@@ -37,12 +37,13 @@ export const useSessionStore = defineStore("session", {
       }
     },
 
-    async iniciarSesion(userId) {
+    async iniciarSesion(username, password) {
       this.cargando = true;
       this.error = null;
       try {
         const { data } = await api.post("/estaciones/login", {
-          user_id: userId,
+          username,
+          password,
           workstation_id: this.estacion.id,
         });
         this.sesion = data;

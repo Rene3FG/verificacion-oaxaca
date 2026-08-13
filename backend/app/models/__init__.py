@@ -14,6 +14,7 @@ from app.models.resultado_obd_sbd import ResultadoObdSbd
 from app.models.resultado_prueba import ResultadoPrueba
 from app.models.siox_consulta import SioxConsulta
 from app.models.sync_outbox import SyncOutbox
+from app.models.usuario import CatUsuario
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
 from app.models.workstation import StationSession, UserStationPermission, Workstation
@@ -23,6 +24,7 @@ __all__ = [
     "CatalogoSimple",
     "CatEstadoVerificacion",
     "CatParametroSistema",
+    "CatUsuario",
     "EventLog",
     "FolioAssignment",
     "FolioRequest",

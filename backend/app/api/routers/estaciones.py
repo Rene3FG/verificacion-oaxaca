@@ -9,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db
 from app.models.access_event import AccessEvent
 from app.models.enums import AccessEventResultado
+from app.models.usuario import CatUsuario
 from app.models.workstation import StationSession, UserStationPermission, Workstation
 from app.schemas.estacion import StationSessionRead, WorkstationRead
+from app.services.auth import verify_password
 
 router = APIRouter(prefix="/api/estaciones", tags=["estaciones"])
 
@@ -34,7 +36,12 @@ async def detectar_estacion(
 
 
 class LoginRequest(BaseModel):
-    user_id: uuid.UUID
+    """HU-119: sustituye el acceso anterior (un user_id sin contraseña que
+    el cliente podía mandar libremente). Ahora la identidad se resuelve
+    server-side por username/password contra cat_usuarios."""
+
+    username: str
+    password: str
     workstation_id: uuid.UUID
     ip_address: str | None = None
     device_fingerprint: str | None = None
@@ -46,21 +53,40 @@ async def iniciar_sesion(
 ) -> StationSession:
     estacion = await db.get(Workstation, payload.workstation_id)
     if estacion is None:
+        raise HTTPException(status_code=404, detail="Estación no encontrada")
+
+    usuario = (
+        await db.execute(
+            select(CatUsuario).where(CatUsuario.username == payload.username)
+        )
+    ).scalar_one_or_none()
+
+    # Mismo mensaje genérico tanto si el usuario no existe como si la
+    # contraseña es incorrecta — no revelar cuál de las dos falló.
+    credenciales_validas = (
+        usuario is not None
+        and usuario.is_active
+        and verify_password(payload.password, usuario.password_hash)
+    )
+    if not credenciales_validas:
         db.add(
             AccessEvent(
-                user_id=payload.user_id,
-                workstation_id=payload.workstation_id,
+                user_id=usuario.id if usuario else None,
+                workstation_id=estacion.id,
+                station_type=estacion.station_type,
+                center_id=estacion.center_id,
+                line_id=estacion.line_id,
                 resultado=AccessEventResultado.DENEGADO,
-                motivo="Estación no encontrada",
+                motivo="Credenciales inválidas",
                 ip_address=payload.ip_address,
             )
         )
         await db.commit()
-        raise HTTPException(status_code=404, detail="Estación no encontrada")
+        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos.")
 
     permisos = await db.execute(
         select(UserStationPermission).where(
-            UserStationPermission.user_id == payload.user_id,
+            UserStationPermission.user_id == usuario.id,
             UserStationPermission.station_type == estacion.station_type,
             UserStationPermission.center_id == estacion.center_id,
             UserStationPermission.can_operate.is_(True),
@@ -80,7 +106,7 @@ async def iniciar_sesion(
     if permiso_valido is None:
         db.add(
             AccessEvent(
-                user_id=payload.user_id,
+                user_id=usuario.id,
                 workstation_id=estacion.id,
                 station_type=estacion.station_type,
                 center_id=estacion.center_id,
@@ -96,7 +122,7 @@ async def iniciar_sesion(
         )
 
     sesion = StationSession(
-        user_id=payload.user_id,
+        user_id=usuario.id,
         workstation_id=estacion.id,
         station_type=estacion.station_type,
         center_id=estacion.center_id,
@@ -111,7 +137,7 @@ async def iniciar_sesion(
 
     db.add(
         AccessEvent(
-            user_id=payload.user_id,
+            user_id=usuario.id,
             workstation_id=estacion.id,
             station_type=estacion.station_type,
             center_id=estacion.center_id,

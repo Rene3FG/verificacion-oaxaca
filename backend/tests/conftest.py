@@ -8,9 +8,11 @@ from app.api.deps import get_db
 from app.core.config import settings
 from app.main import app
 from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
+from app.models.usuario import CatUsuario
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
 from app.models.workstation import StationSession, UserStationPermission, Workstation
+from app.services.auth import hash_password
 
 
 @pytest_asyncio.fixture
@@ -72,6 +74,24 @@ async def crear_estacion(
     db_session.add(estacion)
     await db_session.flush()
     return estacion
+
+
+async def crear_usuario(
+    db_session: AsyncSession,
+    *,
+    username: str | None = None,
+    password: str = "clave-de-prueba",
+    is_active: bool = True,
+) -> CatUsuario:
+    usuario = CatUsuario(
+        username=username or f"usuario-{uuid.uuid4().hex[:8]}",
+        password_hash=hash_password(password),
+        nombre_completo="Usuario de prueba",
+        is_active=is_active,
+    )
+    db_session.add(usuario)
+    await db_session.flush()
+    return usuario
 
 
 async def crear_permiso(
