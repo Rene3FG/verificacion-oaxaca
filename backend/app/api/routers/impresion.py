@@ -2,12 +2,13 @@ import datetime
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
 from app.models.enums import EstadoPrintJob, EstadoVerificacion, StationType
+from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
@@ -172,7 +173,27 @@ async def imprimir_certificado(
 
     pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, verificacion.certificado_tipo)
     exito = await imprimir_en_impresora(pdf_bytes)
-    print_job.intentos += 1
+
+    # Etapa 12: un intento es su propia fila inmutable (PrintAttempt), no un
+    # contador mutado — ver docstring de app.models.print_attempt.
+    # print_job.intentos se recalcula por conteo, nunca se incrementa: es
+    # una caché idempotente bajo reenvío de sync.
+    db.add(
+        PrintAttempt(
+            print_job_id=print_job.id,
+            verificacion_id=verificacion.id,
+            exitoso=exito,
+            error_message=None if exito else "La impresora no respondió.",
+        )
+    )
+    await db.flush()
+    print_job.intentos = (
+        await db.execute(
+            select(func.count())
+            .select_from(PrintAttempt)
+            .where(PrintAttempt.print_job_id == print_job.id)
+        )
+    ).scalar_one()
 
     if exito:
         print_job.estado = EstadoPrintJob.IMPRESO

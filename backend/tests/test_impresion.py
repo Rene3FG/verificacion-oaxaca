@@ -8,6 +8,7 @@ from app.models.enums import (
     StationType,
 )
 from app.models.inspeccion_visual import InspeccionVisual
+from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa
 
@@ -227,6 +228,21 @@ async def test_reintento_impresion_tras_fallo_no_pide_folio_nuevo(
     assert len(print_jobs) == 1
     assert print_jobs[0].intentos == 2
     assert print_jobs[0].estado == EstadoPrintJob.IMPRESO
+
+    # Etapa 12: cada intento es su propia fila inmutable (idempotente bajo
+    # reenvío de sync), no un contador mutado.
+    intentos_registrados = (
+        await db_session.execute(
+            select(PrintAttempt)
+            .where(PrintAttempt.print_job_id == print_jobs[0].id)
+            .order_by(PrintAttempt.created_at)
+        )
+    ).scalars().all()
+    assert len(intentos_registrados) == 2
+    assert intentos_registrados[0].exitoso is False
+    assert intentos_registrados[0].error_message == "La impresora no respondió."
+    assert intentos_registrados[1].exitoso is True
+    assert intentos_registrados[1].error_message is None
 
 
 async def test_cerrar_expediente_sin_condiciones_responde_409(client, db_session):
