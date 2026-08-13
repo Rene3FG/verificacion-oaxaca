@@ -20,6 +20,7 @@ from app.schemas.siox import SioxConsultaRead
 from app.schemas.vehiculo import VehiculoUpdate
 from app.services import state_machine
 from app.services.siox_client import consultar_placa
+from app.services.sync import registrar_evento_con_sync
 from app.services.vehiculo import actualizar_datos_vehiculo
 
 router = APIRouter(prefix="/api/siox", tags=["siox"])
@@ -62,7 +63,8 @@ async def consultar_siox(
     # intento (estado CREADO); un reintento no vuelve a transicionar pero
     # igual debe quedar auditado en event_log, sin forzar una transición
     # inválida por state_machine — de ahí este evento fuera de transition().
-    db.add(
+    await registrar_evento_con_sync(
+        db,
         EventLog(
             verificacion_id=verificacion.id,
             evento="siox_consulta_intentada",
@@ -71,7 +73,8 @@ async def consultar_siox(
             usuario_id=session.user_id,
             modulo="captura",
             detalle_json={"intento": intento, "status": resultado.status},
-        )
+        ),
+        verificacion=verificacion,
     )
 
     db.add(

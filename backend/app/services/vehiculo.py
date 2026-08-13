@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.enums import FuenteDatos
 from app.models.event_log import EventLog
 from app.models.vehiculo import Vehiculo
+from app.services.sync import registrar_evento_con_sync
 
 
 async def actualizar_datos_vehiculo(
@@ -42,7 +43,8 @@ async def actualizar_datos_vehiculo(
         vehiculo.fuente_datos = FuenteDatos.CORREGIDO_OPERADOR
     db.add(vehiculo)
 
-    db.add(
+    await registrar_evento_con_sync(
+        db,
         EventLog(
             verificacion_id=verificacion_id,
             evento=evento,
@@ -53,6 +55,6 @@ async def actualizar_datos_vehiculo(
                 "fuente_datos_anterior": fuente_anterior.value,
                 "fuente_datos_nueva": vehiculo.fuente_datos.value,
             },
-        )
+        ),
     )
     return cambios

@@ -2,9 +2,11 @@
 
 Regla central del proyecto: NINGÚN módulo debe hacer UPDATE directo sobre
 `estado`. Toda transición pasa por `transition()`, que valida contra
-ALLOWED_TRANSITIONS y dos efectos son atómicos con el cambio de estado:
+ALLOWED_TRANSITIONS y tres efectos son atómicos con el cambio de estado:
 1. escribir el nuevo estado en `verificaciones`
 2. escribir la fila correspondiente en `event_log`
+3. encolar ambos en `sync_outbox` para el central (Etapa 12, ver
+   app/services/sync.py)
 
 Ver Regla de negocio #11 ("prohibido saltar flujo") y la sección
 "Reglas que deben quedar explícitas para desarrollo" #19 del proyecto.
@@ -18,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.enums import EstadoVerificacion as E
 from app.models.event_log import EventLog
 from app.models.verificacion import Verificacion
+from app.services.sync import registrar_evento_con_sync
 
 TERMINAL_STATES = {E.CERRADO, E.CANCELADO}
 
@@ -114,7 +117,15 @@ async def transition(
     verificacion.estado = nuevo_estado
     db.add(verificacion)
 
-    db.add(
+    if nuevo_estado == E.CERRADO:
+        verificacion.cerrado_at = datetime.datetime.now(datetime.timezone.utc)
+
+    # Etapa 12: cada transición encola su evento (append-only, ya con id
+    # propio) y un snapshot idempotente de la Verificacion para
+    # sincronizar hacia el central cuando haya conexión — ver
+    # app/services/sync.py.
+    await registrar_evento_con_sync(
+        db,
         EventLog(
             verificacion_id=verificacion.id,
             evento=evento,
@@ -123,11 +134,8 @@ async def transition(
             usuario_id=usuario_id,
             modulo=modulo,
             detalle_json=detalle,
-        )
+        ),
+        verificacion=verificacion,
     )
 
-    if nuevo_estado == E.CERRADO:
-        verificacion.cerrado_at = datetime.datetime.now(datetime.timezone.utc)
-
-    await db.flush()
     return verificacion

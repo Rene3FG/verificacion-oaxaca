@@ -20,6 +20,7 @@ from app.models.verificacion import Verificacion
 from app.schemas.vehiculo import VehiculoRead, VehiculoUpdate
 from app.schemas.verificacion import ExpedienteCompleto, ExpedienteCreate, ExpedienteRead
 from app.services import state_machine
+from app.services.sync import registrar_evento_con_sync
 from app.services.vehiculo import actualizar_datos_vehiculo
 
 ESTADOS_NORMALIZABLES = {
@@ -63,8 +64,10 @@ async def crear_expediente(
     await db.flush()
 
     # CREADO es el estado inicial; no pasa por state_machine.transition
-    # (que valida transiciones ENTRE estados), solo se registra el evento.
-    db.add(
+    # (que valida transiciones ENTRE estados), solo se registra el evento
+    # (y se encola para sync, ver app/services/sync.py).
+    await registrar_evento_con_sync(
+        db,
         EventLog(
             verificacion_id=verificacion.id,
             evento="expediente_creado",
@@ -72,7 +75,8 @@ async def crear_expediente(
             estado_nuevo=EstadoVerificacion.CREADO,
             usuario_id=session.user_id,
             modulo="captura",
-        )
+        ),
+        verificacion=verificacion,
     )
     await db.commit()
     await db.refresh(verificacion)
@@ -181,7 +185,8 @@ async def reasignar_linea(
     linea_anterior = verificacion.linea_id
     verificacion.linea_id = payload.nueva_linea_id
     db.add(verificacion)
-    db.add(
+    await registrar_evento_con_sync(
+        db,
         EventLog(
             verificacion_id=verificacion.id,
             evento="linea_reasignada",
@@ -194,7 +199,8 @@ async def reasignar_linea(
                 "linea_nueva": payload.nueva_linea_id,
                 "motivo": payload.motivo,
             },
-        )
+        ),
+        verificacion=verificacion,
     )
     await db.commit()
     await db.refresh(verificacion)
