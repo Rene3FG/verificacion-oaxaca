@@ -45,11 +45,11 @@ cd backend && source .venv/bin/activate && python -m pytest -q
 ```
 
 `tests/conftest.py` trae fixtures reusables: `crear_estacion`,
-`crear_permiso`, `crear_sesion_activa`, `crear_expediente`, y `client`/
-`db_session` (cada test corre en un SAVEPOINT que se revierte al final, no
-deja datos entre pruebas).
+`crear_permiso`, `crear_sesion_activa`, `crear_sesion_supervisor`,
+`crear_expediente`, y `client`/`db_session` (cada test corre en un
+SAVEPOINT que se revierte al final, no deja datos entre pruebas).
 
-Estado actual: **89 pruebas, todas pasan.**
+Estado actual: **95 pruebas, todas pasan.**
 
 ## Etapa 1 — hecho
 
@@ -225,3 +225,58 @@ Hallazgos menores de la revisión 2026-08-07 — **resueltos 2026-08-10**
   `modelo` del caller — los lee del `Vehiculo` via `selectinload`. Devuelve
   422 si el vehículo no tiene esos campos (expediente no normalizado).
   3 pruebas nuevas en `tests/test_obd.py` cubren el comportamiento.
+
+## Etapa 12 — operación sin internet — cerrada (2026-08-13)
+
+Análisis previo (retomado del WIP en `64bdfd5`): todos los modelos usan
+`UUIDPKMixin` con `default=uuid.uuid4`, así que cada fila nace con un id
+propio y estable generado en Python antes del INSERT. Por eso
+`sync_outbox.entity_uuid` alcanza como clave de deduplicación: el central
+hace upsert-por-id sin importar cuántas veces se reenvíe la misma fila. Lo
+único que no era idempotente era `PrintJob.intentos` (contador mutado), ya
+resuelto — ver abajo.
+
+- **Productor** (`app/services/sync.py`): `encolar_sync`/
+  `registrar_evento_con_sync` (agrega un `EventLog` Y lo encola junto con
+  un snapshot idempotente de `Verificacion`). `state_machine.transition()`
+  encola automáticamente cada transición — cubre casi todo el flujo con un
+  solo punto de código. Los 3 sitios que escribían `EventLog` directo sin
+  pasar por `transition()` (`crear_expediente`, `reasignar_linea`, HU-014
+  de `siox.py`, HU-016 de `vehiculo.py`) están migrados a
+  `registrar_evento_con_sync`.
+- **`PrintAttempt`** (`app/models/print_attempt.py`): un intento de
+  impresión es su propia fila inmutable, no un contador mutado.
+  `impresion.py` ya no hace `print_job.intentos += 1`: crea una fila
+  `PrintAttempt` (`exitoso`/`error_message`) por intento y recalcula
+  `print_job.intentos` contando filas — caché idempotente bajo reenvío.
+- **Consumidor** (`POST /api/sync/procesar`, `requiere_supervisor`): no hay
+  Celery configurado pese a estar en `requirements.txt`, así que el envío
+  se dispara manualmente (botón de supervisor, o un cron/systemd timer
+  local pegándole al endpoint). Llama a `procesar_pendientes`: envío
+  ordenado por `created_at` (FIFO) de filas `PENDING`/`ERROR`, backoff
+  exponencial (`calcular_espera_segundos`, base 5s, tope 3600s) antes de
+  reintentar, y marca `SYNCED`/`ERROR` según la respuesta de
+  `enviar_uno_a_central` (stub inyectable — sin integración real definida
+  con un central, mismo patrón que `siox_client`/`impresora`/sistema de
+  folios). `tests/test_sync.py` cubre backoff, orden FIFO, y que reenviar
+  la misma operación 5 veces produce un solo registro en el central
+  (upsert-por-id).
+- **Alcance decidido — catálogos/usuarios fuera de `sync_outbox`**:
+  `CatUsuario`, `UserStationPermission`, `Workstation` y
+  `CatParametroSistema` NO se encolan. `sync_outbox` es unidireccional
+  (local → central) para datos operativos generados por Captura/Prueba/
+  Impresión durante un corte de conexión; no es un mecanismo de
+  replicación de catálogos. La administración de usuarios/permisos/
+  estaciones (`/api/permisos`, login) requiere conexión — es consistente
+  con que el login ya depende de `cat_usuarios` poblado localmente de
+  antemano, no de un alta hecha sin conexión. Si en el futuro se necesita
+  administrar catálogos sin conexión, es un mecanismo aparte
+  (central → local), no una extensión de este.
+- **Regla de negocio** (ya garantizada estructuralmente, no por este
+  módulo): sin conexión se puede capturar y probar, pero no imprimir el
+  certificado definitivo — `folio_externo is None → 409` en
+  `impresion.py`, porque el folio requiere el sistema externo.
+
+Pendiente real: `enviar_uno_a_central` sigue sin integración — no hay
+central definido todavía. Cuando exista, se conecta ahí sin tocar
+`procesar_pendientes` ni el productor.
