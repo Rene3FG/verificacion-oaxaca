@@ -1,3 +1,5 @@
+import datetime
+
 from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
 from app.models.event_log import EventLog
 from app.models.integration_log import IntegrationLog
@@ -191,6 +193,91 @@ async def test_captura_manual_transiciona_estado(client, db_session):
         resp.json()["estado_expediente"]
         == EstadoVerificacion.DATOS_CAPTURADOS_MANUALMENTE.value
     )
+
+
+async def test_historial_consultas_ordena_mas_reciente_primero(
+    client, db_session, monkeypatch
+):
+    """HU-013: cada intento debe quedar visible en el historial, sin
+    exponer response_raw en la lista."""
+
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+
+    _mock_consultar_placa(
+        monkeypatch,
+        SioxConsultaResultado(status="SIN_DATOS", raw={"html": "no existe"}, normalized=None),
+    )
+    await client.post(
+        f"/api/siox/consultar/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+
+    # `created_at` usa server_default=func.now(), que en Postgres es la hora
+    # de INICIO DE TRANSACCIÓN, no del statement. Esta fixture comparte una
+    # sola transacción para todo el test, así que ambas consultas nacerían
+    # con el mismo created_at si no se atrasa la primera a mano; en
+    # producción cada request tiene su propia transacción y esto no aplica.
+    primera = (
+        await db_session.execute(SioxConsulta.__table__.select())
+    ).mappings().one()
+    await db_session.execute(
+        SioxConsulta.__table__.update()
+        .where(SioxConsulta.id == primera["id"])
+        .values(created_at=primera["created_at"] - datetime.timedelta(hours=1))
+    )
+
+    _mock_consultar_placa(
+        monkeypatch,
+        SioxConsultaResultado(
+            status="EXITOSA",
+            raw={"html": "<div>...</div>"},
+            normalized={"placa": expediente.placa, "marca": "NISSAN", "modelo": 2023},
+        ),
+    )
+    await client.post(
+        f"/api/siox/consultar/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+
+    resp = await client.get(
+        f"/api/siox/consultas/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 2
+    assert body[0]["status"] == "EXITOSA"
+    assert body[0]["response_normalized"]["marca"] == "NISSAN"
+    assert body[1]["status"] == "SIN_DATOS"
+    assert "response_raw" not in body[0]
+    assert body[0]["consultado_por"] == str(sesion.user_id)
+
+
+async def test_historial_consultas_desde_estacion_de_prueba_responde_403(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/siox/consultas/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+
+    assert resp.status_code == 403
+
+
+async def test_historial_consultas_expediente_de_otra_linea_responde_403(client, db_session):
+    sesion = await _sesion_captura(db_session, line_id=1)
+    expediente_ajeno = await crear_expediente(db_session, linea_id=2)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/siox/consultas/{expediente_ajeno.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+
+    assert resp.status_code == 403
 
 
 async def test_consultar_desde_estacion_de_prueba_responde_403(client, db_session):

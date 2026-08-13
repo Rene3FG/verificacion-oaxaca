@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
@@ -14,6 +15,7 @@ from app.models.integration_log import (
 from app.models.siox_consulta import EstadoSioxConsulta, SioxConsulta
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
+from app.schemas.siox import SioxConsultaRead
 from app.services import state_machine
 from app.services.siox_client import consultar_placa
 
@@ -109,6 +111,28 @@ async def consultar_siox(
 
     await db.commit()
     return {"status": resultado.status, "estado_expediente": verificacion.estado}
+
+
+@router.get("/consultas/{expediente_id}", response_model=list[SioxConsultaRead])
+async def historial_consultas_siox(
+    expediente_id: uuid.UUID,
+    session: SessionContext = Depends(requiere_estacion(StationType.CAPTURA)),
+    db: AsyncSession = Depends(get_db),
+) -> list[SioxConsulta]:
+    """HU-013: historial de intentos de consulta SIOX de un expediente, más
+    reciente primero. No expone `response_raw` (ver SioxConsultaRead)."""
+
+    verificacion = await db.get(Verificacion, expediente_id)
+    if verificacion is None:
+        raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.linea_id)
+
+    result = await db.execute(
+        select(SioxConsulta)
+        .where(SioxConsulta.verificacion_id == expediente_id)
+        .order_by(SioxConsulta.created_at.desc())
+    )
+    return list(result.scalars().all())
 
 
 @router.post("/captura-manual/{expediente_id}")
