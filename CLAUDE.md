@@ -49,7 +49,7 @@ cd backend && source .venv/bin/activate && python -m pytest -q
 `db_session` (cada test corre en un SAVEPOINT que se revierte al final, no
 deja datos entre pruebas).
 
-Estado actual: **38 pruebas, todas pasan.**
+Estado actual: **52 pruebas, todas pasan.**
 
 ## Etapa 1 — hecho
 
@@ -125,11 +125,28 @@ en una sola llamada. `tests/test_estacion_guard.py::test_flujo_completo_captura_
 cubre el camino end-to-end completo (SIOX exitoso → normalizar → inspección
 visual) que antes era imposible.
 
-Otros dos hallazgos menores de la misma revisión, sin resolver:
-- `Verificacion.combustible_validado` se **lee** en `pruebas.py` al guardar
-  el resultado de la prueba, pero ningún endpoint lo **escribe** — siempre
-  es `None` en la práctica.
+Otro hallazgo menor de la misma revisión, sin resolver:
 - `POST /api/obd/evaluar/{id}` pide `tipo_vehiculo`/`combustible`/`modelo`
   como parámetros que debe mandar el caller, en vez de leerlos del
   `Vehiculo` ya poblado por HU-012 — inconsistente con la regla de negocio
   #6 ("el expediente completo, nunca solo placa/datos sueltos").
+
+## Captura — cerrado (2026-08-13)
+
+- **HU-013**: `GET /api/siox/consultas/{id}` — historial de consultas SIOX,
+  más reciente primero, sin exponer `response_raw`.
+- **HU-014**: cada intento de `consultar_siox` audita en `event_log`
+  (`siox_consulta_intentada`, con número de intento) aunque no dispare una
+  transición válida — un reintento nunca queda invisible.
+- **HU-016**: `PATCH /api/expedientes/{id}/vehiculo` corrige datos del
+  vehículo (campos opcionales); si el dato corregido venía de SIOX,
+  `fuente_datos` pasa a `CORREGIDO_OPERADOR`. Lógica compartida en
+  `app/services/vehiculo.py`.
+- **HU-015**: `POST /api/siox/captura-manual/{id}` acepta opcionalmente los
+  mismos campos, reutilizando `app/services/vehiculo.py`.
+- **HU-017**: combustible obligatorio. `normalizar_expediente` rechaza
+  (409) sin `vehiculo.combustible` y, de paso, **ahora sí escribe**
+  `Verificacion.combustible_validado` (antes ningún endpoint lo hacía —
+  ver hallazgo del 2026-08-06, ya resuelto). `guardar_resultado_prueba` en
+  Prueba también rechaza (409) si falta, en vez de defaultear a cadena
+  vacía.
