@@ -49,7 +49,7 @@ cd backend && source .venv/bin/activate && python -m pytest -q
 `db_session` (cada test corre en un SAVEPOINT que se revierte al final, no
 deja datos entre pruebas).
 
-Estado actual: **86 pruebas, todas pasan.**
+Estado actual: **89 pruebas, todas pasan.**
 
 ## Etapa 1 — hecho
 
@@ -194,12 +194,6 @@ Pendiente de Prompt 4 (no implementado): nada explícito quedó fuera de
 las 4 historias pedidas, pero el frontend de supervisión/administración
 (pantallas para todo lo anterior) no existe — solo backend.
 
-Otro hallazgo menor de la misma revisión, sin resolver:
-- `POST /api/obd/evaluar/{id}` pide `tipo_vehiculo`/`combustible`/`modelo`
-  como parámetros que debe mandar el caller, en vez de leerlos del
-  `Vehiculo` ya poblado por HU-012 — inconsistente con la regla de negocio
-  #6 ("el expediente completo, nunca solo placa/datos sueltos").
-
 ## Captura — cerrado (2026-08-13)
 
 - **HU-013**: `GET /api/siox/consultas/{id}` — historial de consultas SIOX,
@@ -214,8 +208,20 @@ Otro hallazgo menor de la misma revisión, sin resolver:
 - **HU-015**: `POST /api/siox/captura-manual/{id}` acepta opcionalmente los
   mismos campos, reutilizando `app/services/vehiculo.py`.
 - **HU-017**: combustible obligatorio. `normalizar_expediente` rechaza
-  (409) sin `vehiculo.combustible` y, de paso, **ahora sí escribe**
-  `Verificacion.combustible_validado` (antes ningún endpoint lo hacía —
-  ver hallazgo del 2026-08-06, ya resuelto). `guardar_resultado_prueba` en
-  Prueba también rechaza (409) si falta, en vez de defaultear a cadena
-  vacía.
+  (409) sin `vehiculo.combustible` y, de paso, escribe
+  `Verificacion.combustible_validado` en ese punto (Captura, antes de
+  Inspección Visual). `guardar_resultado_prueba` en Prueba también
+  rechaza (409) si falta, en vez de defaultear a cadena vacía.
+
+Hallazgos menores de la revisión 2026-08-07 — **resueltos 2026-08-10**
+(en paralelo a lo anterior, por otra vía — ver nota):
+- `Verificacion.combustible_validado` también se escribe en `POST
+  /api/obd/evaluar/{id}` al momento de evaluar, tomando el valor
+  directamente del `Vehiculo` normalizado. Con HU-017 ya garantizando
+  combustible desde Captura, esta segunda escritura es redundante pero
+  inofensiva (mismo valor, mismo campo) — queda como defensa adicional
+  si algún expediente llegara a OBD sin pasar por `/normalizar`.
+- `POST /api/obd/evaluar/{id}` ya no acepta `tipo_vehiculo`/`combustible`/
+  `modelo` del caller — los lee del `Vehiculo` via `selectinload`. Devuelve
+  422 si el vehículo no tiene esos campos (expediente no normalizado).
+  3 pruebas nuevas en `tests/test_obd.py` cubren el comportamiento.

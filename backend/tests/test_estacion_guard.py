@@ -128,7 +128,6 @@ async def test_obd_evaluar_desde_impresion_responde_403(client, db_session):
 
     resp = await client.post(
         f"/api/obd/evaluar/{expediente.id}",
-        params={"tipo_vehiculo": "vehiculo", "combustible": "gasolina", "modelo": 2023},
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp.status_code == 403
