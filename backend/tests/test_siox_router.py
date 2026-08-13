@@ -179,6 +179,52 @@ async def test_consultar_error_de_red_no_bloquea(client, db_session, monkeypatch
     assert log["status"].value == "error"
 
 
+async def test_reintento_de_consulta_no_transiciona_pero_se_audita(
+    client, db_session, monkeypatch
+):
+    """HU-014: la transición CREADO -> DATOS_SIOX_CONSULTADOS solo ocurre en
+    el primer intento; un reintento no debe forzar una transición inválida,
+    pero sí debe quedar auditado en event_log con su número de intento."""
+
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+
+    _mock_consultar_placa(
+        monkeypatch, SioxConsultaResultado(status="ERROR", raw=None, normalized=None)
+    )
+
+    primer_intento = await client.post(
+        f"/api/siox/consultar/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert primer_intento.status_code == 200
+    assert primer_intento.json()["intento"] == 1
+
+    segundo_intento = await client.post(
+        f"/api/siox/consultar/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert segundo_intento.status_code == 200
+    body = segundo_intento.json()
+    assert body["intento"] == 2
+    # No hubo transición inválida: el expediente sigue en el mismo estado.
+    assert body["estado_expediente"] == EstadoVerificacion.DATOS_SIOX_CONSULTADOS.value
+
+    eventos = (
+        await db_session.execute(
+            EventLog.__table__.select()
+            .where(
+                EventLog.verificacion_id == expediente.id,
+                EventLog.evento == "siox_consulta_intentada",
+            )
+            .order_by(EventLog.created_at)
+        )
+    ).mappings().all()
+    assert len(eventos) == 2
+    assert [e["detalle_json"]["intento"] for e in eventos] == [1, 2]
+    assert eventos[1]["estado_anterior"] == EstadoVerificacion.DATOS_SIOX_CONSULTADOS
+    assert eventos[1]["estado_nuevo"] == EstadoVerificacion.DATOS_SIOX_CONSULTADOS
+
+
 async def test_captura_manual_transiciona_estado(client, db_session):
     sesion = await _sesion_captura(db_session)
     expediente = await crear_expediente(db_session, linea_id=1)

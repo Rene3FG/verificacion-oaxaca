@@ -1,12 +1,13 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
 from app.core.config import settings
 from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
+from app.models.event_log import EventLog
 from app.models.integration_log import (
     IntegrationDirection,
     IntegrationLog,
@@ -44,7 +45,32 @@ async def consultar_siox(
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     assert_linea_permitida(session, verificacion.linea_id)
 
+    consultas_previas = (
+        await db.execute(
+            select(func.count())
+            .select_from(SioxConsulta)
+            .where(SioxConsulta.verificacion_id == verificacion.id)
+        )
+    ).scalar_one()
+    intento = consultas_previas + 1
+
     resultado = await consultar_placa(verificacion.placa)
+
+    # HU-014: la transición a DATOS_SIOX_CONSULTADOS solo ocurre en el primer
+    # intento (estado CREADO); un reintento no vuelve a transicionar pero
+    # igual debe quedar auditado en event_log, sin forzar una transición
+    # inválida por state_machine — de ahí este evento fuera de transition().
+    db.add(
+        EventLog(
+            verificacion_id=verificacion.id,
+            evento="siox_consulta_intentada",
+            estado_anterior=verificacion.estado,
+            estado_nuevo=verificacion.estado,
+            usuario_id=session.user_id,
+            modulo="captura",
+            detalle_json={"intento": intento, "status": resultado.status},
+        )
+    )
 
     db.add(
         SioxConsulta(
@@ -110,7 +136,11 @@ async def consultar_siox(
     # /api/siox/captura-manual/{expediente_id} (regla: nunca bloquear).
 
     await db.commit()
-    return {"status": resultado.status, "estado_expediente": verificacion.estado}
+    return {
+        "status": resultado.status,
+        "estado_expediente": verificacion.estado,
+        "intento": intento,
+    }
 
 
 @router.get("/consultas/{expediente_id}", response_model=list[SioxConsultaRead])
