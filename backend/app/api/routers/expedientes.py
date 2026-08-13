@@ -96,6 +96,19 @@ async def normalizar_expediente(
             detail=f"No se puede normalizar un expediente en estado {verificacion.estado}",
         )
 
+    # HU-017: combustible es obligatorio para normalizar — sin él, Prueba no
+    # puede elegir tipo de prueba (gasolina->dinámica, diésel->opacidad).
+    # Aquí también se escribe combustible_validado, que Prueba consume más
+    # adelante y que hasta ahora ningún endpoint llenaba.
+    vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
+    if not vehiculo.combustible:
+        raise HTTPException(
+            status_code=409,
+            detail="El combustible del vehículo es obligatorio para normalizar.",
+        )
+    verificacion.combustible_validado = vehiculo.combustible
+    db.add(verificacion)
+
     await state_machine.transition(
         db,
         verificacion,

@@ -88,7 +88,10 @@ async def test_normalizar_desde_datos_siox_importados_llega_a_inspeccion_pendien
 
     sesion = await _sesion_captura(db_session)
     expediente = await crear_expediente(
-        db_session, linea_id=1, estado=EstadoVerificacion.DATOS_SIOX_IMPORTADOS
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.DATOS_SIOX_IMPORTADOS,
+        combustible="GASOLINA",
     )
     await db_session.commit()
 
@@ -106,7 +109,10 @@ async def test_normalizar_desde_datos_capturados_manualmente_llega_a_inspeccion_
 ):
     sesion = await _sesion_captura(db_session)
     expediente = await crear_expediente(
-        db_session, linea_id=1, estado=EstadoVerificacion.DATOS_CAPTURADOS_MANUALMENTE
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.DATOS_CAPTURADOS_MANUALMENTE,
+        combustible="DIESEL",
     )
     await db_session.commit()
 
@@ -247,6 +253,47 @@ async def test_actualizar_vehiculo_expediente_de_otra_linea_responde_403(client,
     )
 
     assert resp.status_code == 403
+
+
+async def test_normalizar_sin_combustible_responde_409(client, db_session):
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.DATOS_SIOX_IMPORTADOS,
+        combustible=None,
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/expedientes/{expediente.id}/normalizar",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 409
+    assert "combustible" in resp.json()["detail"].lower()
+
+
+async def test_normalizar_con_combustible_escribe_combustible_validado(client, db_session):
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.DATOS_SIOX_IMPORTADOS,
+        combustible="GASOLINA",
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/expedientes/{expediente.id}/normalizar",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["estado"] == EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE.value
+
+    await db_session.refresh(expediente)
+    assert expediente.combustible_validado == "GASOLINA"
 
 
 async def test_normalizar_desde_estacion_de_prueba_responde_403(client, db_session):

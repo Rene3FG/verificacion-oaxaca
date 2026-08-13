@@ -144,7 +144,10 @@ async def test_flujo_completo_captura_a_inspeccion_visual(client, db_session):
     captura = await _sesion(db_session, station_type=StationType.CAPTURA)
     prueba = await _sesion(db_session, station_type=StationType.PRUEBA)
     expediente = await crear_expediente(
-        db_session, linea_id=1, estado=EstadoVerificacion.DATOS_SIOX_IMPORTADOS
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.DATOS_SIOX_IMPORTADOS,
+        combustible="GASOLINA",
     )
     await db_session.commit()
 

@@ -142,11 +142,20 @@ async def guardar_resultado_prueba(
 ) -> dict:
     verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
 
+    # HU-017: combustible es obligatorio; Captura lo garantiza al normalizar
+    # (ver expedientes.normalizar_expediente), pero Prueba también lo
+    # rechaza en vez de guardar un resultado con combustible vacío.
+    if not verificacion.combustible_validado:
+        raise HTTPException(
+            status_code=409,
+            detail="El expediente no tiene combustible validado.",
+        )
+
     db.add(
         ResultadoPrueba(
             verificacion_id=verificacion.id,
             tipo_prueba=verificacion.tipo_prueba_final,
-            combustible=verificacion.combustible_validado or "",
+            combustible=verificacion.combustible_validado,
             resultado=payload.resultado,
             valores_medidos_json=payload.valores_medidos_json,
             limites_aplicados_json=payload.limites_aplicados_json,
