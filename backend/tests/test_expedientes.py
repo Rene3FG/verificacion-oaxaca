@@ -1,4 +1,6 @@
-from app.models.enums import EstadoVerificacion, StationType
+from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
+from app.models.event_log import EventLog
+from app.models.vehiculo import Vehiculo
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa
 
 
@@ -130,6 +132,121 @@ async def test_normalizar_desde_estado_no_valido_responde_409(client, db_session
     )
 
     assert resp.status_code == 409
+
+
+async def test_actualizar_vehiculo_solo_toca_campos_enviados(client, db_session):
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"/api/expedientes/{expediente.id}/vehiculo",
+        json={"marca": "NISSAN", "modelo": 2023},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["marca"] == "NISSAN"
+    assert body["modelo"] == 2023
+    assert body["niv"] is None
+    # No venía de SIOX, así que corregir a mano no cambia la fuente.
+    assert body["fuente_datos"] == FuenteDatos.MANUAL.value
+
+
+async def test_actualizar_vehiculo_corregido_marca_fuente_corregido_operador(
+    client, db_session
+):
+    """HU-016: si el dato corregido venía de SIOX, fuente_datos pasa a
+    CORREGIDO_OPERADOR."""
+
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    vehiculo = await db_session.get(Vehiculo, expediente.vehiculo_id)
+    vehiculo.marca = "NISSAN"
+    vehiculo.fuente_datos = FuenteDatos.SIOX
+    db_session.add(vehiculo)
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"/api/expedientes/{expediente.id}/vehiculo",
+        json={"marca": "CHEVROLET"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["marca"] == "CHEVROLET"
+    assert body["fuente_datos"] == FuenteDatos.CORREGIDO_OPERADOR.value
+
+    evento = (
+        await db_session.execute(
+            EventLog.__table__.select().where(
+                EventLog.verificacion_id == expediente.id,
+                EventLog.evento == "datos_vehiculo_corregidos",
+            )
+        )
+    ).mappings().one()
+    assert evento["detalle_json"]["campos_modificados"]["marca"] == {
+        "anterior": "NISSAN",
+        "nuevo": "CHEVROLET",
+    }
+    assert evento["detalle_json"]["fuente_datos_anterior"] == FuenteDatos.SIOX.value
+    assert evento["detalle_json"]["fuente_datos_nueva"] == FuenteDatos.CORREGIDO_OPERADOR.value
+
+
+async def test_actualizar_vehiculo_sin_cambios_no_escribe_evento(client, db_session):
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"/api/expedientes/{expediente.id}/vehiculo",
+        json={},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    eventos = (
+        await db_session.execute(
+            EventLog.__table__.select().where(
+                EventLog.verificacion_id == expediente.id,
+                EventLog.evento == "datos_vehiculo_corregidos",
+            )
+        )
+    ).mappings().all()
+    assert eventos == []
+
+
+async def test_actualizar_vehiculo_desde_estacion_de_prueba_responde_403(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"/api/expedientes/{expediente.id}/vehiculo",
+        json={"marca": "NISSAN"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 403
+
+
+async def test_actualizar_vehiculo_expediente_de_otra_linea_responde_403(client, db_session):
+    sesion = await _sesion_captura(db_session, line_id=1)
+    expediente_ajeno = await crear_expediente(db_session, linea_id=2)
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"/api/expedientes/{expediente_ajeno.id}/vehiculo",
+        json={"marca": "NISSAN"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 403
 
 
 async def test_normalizar_desde_estacion_de_prueba_responde_403(client, db_session):

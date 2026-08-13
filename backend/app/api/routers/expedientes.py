@@ -10,8 +10,10 @@ from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
 from app.models.event_log import EventLog
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
+from app.schemas.vehiculo import VehiculoRead, VehiculoUpdate
 from app.schemas.verificacion import ExpedienteCompleto, ExpedienteCreate, ExpedienteRead
 from app.services import state_machine
+from app.services.vehiculo import actualizar_datos_vehiculo
 
 ESTADOS_NORMALIZABLES = {
     EstadoVerificacion.DATOS_SIOX_IMPORTADOS,
@@ -113,6 +115,38 @@ async def normalizar_expediente(
     await db.commit()
     await db.refresh(verificacion)
     return verificacion
+
+
+@router.patch("/{expediente_id}/vehiculo", response_model=VehiculoRead)
+async def actualizar_vehiculo(
+    expediente_id: uuid.UUID,
+    payload: VehiculoUpdate,
+    session: SessionContext = Depends(requiere_estacion(StationType.CAPTURA)),
+    db: AsyncSession = Depends(get_db),
+) -> Vehiculo:
+    """HU-016: corregir/escribir los datos del vehículo (hoy solo se llenan
+    desde SIOX). Campos opcionales: solo se tocan los presentes en el
+    payload. Si el dato corregido venía de SIOX, fuente_datos pasa a
+    CORREGIDO_OPERADOR (ver app.services.vehiculo)."""
+
+    verificacion = await db.get(Verificacion, expediente_id)
+    if verificacion is None:
+        raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.linea_id)
+
+    vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
+    await actualizar_datos_vehiculo(
+        db,
+        vehiculo,
+        payload.model_dump(exclude_unset=True),
+        verificacion_id=verificacion.id,
+        usuario_id=session.user_id,
+        modulo="captura",
+        evento="datos_vehiculo_corregidos",
+    )
+    await db.commit()
+    await db.refresh(vehiculo)
+    return vehiculo
 
 
 @router.get("/{expediente_id}", response_model=ExpedienteCompleto)
