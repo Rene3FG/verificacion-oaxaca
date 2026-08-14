@@ -194,6 +194,50 @@ Pendiente de Prompt 4 (no implementado): nada explícito quedó fuera de
 las 4 historias pedidas, pero el frontend de supervisión/administración
 (pantallas para todo lo anterior) no existe — solo backend.
 
+### Frontend Supervisor/Administrador (2026-08-14)
+
+`SupervisorView.vue` (ruta `/supervisor`, `meta.requiereSupervisor`) cubre
+las 4 historias del bloque anterior en dos pestañas:
+
+- **Monitor**: tabla de `GET /api/supervision/monitor` (todas las líneas
+  activas del centro de la sesión), con botones por fila para abrir la
+  **bitácora** (`GET /api/supervision/expedientes/{id}/bitacora`, en un
+  diálogo con `v-timeline`) y **reasignar línea**
+  (`POST /api/expedientes/{id}/reasignar-linea`, diálogo con línea nueva +
+  motivo obligatorio).
+- **Permisos**: tabla de `GET /api/permisos?center_id=<centro de la
+  sesión>` con switches inline para `can_operate`/`can_supervise` (PATCH
+  al cambiar) y borrado (`DELETE`). Alta de permiso en diálogo
+  (`POST /api/permisos`).
+
+Dos piezas de plomería que no existían y hicieron falta para que la
+pantalla fuera usable (no son historias nuevas, son huecos técnicos):
+
+- **`StationSessionRead.can_supervise`** (`app/schemas/estacion.py`): no es
+  columna de `StationSession` — el login nunca decía si la sesión puede
+  supervisar. Se calcula en `POST /api/estaciones/login`
+  (`app/api/routers/estaciones.py`) a partir del
+  `UserStationPermission` (`permiso_valido`) que autorizó el acceso, y se
+  inyecta como atributo suelto en el objeto antes de serializar (no se
+  persiste). El frontend (`session.puedeSupervisar` en
+  `stores/session.js`) lo usa para mostrar el botón "Supervisor" en
+  `TopAppBar.vue` y para el guard de router de `/supervisor` —
+  independiente del `station_type` físico de la estación donde se hizo
+  login.
+- **`GET /api/usuarios`** (`app/api/routers/usuarios.py`, nuevo router,
+  `requiere_supervisor`): antes no había forma de listar `cat_usuarios`
+  desde la API — se necesitaba para poblar el selector de usuario al dar
+  de alta un permiso. Es de solo lectura; `cat_usuarios` se sigue
+  administrando solo por `app/seed.py`, no hay alta de usuarios desde la
+  app todavía.
+
+Pruebas nuevas: `can_supervise` en el response de login
+(`tests/test_login.py`) y `tests/test_usuarios.py`. 99 pruebas, todas
+pasan. Probado end-to-end contra el backend real vía curl (login como
+`supervisor1`, monitor, bitácora, reasignar línea ida y vuelta, alta/
+edición/baja de permiso) — sin extensión de Chrome conectada en esta
+sesión, no se pudo probar la vista visualmente en el navegador.
+
 ## Captura — cerrado (2026-08-13)
 
 - **HU-013**: `GET /api/siox/consultas/{id}` — historial de consultas SIOX,
