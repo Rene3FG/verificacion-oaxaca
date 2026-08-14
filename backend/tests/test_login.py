@@ -197,6 +197,65 @@ async def test_login_permitido_registra_access_event(client, db_session):
     assert eventos[0].user_id == usuario.id
 
 
+async def test_login_expone_can_supervise_del_permiso_usado(client, db_session):
+    """El frontend usa can_supervise (no viene de StationSession, se
+    calcula del UserStationPermission que autorizó el login) para
+    mostrar/ocultar la pantalla de Supervisor."""
+
+    supervisor = await crear_usuario(db_session, password="clave123")
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-04", line_id=1
+    )
+    await crear_permiso(
+        db_session,
+        user_id=supervisor.id,
+        station_type=StationType.CAPTURA,
+        center_id="OAX-04",
+        line_id=None,
+        can_supervise=True,
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/estaciones/login",
+        json={
+            "username": supervisor.username,
+            "password": "clave123",
+            "workstation_id": str(estacion.id),
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["can_supervise"] is True
+
+
+async def test_login_can_supervise_false_para_operador_normal(client, db_session):
+    operador = await crear_usuario(db_session, password="clave123")
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-04", line_id=1
+    )
+    await crear_permiso(
+        db_session,
+        user_id=operador.id,
+        station_type=StationType.CAPTURA,
+        center_id="OAX-04",
+        line_id=1,
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/estaciones/login",
+        json={
+            "username": operador.username,
+            "password": "clave123",
+            "workstation_id": str(estacion.id),
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["can_supervise"] is False
+
+
 async def test_login_denegado_registra_access_event_sin_expediente(client, db_session):
     """HU-007: un login denegado se audita en access_events, que no exige
     verificacion_id (a diferencia de event_log)."""

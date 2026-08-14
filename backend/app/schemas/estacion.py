@@ -31,3 +31,9 @@ class StationSessionRead(BaseModel):
     login_at: datetime.datetime | None
     logout_at: datetime.datetime | None
     status: str
+    # No es columna de StationSession: se calcula en /estaciones/login a
+    # partir del UserStationPermission usado para autorizar el acceso, y se
+    # inyecta como atributo suelto antes de serializar. El frontend lo usa
+    # para mostrar/ocultar la pantalla de Supervisor sin depender de a qué
+    # tipo de estación física se conectó la sesión.
+    can_supervise: bool = False

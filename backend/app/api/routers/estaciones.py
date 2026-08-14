@@ -149,6 +149,7 @@ async def iniciar_sesion(
     )
     await db.commit()
     await db.refresh(sesion)
+    sesion.can_supervise = permiso_valido.can_supervise
     return sesion
 
 

@@ -12,6 +12,7 @@ from app.api.routers import (
     siox,
     supervision,
     sync,
+    usuarios,
 )
 
 app = FastAPI(title="Sistema de Verificación Vehicular de Oaxaca")
@@ -27,6 +28,7 @@ app.include_router(estaciones.router)
 app.include_router(permisos.router)
 app.include_router(supervision.router)
 app.include_router(sync.router)
+app.include_router(usuarios.router)
 
 
 @app.get("/health")
