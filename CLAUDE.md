@@ -135,6 +135,56 @@ de Prueba (decisión 2026-08-07), así que esta vista no los implementa.
 `PruebaView.vue` sigue siendo un cascarón; ahí es donde esos dos pasos
 tendrían que completarse.
 
+## Frontend — Prueba (2026-08-14)
+
+`PruebaView.vue` deja de ser un cascarón (antes solo listaba `GET
+/pruebas/cola`, que además solo cubre `LISTO_PARA_PRUEBA` — no sirve para
+ver expedientes en Inspección Visual u OBD). Ahora, igual que
+`CapturaView`, usa `GET /api/expedientes?centro_id=&linea_id=` y filtra
+client-side a los 8 estados que le corresponden a esta estación
+(`INSPECCION_VISUAL_PENDIENTE` … `PRUEBA_EN_PROCESO`), y renderiza una
+sección distinta según el estado del expediente abierto:
+
+- **Inspección visual**: checklist fijo de 8 puntos (luces, limpiaparabrisas/
+  claxon, espejos, llantas, fugas, escape, placas) — **propuesto por Claude
+  a falta del documento de diseño del proyecto** (mismo caso que el
+  checklist de impresión en `app/services/certificado.py`, a confirmar con
+  el equipo de Prueba). El resultado (`APROBADA`/`RECHAZADA`) se calcula
+  solo de si algún ítem quedó sin marcar; un rechazo exige texto de causal
+  y, al confirmar, el expediente sale de esta vista (regla de negocio #3:
+  salta directo a Impresión Central, ya no pasa por OBD ni Prueba).
+- **OBD/SBD**: tres botones según el estado (`evaluar aplicabilidad` →
+  `solicitar` → `guardar resultado`), sin captura de `codigos_error`/
+  `datos_raw` (opcionales en el schema, sin UI todavía — pendiente si se
+  necesita).
+- **Prueba**: tipo por defecto según combustible del vehículo (gasolina →
+  dinámica, cambiable a estática con motivo obligatorio; cualquier otro
+  combustible → opacidad, sin cambio permitido) — replica en el frontend la
+  regla de negocio #5/#9 que ya vive en el backend, pero **no lee
+  `cat_parametros_sistema`** (`gasolina_prueba_default`,
+  `gasolina_permite_cambio_estatica`) porque no hay endpoint que exponga
+  parámetros de sistema; si se vuelven configurables de verdad, hace falta
+  ese endpoint. Configurar → iniciar → resultado (editor de pares
+  clave/valor libres para `valores_medidos_json`, sin `limites_aplicados_json`
+  todavía). Al guardar resultado, el expediente sale a Impresión Central.
+
+Probado end-to-end contra el backend real (no simulado): 3 expedientes
+nuevos por `curl` cubriendo los 3 caminos completos de la máquina de
+estados — aprobación con OBD aplicable (gasolina 2022, dinámica), rechazo
+en inspección visual (salta a impresión), y OBD no aplicable (diésel,
+directo a Prueba, opacidad). Los 3 expedientes de prueba y las filas de
+`sync_outbox` que generaron se borraron después de verificar — **la base de
+datos de desarrollo (puerto 5433) es la misma que usa `pytest`
+(`SessionLocal`, no hay DB de test separada)**, así que cualquier POST real
+contra el `uvicorn` de desarrollo dejaba entradas que sí afectaban después
+las aserciones de `tests/test_sync.py` y `tests/test_colas_y_lineas.py`
+(conteos globales de `sync_outbox`/`PENDIENTE_IMPRESION` sin filtrar por
+placa de prueba). Si se vuelve a probar manualmente contra el servidor de
+desarrollo, limpiar después (`DELETE FROM sync_outbox` y los expedientes de
+prueba) antes de confiar en la suite. Build de producción sin errores; sin
+extensión de Chrome conectada en esta sesión, no se probó visualmente en
+navegador.
+
 ## Folios e Impresión — cerrado (2026-08-13)
 
 - **Folios**: `/api/folios/solicitar` ya reutilizaba una `FolioRequest`
