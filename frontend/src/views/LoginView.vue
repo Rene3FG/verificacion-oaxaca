@@ -5,7 +5,8 @@ import { useSessionStore } from "../stores/session";
 
 const session = useSessionStore();
 const router = useRouter();
-const userId = ref("");
+const username = ref("");
+const password = ref("");
 
 const ROUTE_BY_STATION_TYPE = {
   captura: "captura",
@@ -22,7 +23,7 @@ onMounted(async () => {
 });
 
 async function entrar() {
-  await session.iniciarSesion(userId.value);
+  await session.iniciarSesion(username.value, password.value);
   router.push({ name: ROUTE_BY_STATION_TYPE[session.estacion.station_type] });
 }
 </script>
@@ -48,9 +49,19 @@ async function entrar() {
           </p>
 
           <v-text-field
-            v-model="userId"
-            label="Usuario (UUID de prueba)"
+            v-model="username"
+            label="Usuario"
             variant="outlined"
+            autocomplete="username"
+            @keyup.enter="entrar"
+          />
+          <v-text-field
+            v-model="password"
+            label="Contraseña"
+            type="password"
+            variant="outlined"
+            autocomplete="current-password"
+            @keyup.enter="entrar"
           />
 
           <v-btn

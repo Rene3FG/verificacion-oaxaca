@@ -8,10 +8,12 @@ from app.schemas.vehiculo import VehiculoRead
 
 
 class ExpedienteCreate(BaseModel):
+    """centro_id, linea_id y operador_id NO se aceptan aquí: se resuelven
+    server-side desde la sesión de la estación de Captura (get_current_session).
+    Aceptarlos del cliente permitiría crear un expediente en una línea o a
+    nombre de un usuario distinto al que realmente está operando."""
+
     placa: str
-    centro_id: str
-    linea_id: int
-    operador_id: uuid.UUID | None = None
 
 
 class ExpedienteRead(BaseModel):
