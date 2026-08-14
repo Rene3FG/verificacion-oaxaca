@@ -21,6 +21,12 @@ const routes = [
     component: () => import("../views/ImpresionView.vue"),
     meta: { stationType: "impresion" },
   },
+  {
+    path: "/supervisor",
+    name: "supervisor",
+    component: () => import("../views/SupervisorView.vue"),
+    meta: { requiereSupervisor: true },
+  },
 ];
 
 const router = createRouter({
@@ -36,6 +42,9 @@ router.beforeEach((to) => {
     return { name: "login" };
   }
   if (to.meta.stationType && session.estacion?.station_type !== to.meta.stationType) {
+    return { name: "login" };
+  }
+  if (to.meta.requiereSupervisor && !session.puedeSupervisar) {
     return { name: "login" };
   }
 });

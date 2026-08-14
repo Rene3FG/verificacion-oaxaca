@@ -1,7 +1,9 @@
 <script setup>
+import { useRouter } from "vue-router";
 import { useSessionStore } from "../stores/session";
 
 const session = useSessionStore();
+const router = useRouter();
 </script>
 
 <template>
@@ -22,6 +24,17 @@ const session = useSessionStore();
     >
       {{ session.conexion === "en_linea" ? "En línea" : "Sin internet" }}
     </v-chip>
+
+    <v-btn
+      v-if="session.puedeSupervisar"
+      class="mr-2"
+      variant="tonal"
+      color="white"
+      prepend-icon="mdi-shield-account"
+      @click="router.push({ name: 'supervisor' })"
+    >
+      Supervisor
+    </v-btn>
 
     <v-btn v-if="session.tieneSesionActiva" icon="mdi-logout" @click="session.cerrarSesion()" />
   </v-app-bar>

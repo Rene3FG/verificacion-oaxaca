@@ -20,6 +20,7 @@ export const useSessionStore = defineStore("session", {
   getters: {
     tieneEstacionConfigurada: (state) => state.estacion !== null,
     tieneSesionActiva: (state) => state.sesion !== null,
+    puedeSupervisar: (state) => state.sesion?.can_supervise === true,
   },
 
   actions: {
