@@ -211,13 +211,21 @@ async def reasignar_linea(
 async def actualizar_vehiculo(
     expediente_id: uuid.UUID,
     payload: VehiculoUpdate,
-    session: SessionContext = Depends(requiere_estacion(StationType.CAPTURA)),
+    session: SessionContext = Depends(
+        requiere_estacion(StationType.CAPTURA, StationType.PRUEBA)
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> Vehiculo:
     """HU-016: corregir/escribir los datos del vehículo (hoy solo se llenan
     desde SIOX). Campos opcionales: solo se tocan los presentes en el
     payload. Si el dato corregido venía de SIOX, fuente_datos pasa a
-    CORREGIDO_OPERADOR (ver app.services.vehiculo)."""
+    CORREGIDO_OPERADOR (ver app.services.vehiculo).
+
+    Abierto también a la estación de Prueba (decisión de producto
+    2026-08-14): si Inspección Visual detecta un error en los datos del
+    vehículo, el operador de Prueba debe poder corregirlo sin devolver el
+    expediente a Captura. Sin límite de estado explícito — se puede
+    corregir en cualquier punto mientras el expediente siga abierto."""
 
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:

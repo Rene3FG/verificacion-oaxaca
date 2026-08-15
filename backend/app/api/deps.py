@@ -66,19 +66,20 @@ async def get_current_session(
     )
 
 
-def requiere_estacion(tipo: StationType):
-    """Dependencia que restringe un endpoint a un tipo de estación
-    (p.ej. Captura). Reemplaza a `get_current_session` en la firma del
-    router: una estación de Prueba o Impresión recibe 403 en vez de poder
-    operar flujos que no le corresponden."""
+def requiere_estacion(*tipos: StationType):
+    """Dependencia que restringe un endpoint a uno o más tipos de estación
+    (p.ej. Captura, o Captura+Prueba). Reemplaza a `get_current_session` en
+    la firma del router: una estación de un tipo no listado recibe 403 en
+    vez de poder operar flujos que no le corresponden."""
 
     async def checker(
         session: SessionContext = Depends(get_current_session),
     ) -> SessionContext:
-        if session.station_type != tipo:
+        if session.station_type not in tipos:
+            nombres = ", ".join(tipo.value for tipo in tipos)
             raise HTTPException(
                 status_code=403,
-                detail=f"Esta operación requiere una estación de tipo {tipo.value}.",
+                detail=f"Esta operación requiere una estación de tipo {nombres}.",
             )
         return session
 

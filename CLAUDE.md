@@ -185,6 +185,31 @@ prueba) antes de confiar en la suite. Build de producción sin errores; sin
 extensión de Chrome conectada en esta sesión, no se probó visualmente en
 navegador.
 
+## Corrección de vehículo desde Prueba (2026-08-14)
+
+Decisión de producto del cliente: el operador debe poder corregir los datos
+del vehículo después de normalizar, porque Inspección Visual (estación de
+Prueba) puede detectar un error que antes no había forma de arreglar sin
+devolver el expediente a Captura.
+
+- `requiere_estacion` (`app/api/deps.py`) ahora acepta múltiples
+  `StationType` (`*tipos`) en vez de uno solo — cambio retrocompatible, los
+  demás endpoints que le pasaban un único tipo siguen igual.
+- `PATCH /api/expedientes/{id}/vehiculo` (HU-016) ahora acepta Captura
+  **o** Prueba (antes solo Captura). Sin chequeo de estado del expediente
+  (decisión explícita: se puede corregir en cualquier punto mientras el
+  expediente siga abierto, no solo antes de normalizar).
+- `PruebaView.vue`: panel colapsable "Datos del vehículo" (arriba de
+  Inspección Visual/OBD/Prueba, visible en cualquier sub-estado de esta
+  estación) que reusa el mismo patrón de formulario de `CapturaView.vue`
+  contra el mismo endpoint.
+- Pruebas actualizadas en `tests/test_expedientes.py`:
+  `test_actualizar_vehiculo_desde_estacion_de_prueba_responde_200`
+  (antes esperaba 403, ahora es el camino soportado) y nueva
+  `test_actualizar_vehiculo_desde_estacion_de_impresion_responde_403`
+  (Impresión sigue sin poder tocar datos del vehículo). 100 pruebas, todas
+  pasan.
+
 ## Folios e Impresión — cerrado (2026-08-13)
 
 - **Folios**: `/api/folios/solicitar` ya reutilizaba una `FolioRequest`

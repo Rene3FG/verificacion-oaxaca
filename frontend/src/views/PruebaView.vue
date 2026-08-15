@@ -43,6 +43,33 @@ const cargandoExpediente = ref(false);
 const error = ref(null);
 const aviso = ref(null);
 
+// --- Corregir datos del vehículo (decisión de producto 2026-08-14: si
+// Inspección Visual detecta un error, Prueba debe poder corregirlo sin
+// devolver el expediente a Captura). Mismos campos que CapturaView.vue.
+const CAMPOS_VEHICULO = ["niv", "marca", "linea", "modelo", "tipo_vehiculo"];
+const vehiculoForm = reactive(Object.fromEntries(CAMPOS_VEHICULO.map((c) => [c, null])));
+const guardandoVehiculo = ref(false);
+const editandoVehiculo = ref(false);
+
+function sincronizarVehiculoForm(vehiculo) {
+  for (const campo of CAMPOS_VEHICULO) vehiculoForm[campo] = vehiculo?.[campo] ?? null;
+}
+
+async function guardarVehiculo() {
+  guardandoVehiculo.value = true;
+  error.value = null;
+  try {
+    await api.patch(`/expedientes/${expediente.value.id}/vehiculo`, { ...vehiculoForm });
+    aviso.value = "Datos del vehículo corregidos.";
+    editandoVehiculo.value = false;
+    await recargarExpediente();
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudieron guardar los datos.";
+  } finally {
+    guardandoVehiculo.value = false;
+  }
+}
+
 // --- Inspección visual ---
 const checklistForm = reactive(
   Object.fromEntries(CHECKLIST_ITEMS.map((item) => [item.key, true]))
@@ -123,6 +150,7 @@ async function abrirExpediente(id) {
     expediente.value = data;
     reiniciarChecklist();
     reiniciarPrueba();
+    sincronizarVehiculoForm(data.vehiculo);
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudo abrir el expediente.";
   } finally {
@@ -322,6 +350,30 @@ onMounted(cargarExpedientesEnCurso);
       </v-alert>
 
       <v-progress-linear v-if="cargandoExpediente" indeterminate class="mb-4" />
+
+      <!-- Corregir datos del vehículo: si Inspección Visual (o cualquier
+           paso de Prueba) detecta un error en los datos, se corrige aquí
+           sin devolver el expediente a Captura. -->
+      <v-card class="mb-4" variant="outlined">
+        <v-card-title class="d-flex align-center ga-2" style="cursor: pointer" @click="editandoVehiculo = !editandoVehiculo">
+          Datos del vehículo
+          <span class="text-body-2 text-medium-emphasis">(fuente: {{ expediente.vehiculo?.fuente_datos }})</span>
+          <v-spacer />
+          <v-icon :icon="editandoVehiculo ? 'mdi-chevron-up' : 'mdi-pencil'" />
+        </v-card-title>
+        <v-card-text v-if="editandoVehiculo">
+          <v-row dense>
+            <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.niv" label="NIV" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.marca" label="Marca" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.linea" label="Línea/versión" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model.number="vehiculoForm.modelo" label="Modelo" type="number" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.tipo_vehiculo" label="Tipo de vehículo" variant="outlined" density="compact" /></v-col>
+          </v-row>
+          <v-btn color="primary" :loading="guardandoVehiculo" @click="guardarVehiculo">
+            Guardar corrección
+          </v-btn>
+        </v-card-text>
+      </v-card>
 
       <!-- Inspección visual -->
       <v-card v-if="expediente.estado === 'INSPECCION_VISUAL_PENDIENTE'" class="mb-4" variant="outlined">

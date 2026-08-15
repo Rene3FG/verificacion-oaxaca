@@ -224,9 +224,31 @@ async def test_actualizar_vehiculo_sin_cambios_no_escribe_evento(client, db_sess
     assert eventos == []
 
 
-async def test_actualizar_vehiculo_desde_estacion_de_prueba_responde_403(client, db_session):
+async def test_actualizar_vehiculo_desde_estacion_de_prueba_responde_200(client, db_session):
+    """Decisión de producto 2026-08-14: si Inspección Visual detecta un
+    error en los datos del vehículo, Prueba debe poder corregirlo sin
+    devolver el expediente a Captura."""
+
     estacion = await crear_estacion(
         db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"/api/expedientes/{expediente.id}/vehiculo",
+        json={"marca": "NISSAN"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["marca"] == "NISSAN"
+
+
+async def test_actualizar_vehiculo_desde_estacion_de_impresion_responde_403(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.IMPRESION, center_id="OAX-01", line_id=1
     )
     sesion = await crear_sesion_activa(db_session, estacion=estacion)
     expediente = await crear_expediente(db_session, linea_id=1)
