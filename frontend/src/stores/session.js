@@ -12,7 +12,9 @@ export const useSessionStore = defineStore("session", {
     estacion: null,
     sesion: null,
     usuario: null,
-    conexion: "en_linea",
+    // Reemplazado por datos reales de GET /api/sync/estado (ver
+    // actualizarEstadoSync); antes era un valor fijo que nunca cambiaba.
+    estadoSync: null,
     cargando: false,
     error: null,
   }),
@@ -21,6 +23,15 @@ export const useSessionStore = defineStore("session", {
     tieneEstacionConfigurada: (state) => state.estacion !== null,
     tieneSesionActiva: (state) => state.sesion !== null,
     puedeSupervisar: (state) => state.sesion?.can_supervise === true,
+
+    // "en_linea" | "sincronizando" | "pendientes" | "desconocido" — antes
+    // de la primera respuesta de /api/sync/estado no se sabe.
+    conexion: (state) => {
+      if (state.estadoSync === null) return "desconocido";
+      if (state.estadoSync.sincronizando > 0) return "sincronizando";
+      if (state.estadoSync.pendientes > 0) return "pendientes";
+      return "en_linea";
+    },
   },
 
   actions: {
@@ -63,6 +74,19 @@ export const useSessionStore = defineStore("session", {
       }
       this.sesion = null;
       this.usuario = null;
+      this.estadoSync = null;
+    },
+
+    async actualizarEstadoSync() {
+      if (!this.tieneSesionActiva) return;
+      try {
+        const { data } = await api.get("/sync/estado");
+        this.estadoSync = data;
+      } catch {
+        // Si el backend local no responde, no hay nada más específico que
+        // "desconocido" que mostrar — no es un error del usuario.
+        this.estadoSync = null;
+      }
     },
   },
 });

@@ -147,3 +147,48 @@ async def test_procesar_endpoint_envia_pendientes(client, db_session, monkeypatc
 
     await db_session.refresh(outbox)
     assert outbox.sync_status == SyncStatus.SYNCED
+
+
+async def test_estado_no_requiere_supervisor(client, db_session):
+    """A diferencia de /procesar, /estado es de solo lectura: cualquier
+    estación con sesión activa debe poder consultarlo (lo usa el Top App
+    Bar en toda vista, no solo en Supervisor)."""
+
+    estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA)
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+
+    resp = await client.get("/api/sync/estado", headers={"X-Session-Id": str(sesion.id)})
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "pendientes": 0,
+        "sincronizando": 0,
+        "en_error": 0,
+        "sincronizados": 0,
+        "pendiente_mas_antiguo": None,
+    }
+
+
+async def test_estado_cuenta_pendientes_y_errores(client, db_session, monkeypatch):
+    sesion = await crear_sesion_supervisor(db_session)
+    await _encolar(db_session)
+    await _encolar(db_session)
+    await db_session.commit()
+
+    async def _falla(row: SyncOutbox) -> dict:
+        raise RuntimeError("central no disponible")
+
+    monkeypatch.setattr("app.api.routers.sync._enviar_a_central", _falla)
+    resp = await client.post("/api/sync/procesar", headers={"X-Session-Id": str(sesion.id)})
+    assert resp.status_code == 200
+
+    resp = await client.get("/api/sync/estado", headers={"X-Session-Id": str(sesion.id)})
+    body = resp.json()
+
+    # Ambos fallaron: PENDING -> ERROR, y "pendientes" agrupa PENDING+ERROR
+    # (desde la perspectiva del operador ambos son "trabajo sin sincronizar").
+    assert body["pendientes"] == 2
+    assert body["en_error"] == 2
+    assert body["sincronizados"] == 0
+    assert body["pendiente_mas_antiguo"] is not None

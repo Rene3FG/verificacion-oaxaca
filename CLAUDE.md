@@ -399,3 +399,36 @@ resuelto — ver abajo.
 Pendiente real: `enviar_uno_a_central` sigue sin integración — no hay
 central definido todavía. Cuando exista, se conecta ahí sin tocar
 `procesar_pendientes` ni el productor.
+
+### Visibilidad de sincronización para el operador (2026-08-20)
+
+El diseño original pedía que el operador viera "En línea / Sin internet / N
+pendientes / Sincronizando / Todo sincronizado", pero nada lo exponía:
+`session.conexion` en el frontend estaba fijo en `"en_linea"` y Supervisor
+no tenía botón para disparar `/api/sync/procesar` (el endpoint ya existía).
+
+- **`GET /api/sync/estado`** (`app/api/routers/sync.py`): conteos de
+  `sync_outbox` por `sync_status` (`pendientes` = PENDING+ERROR,
+  `sincronizando`, `en_error`, `sincronizados`, `pendiente_mas_antiguo`).
+  A diferencia de `/procesar`, usa `get_current_session` (no
+  `requiere_supervisor`): es de solo lectura y lo consume el Top App Bar
+  en cualquier estación, no solo Supervisor.
+- **`TopAppBar.vue`**: refresca `session.actualizarEstadoSync()` cada 30s
+  (mismo patrón de polling que el resto del sistema); el chip de conexión
+  ahora muestra "Sincronizando…" / "N pendientes" / "Todo sincronizado" /
+  "M en error" según la respuesta real, en vez del texto fijo anterior.
+- **`SupervisorView.vue`**: nueva pestaña "Sincronización" con los mismos
+  conteos y un botón "Sincronizar ahora" (`POST /api/sync/procesar`).
+
+**Advertencia de base de datos compartida (recordatorio, ver arriba):**
+tras `python -m app.seed_demo`, 3 pruebas fallan
+(`test_cola_prueba_deriva_de_la_sesion`,
+`test_impresion_cola_limitada_a_allowed_line_ids`,
+`test_historial_consultas_ordena_mas_reciente_primero`) porque asumen
+tablas vacías a nivel global y la demo deja un expediente real en línea 1 /
+`LISTO_PARA_PRUEBA` y filas de `SioxConsulta`. No es una regresión: es el
+mismo riesgo ya documentado (dev DB = test DB, sin DB de test separada).
+Para confiar en la suite completa: `TRUNCATE TABLE verificaciones,
+vehiculos, sync_outbox CASCADE;` y NO correr `seed_demo` antes de
+`pytest`. Para grabar una demo: correr `seed_demo` y aceptar que esas 3
+pruebas van a fallar hasta la próxima limpieza.
