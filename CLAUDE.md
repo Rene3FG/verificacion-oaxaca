@@ -399,3 +399,39 @@ resuelto — ver abajo.
 Pendiente real: `enviar_uno_a_central` sigue sin integración — no hay
 central definido todavía. Cuando exista, se conecta ahí sin tocar
 `procesar_pendientes` ni el productor.
+
+## Frontend — Impresión (2026-08-18)
+
+`ImpresionView.vue` deja de ser el cascarón de René (Aug 4, que solo
+listaba la cola) y cubre el flujo completo de esta estación, igual que
+`CapturaView`/`PruebaView`: `GET /impresion/cola` para la lista, y una
+vista de detalle con cuatro secciones que se habilitan/deshabilitan según
+el estado del expediente abierto:
+
+- **Certificado**: `POST /impresion/tipo-certificado/{id}` calcula y
+  guarda `certificado_tipo`; la vista previa (`GET
+  /impresion/vista-previa/{id}`, blob de PDF abierto en pestaña nueva)
+  solo se habilita una vez calculado.
+- **Folio externo**: `POST /folios/solicitar/{id}` solo si ya hay
+  `certificado_tipo` y el expediente está en `PENDIENTE_IMPRESION` o
+  `FOLIO_ERROR` (reintentable) y no tiene folio ya asignado. Si el sistema
+  externo no responde (`data.folio` nulo), la vista muestra la alerta roja
+  y no bloquea — el expediente queda en `FOLIO_ERROR`, reintentable desde
+  el mismo botón.
+- **Impresión**: `POST /impresion/imprimir/{id}`, habilitado solo con
+  folio asignado y estado `FOLIO_ASIGNADO`/`IMPRESION_FALLIDA` (el botón
+  cambia su texto a "Reintentar impresión" en el segundo caso). Si la
+  impresora no responde, la respuesta trae `intentos` y el expediente se
+  queda en `IMPRESION_FALLIDA` para reintentar.
+- **Cierre**: `POST /impresion/cerrar/{id}`, habilitado solo en estado
+  `IMPRESO` sin `cerrado_at`; al confirmar, vuelve a la cola tras 1.2s.
+
+Validado manualmente contra el backend real (no simulado): cola, detalle,
+cálculo de tipo de certificado (`RECHAZO_VISUAL`), vista previa de PDF
+(HTTP 200), y el camino `FOLIO_ERROR` (alerta roja correcta, botones de
+Imprimir/Cerrar correctamente bloqueados). **El camino
+folio→imprimir→cerrar exitoso sigue sin probarse**:
+`_consultar_sistema_externo_folios` (`app/api/routers/folios.py`) está
+hardcodeado a devolver `{"status": "error"}` — no hay sistema externo de
+folios real ni mecanismo de mock todavía (pendiente de definir con el
+equipo de backend). Build de producción sin errores.
