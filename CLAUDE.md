@@ -411,7 +411,12 @@ el estado del expediente abierto:
 - **Certificado**: `POST /impresion/tipo-certificado/{id}` calcula y
   guarda `certificado_tipo`; la vista previa (`GET
   /impresion/vista-previa/{id}`, blob de PDF abierto en pestaña nueva)
-  solo se habilita una vez calculado.
+  solo se habilita una vez calculado. "Calcular tipo de certificado" solo
+  se habilita en `PENDIENTE_IMPRESION`/`FOLIO_ERROR` (mismos estados que
+  "Solicitar folio") — recalcular con el expediente ya en
+  `FOLIO_ASIGNADO` devuelve 409 en el backend (ver "Folios e Impresión"
+  arriba), así que el frontend evita ofrecer esa acción una vez que ya no
+  aplica, en vez de dejar que el operador se tope con el error.
 - **Folio externo**: `POST /folios/solicitar/{id}` solo si ya hay
   `certificado_tipo` y el expediente está en `PENDIENTE_IMPRESION` o
   `FOLIO_ERROR` (reintentable) y no tiene folio ya asignado. Si el sistema

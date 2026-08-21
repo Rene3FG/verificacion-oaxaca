@@ -23,6 +23,10 @@ const cargandoVistaPrevia = ref(false);
 const imprimiendo = ref(false);
 const cerrando = ref(false);
 
+const puedeCalcularTipo = computed(
+  () =>
+    expediente.value && ESTADOS_SOLICITABLES.includes(expediente.value.estado)
+);
 const puedeSolicitarFolio = computed(
   () =>
     expediente.value &&
@@ -207,7 +211,12 @@ onMounted(cargarCola);
           <p class="mb-2">
             Tipo: {{ expediente.certificado_tipo ?? "sin determinar" }}
           </p>
-          <v-btn variant="outlined" :loading="calculandoTipo" @click="calcularTipoCertificado">
+          <v-btn
+            variant="outlined"
+            :disabled="!puedeCalcularTipo"
+            :loading="calculandoTipo"
+            @click="calcularTipoCertificado"
+          >
             Calcular tipo de certificado
           </v-btn>
           <v-btn
