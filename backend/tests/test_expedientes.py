@@ -334,3 +334,63 @@ async def test_normalizar_desde_estacion_de_prueba_responde_403(client, db_sessi
     )
 
     assert resp.status_code == 403
+
+
+async def test_listar_expedientes_sin_session_id_responde_401(client, db_session):
+    """Antes este endpoint no dependía de ninguna sesión: cualquiera podía
+    listar TODOS los expedientes de TODOS los centros sin autenticarse."""
+
+    resp = await client.get("/api/expedientes")
+    assert resp.status_code in (401, 422)
+
+
+async def test_listar_expedientes_se_acota_a_la_sesion_por_default(client, db_session):
+    """Sin filtros de query, antes devolvía todo el sistema; ahora se acota
+    por default al centro/línea de la sesión."""
+
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    de_mi_sesion = await crear_expediente(db_session, centro_id="OAX-01", linea_id=1)
+    await crear_expediente(db_session, centro_id="OAX-01", linea_id=2)
+    await crear_expediente(db_session, centro_id="reforma", linea_id=1)
+    await db_session.commit()
+
+    resp = await client.get("/api/expedientes", headers={"X-Session-Id": str(sesion.id)})
+
+    assert resp.status_code == 200
+    ids = {e["id"] for e in resp.json()}
+    assert ids == {str(de_mi_sesion.id)}
+
+
+async def test_listar_expedientes_rechaza_centro_id_ajeno(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/expedientes",
+        params={"centro_id": "reforma"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 403
+
+
+async def test_listar_expedientes_rechaza_linea_id_ajena(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/expedientes",
+        params={"linea_id": 2},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 403

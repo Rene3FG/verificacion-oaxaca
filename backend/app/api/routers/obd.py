@@ -33,7 +33,7 @@ async def evaluar_obd(
     verificacion = result.scalar_one_or_none()
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
-    assert_linea_permitida(session, verificacion.linea_id)
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
 
     vehiculo = verificacion.vehiculo
     if vehiculo.tipo_vehiculo is None or vehiculo.combustible is None or vehiculo.modelo is None:
@@ -101,7 +101,7 @@ async def solicitar_obd(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
-    assert_linea_permitida(session, verificacion.linea_id)
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
 
     await state_machine.transition(
         db,
@@ -125,7 +125,7 @@ async def guardar_resultado_obd(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
-    assert_linea_permitida(session, verificacion.linea_id)
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
 
     await state_machine.transition(
         db,

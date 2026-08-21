@@ -420,15 +420,47 @@ no tenía botón para disparar `/api/sync/procesar` (el endpoint ya existía).
 - **`SupervisorView.vue`**: nueva pestaña "Sincronización" con los mismos
   conteos y un botón "Sincronizar ahora" (`POST /api/sync/procesar`).
 
-**Advertencia de base de datos compartida (recordatorio, ver arriba):**
-tras `python -m app.seed_demo`, 3 pruebas fallan
-(`test_cola_prueba_deriva_de_la_sesion`,
-`test_impresion_cola_limitada_a_allowed_line_ids`,
-`test_historial_consultas_ordena_mas_reciente_primero`) porque asumen
-tablas vacías a nivel global y la demo deja un expediente real en línea 1 /
-`LISTO_PARA_PRUEBA` y filas de `SioxConsulta`. No es una regresión: es el
-mismo riesgo ya documentado (dev DB = test DB, sin DB de test separada).
-Para confiar en la suite completa: `TRUNCATE TABLE verificaciones,
-vehiculos, sync_outbox CASCADE;` y NO correr `seed_demo` antes de
-`pytest`. Para grabar una demo: correr `seed_demo` y aceptar que esas 3
-pruebas van a fallar hasta la próxima limpieza.
+### Bug real encontrado al investigar la colisión demo/pruebas (2026-08-21)
+
+Al construir lo de arriba, sembrar `seed_demo` (centro `reforma`) rompía 3
+pruebas que usan centro `OAX-01`. La causa NO era solo "misma base para
+dev y test" (eso sigue siendo cierto, ver Etapa 2): era que **el número de
+línea nunca se comparaba junto con el centro**, pese a que
+`Workstation.center_id`/`Verificacion.centro_id` existen justo para eso.
+Una estación de la "línea 1" del centro `OAX-01` podía ver y operar
+expedientes de la "línea 1" de CUALQUIER OTRO centro (`reforma` incluido)
+con el mismo número de línea — el 403 de HU-008 ("Este expediente
+pertenece a otra línea") nunca se disparaba entre centros porque
+`assert_linea_permitida` y las colas de Prueba/Impresión solo miraban
+`linea_id`, nunca `centro_id`.
+
+- **`assert_linea_permitida(session, centro_id, linea_id)`**
+  (`app/api/deps.py`): ahora exige `session.center_id == centro_id`
+  además del número de línea. Cambió la firma (antes solo `linea_id`);
+  actualizados los 11 llamadores (`expedientes`, `pruebas`, `impresion`,
+  `folios`, `obd`, `inspeccion`, `siox`) para pasar
+  `verificacion.centro_id`.
+- **`cola_prueba`** (`app/api/routers/pruebas.py`) y **`cola_impresion`**
+  (`app/api/routers/impresion.py`): ahora filtran también por
+  `Verificacion.centro_id == session.center_id`.
+- **Hallazgo más serio en el camino**: `GET /api/expedientes`
+  (`listar_expedientes`, usado por `CapturaView`/`PruebaView`) **no
+  dependía de ninguna sesión** — sin `X-Session-Id`, y sin importar los
+  filtros `?centro_id=&linea_id=` de la query (el frontend manda los
+  suyos, pero nada del lado del servidor los validaba), devolvía TODOS
+  los expedientes de TODOS los centros del sistema. Ahora exige sesión
+  activa, valida que `centro_id`/`linea_id` de la query (si se mandan)
+  coincidan con lo que la sesión puede ver (403 si no), y si se omiten se
+  acota por default al centro/líneas de la sesión — nunca a todo el
+  sistema.
+- Pruebas nuevas: `tests/test_expedientes.py` (4, incluye 401 sin sesión y
+  403 por centro/línea ajenos), `tests/test_colas_y_lineas.py` (2, "misma
+  línea, otro centro" en cola de Prueba y en el 403 de HU-008), y
+  `tests/test_siox_router.py::test_historial_consultas_ordena_mas_reciente_primero`
+  corregido (escaneaba `SioxConsulta` sin filtrar por expediente — un bug
+  de aislamiento del test, no de producción).
+
+**Resultado**: 111 pruebas, todas pasan — incluso con `seed_demo` ya
+sembrado. La advertencia anterior ("no correr `seed_demo` antes de
+`pytest`") ya no aplica: era sintomática de este bug, no un límite
+permanente del setup de pruebas.

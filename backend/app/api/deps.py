@@ -109,9 +109,21 @@ async def requiere_supervisor(
     return session
 
 
-def assert_linea_permitida(session: SessionContext, linea_id: int) -> None:
-    """HU-008: operar un expediente de otra línea responde 403."""
-    if linea_id not in session.lineas_visibles():
+def assert_linea_permitida(session: SessionContext, centro_id: str, linea_id: int) -> None:
+    """HU-008: operar un expediente de otra línea responde 403.
+
+    Los números de línea son locales a cada centro (Centro Reforma y otro
+    centro pueden tener, cada uno, su propia "línea 1"), igual que
+    `Workstation.center_id`/`Verificacion.centro_id` ya lo modelan. Antes
+    esta función solo comparaba `linea_id`, así que una sesión del centro A
+    podía operar el expediente de la "línea 1" del centro B con el mismo
+    número de línea — el 403 de "otra línea" nunca se disparaba porque
+    nunca se miraba el centro. `session.center_id` viene de
+    `Workstation.center_id` (columna NOT NULL) en cada login real, así que
+    en la práctica nunca es None; si lo fuera, se falla cerrado (403) en
+    vez de asumir acceso."""
+
+    if session.center_id != centro_id or linea_id not in session.lineas_visibles():
         raise HTTPException(
             status_code=403,
             detail="Acceso denegado. Este expediente pertenece a otra línea.",

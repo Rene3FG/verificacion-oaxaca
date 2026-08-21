@@ -305,7 +305,11 @@ async def test_historial_consultas_ordena_mas_reciente_primero(
     # con el mismo created_at si no se atrasa la primera a mano; en
     # producción cada request tiene su propia transacción y esto no aplica.
     primera = (
-        await db_session.execute(SioxConsulta.__table__.select())
+        await db_session.execute(
+            SioxConsulta.__table__.select().where(
+                SioxConsulta.verificacion_id == expediente.id
+            )
+        )
     ).mappings().one()
     await db_session.execute(
         SioxConsulta.__table__.update()

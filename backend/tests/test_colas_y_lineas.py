@@ -16,6 +16,11 @@ async def test_cola_prueba_deriva_de_la_sesion(client, db_session):
     await crear_expediente(
         db_session, linea_id=2, estado=EstadoVerificacion.LISTO_PARA_PRUEBA
     )
+    # Misma línea (1), pero de OTRO centro: el número de línea es local a
+    # cada centro, así que esto no debe aparecer en la cola de OAX-01.
+    await crear_expediente(
+        db_session, centro_id="reforma", linea_id=1, estado=EstadoVerificacion.LISTO_PARA_PRUEBA
+    )
     await db_session.commit()
 
     resp = await client.get(
@@ -65,6 +70,30 @@ async def test_operar_expediente_de_otra_linea_responde_403(client, db_session):
     assert resp.json()["detail"] == "Acceso denegado. Este expediente pertenece a otra línea."
 
 
+async def test_operar_expediente_de_otro_centro_misma_linea_responde_403(client, db_session):
+    """El número de línea es local a cada centro: una "línea 1" del centro
+    A y una "línea 1" del centro B son cosas distintas. Antes
+    `assert_linea_permitida` solo comparaba el número de línea, así que
+    esto no daba 403."""
+
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente_otro_centro = await crear_expediente(
+        db_session, centro_id="reforma", linea_id=1, estado=EstadoVerificacion.LISTO_PARA_PRUEBA
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/iniciar/{expediente_otro_centro.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Acceso denegado. Este expediente pertenece a otra línea."
+
+
 async def test_impresion_cola_limitada_a_allowed_line_ids(client, db_session):
     """HU-003/009: Impresión Central solo ve las líneas de allowed_line_ids,
     nunca todas las líneas del sistema."""
@@ -87,6 +116,11 @@ async def test_impresion_cola_limitada_a_allowed_line_ids(client, db_session):
     )
     await crear_expediente(
         db_session, linea_id=3, estado=EstadoVerificacion.PENDIENTE_IMPRESION
+    )
+    # Misma línea (1) que sí está permitida, pero de otro centro: no debe
+    # aparecer en la cola de una estación centralizada de OAX-01.
+    await crear_expediente(
+        db_session, centro_id="reforma", linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
     )
     await db_session.commit()
 
