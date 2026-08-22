@@ -31,6 +31,14 @@ TEST_SUPERVISOR_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
 TEST_SUPERVISOR_USERNAME = "supervisor1"
 TEST_SUPERVISOR_PASSWORD = "supervisor1"  # noqa: S105 - solo desarrollo/demo
 
+# Operador de línea 2: operador1 tiene Captura+Prueba+Impresión en línea 1
+# a la vez, lo que no permite demostrar el bloqueo de expediente/estación
+# de otra línea (assert_linea_permitida). operador2 solo tiene Captura y
+# Prueba de línea 2.
+TEST_USER2_ID = uuid.UUID("00000000-0000-0000-0000-000000000003")
+TEST_USER2_USERNAME = "operador2"
+TEST_USER2_PASSWORD = "operador2"  # noqa: S105 - solo desarrollo/demo
+
 WORKSTATIONS = [
     dict(
         name="CAPTURA-REFORMA-L1",
@@ -116,6 +124,16 @@ async def seed() -> None:
                     is_active=True,
                 )
             )
+        if await db.get(CatUsuario, TEST_USER2_ID) is None:
+            db.add(
+                CatUsuario(
+                    id=TEST_USER2_ID,
+                    username=TEST_USER2_USERNAME,
+                    password_hash=hash_password(TEST_USER2_PASSWORD),
+                    nombre_completo="Operador de prueba (línea 2)",
+                    is_active=True,
+                )
+            )
 
         permisos_operador = [
             dict(station_type=StationType.CAPTURA, line_id=1),
@@ -134,6 +152,28 @@ async def seed() -> None:
                 db.add(
                     UserStationPermission(
                         user_id=TEST_USER_ID,
+                        center_id="reforma",
+                        can_operate=True,
+                        **permiso,
+                    )
+                )
+
+        permisos_operador2 = [
+            dict(station_type=StationType.CAPTURA, line_id=2),
+            dict(station_type=StationType.PRUEBA, line_id=2),
+        ]
+        for permiso in permisos_operador2:
+            existing_permiso2 = await db.execute(
+                select(UserStationPermission).where(
+                    UserStationPermission.user_id == TEST_USER2_ID,
+                    UserStationPermission.station_type == permiso["station_type"],
+                    UserStationPermission.center_id == "reforma",
+                )
+            )
+            if existing_permiso2.scalar_one_or_none() is None:
+                db.add(
+                    UserStationPermission(
+                        user_id=TEST_USER2_ID,
                         center_id="reforma",
                         can_operate=True,
                         **permiso,

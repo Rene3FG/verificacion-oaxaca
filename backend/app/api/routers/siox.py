@@ -46,7 +46,7 @@ async def consultar_siox(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
-    assert_linea_permitida(session, verificacion.linea_id)
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
 
     consultas_previas = (
         await db.execute(
@@ -160,7 +160,7 @@ async def historial_consultas_siox(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
-    assert_linea_permitida(session, verificacion.linea_id)
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
 
     result = await db.execute(
         select(SioxConsulta)
@@ -185,7 +185,7 @@ async def captura_manual(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
-    assert_linea_permitida(session, verificacion.linea_id)
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
 
     if payload is not None:
         vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)

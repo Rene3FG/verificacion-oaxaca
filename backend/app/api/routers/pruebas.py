@@ -30,7 +30,7 @@ async def _obtener_expediente_de_la_linea(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
-    assert_linea_permitida(session, verificacion.linea_id)
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
     return verificacion
 
 
@@ -42,7 +42,12 @@ async def cola_prueba(
     """La estación de Prueba solo ve expedientes de su línea (regla del
     modelo de estaciones). La línea sale de la sesión, nunca de la URL: antes
     una estación de línea 1 podía pedir la cola de la línea 2 cambiando
-    /api/pruebas/cola/2 por la dirección."""
+    /api/pruebas/cola/2 por la dirección.
+
+    El número de línea es local a cada centro (ver docstring de
+    `assert_linea_permitida`): sin filtrar también por `centro_id`, una
+    estación de línea 1 del centro A vería expedientes de la línea 1 del
+    centro B."""
 
     if session.line_id is None:
         raise HTTPException(status_code=400, detail="La sesión no tiene línea asociada.")
@@ -51,6 +56,7 @@ async def cola_prueba(
         select(Verificacion)
         .options(selectinload(Verificacion.vehiculo))
         .where(
+            Verificacion.centro_id == session.center_id,
             Verificacion.linea_id == session.line_id,
             Verificacion.estado == EstadoVerificacion.LISTO_PARA_PRUEBA,
         )

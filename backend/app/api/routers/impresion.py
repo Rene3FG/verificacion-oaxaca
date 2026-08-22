@@ -40,7 +40,11 @@ async def cola_impresion(
     todas las líneas del sistema. El filtro `?linea_id=` solo puede
     estrechar ese conjunto, jamás ampliarlo: si pide una línea fuera de
     `allowed_line_ids` la cola simplemente sale vacía, nunca expone otra
-    línea."""
+    línea.
+
+    También se acota por `centro_id` de la sesión: el número de línea es
+    local a cada centro (ver docstring de `assert_linea_permitida`), y una
+    estación centralizada solo pertenece a un centro."""
 
     lineas_permitidas = session.lineas_visibles()
     lineas_query = {linea_id} & lineas_permitidas if linea_id is not None else lineas_permitidas
@@ -54,6 +58,7 @@ async def cola_impresion(
                 EstadoVerificacion.IMPRESION_FALLIDA,
             ]
         ),
+        Verificacion.centro_id == session.center_id,
         Verificacion.linea_id.in_(lineas_query),
     )
 
@@ -67,7 +72,7 @@ async def _obtener_expediente_y_vehiculo(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
-    assert_linea_permitida(session, verificacion.linea_id)
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
     vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
     return verificacion, vehiculo
 

@@ -187,10 +187,45 @@ async function eliminarPermiso(permiso) {
   }
 }
 
+// --- Sincronización (visibilidad de sync_outbox al operador) ---
+const estadoSync = ref(null);
+const cargandoEstadoSync = ref(false);
+const sincronizando = ref(false);
+const resultadoSync = ref(null);
+
+async function cargarEstadoSync() {
+  cargandoEstadoSync.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.get("/sync/estado");
+    estadoSync.value = data;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo cargar el estado de sincronización.";
+  } finally {
+    cargandoEstadoSync.value = false;
+  }
+}
+
+async function sincronizarAhora() {
+  sincronizando.value = true;
+  error.value = null;
+  resultadoSync.value = null;
+  try {
+    const { data } = await api.post("/sync/procesar");
+    resultadoSync.value = data;
+    await cargarEstadoSync();
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo procesar la cola de sincronización.";
+  } finally {
+    sincronizando.value = false;
+  }
+}
+
 onMounted(() => {
   cargarMonitor();
   cargarUsuarios();
   cargarPermisos();
+  cargarEstadoSync();
 });
 </script>
 
@@ -210,6 +245,7 @@ onMounted(() => {
     <v-tabs v-model="tab" class="mb-4">
       <v-tab value="monitor">Monitor</v-tab>
       <v-tab value="permisos">Permisos</v-tab>
+      <v-tab value="sincronizacion">Sincronización</v-tab>
     </v-tabs>
 
     <v-window v-model="tab">
@@ -328,6 +364,72 @@ onMounted(() => {
                 </tr>
               </tbody>
             </v-table>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+
+      <v-window-item value="sincronizacion">
+        <v-card variant="outlined">
+          <v-card-title class="d-flex align-center ga-2">
+            Sincronización con el central
+            <v-spacer />
+            <v-btn
+              variant="text"
+              icon="mdi-refresh"
+              :loading="cargandoEstadoSync"
+              @click="cargarEstadoSync"
+            />
+          </v-card-title>
+          <v-card-text>
+            <v-progress-linear v-if="cargandoEstadoSync && !estadoSync" indeterminate class="mb-4" />
+            <template v-else-if="estadoSync">
+              <v-row class="mb-2" dense>
+                <v-col cols="6" sm="3">
+                  <div class="text-caption text-medium-emphasis">Pendientes</div>
+                  <div class="text-h6">{{ estadoSync.pendientes }}</div>
+                </v-col>
+                <v-col cols="6" sm="3">
+                  <div class="text-caption text-medium-emphasis">En error</div>
+                  <div class="text-h6">{{ estadoSync.en_error }}</div>
+                </v-col>
+                <v-col cols="6" sm="3">
+                  <div class="text-caption text-medium-emphasis">Sincronizando</div>
+                  <div class="text-h6">{{ estadoSync.sincronizando }}</div>
+                </v-col>
+                <v-col cols="6" sm="3">
+                  <div class="text-caption text-medium-emphasis">Sincronizados</div>
+                  <div class="text-h6">{{ estadoSync.sincronizados }}</div>
+                </v-col>
+              </v-row>
+              <p v-if="estadoSync.pendiente_mas_antiguo" class="text-body-2 text-medium-emphasis mb-4">
+                Pendiente más antiguo desde
+                {{ new Date(estadoSync.pendiente_mas_antiguo).toLocaleString() }}.
+              </p>
+              <p v-else class="text-body-2 text-medium-emphasis mb-4">
+                No hay nada pendiente de sincronizar.
+              </p>
+
+              <v-btn
+                color="primary"
+                :loading="sincronizando"
+                :disabled="estadoSync.pendientes === 0"
+                prepend-icon="mdi-sync"
+                @click="sincronizarAhora"
+              >
+                Sincronizar ahora
+              </v-btn>
+
+              <p v-if="resultadoSync" class="text-body-2 mt-3">
+                Último intento: {{ resultadoSync.enviados }} enviados,
+                {{ resultadoSync.fallidos }} fallidos,
+                {{ resultadoSync.en_backoff }} en espera de reintento
+                (de {{ resultadoSync.procesados }} procesados).
+              </p>
+              <p v-if="resultadoSync?.fallidos > 0" class="text-caption text-medium-emphasis">
+                No hay un central real definido todavía — los fallos son esperados hasta que
+                exista esa integración.
+              </p>
+            </template>
           </v-card-text>
         </v-card>
       </v-window-item>

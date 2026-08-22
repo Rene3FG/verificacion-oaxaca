@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import (
     SessionContext,
     assert_linea_permitida,
+    get_current_session,
     get_db,
     requiere_estacion,
     requiere_supervisor,
@@ -99,7 +100,7 @@ async def normalizar_expediente(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
-    assert_linea_permitida(session, verificacion.linea_id)
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
 
     if verificacion.estado not in ESTADOS_NORMALIZABLES:
         raise HTTPException(
@@ -230,7 +231,7 @@ async def actualizar_vehiculo(
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
-    assert_linea_permitida(session, verificacion.linea_id)
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
 
     vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
     await actualizar_datos_vehiculo(
@@ -267,13 +268,33 @@ async def listar_expedientes(
     centro_id: str | None = None,
     linea_id: int | None = None,
     estado: EstadoVerificacion | None = None,
+    session: SessionContext = Depends(get_current_session),
     db: AsyncSession = Depends(get_db),
 ) -> list[Verificacion]:
-    query = select(Verificacion)
-    if centro_id is not None:
-        query = query.where(Verificacion.centro_id == centro_id)
-    if linea_id is not None:
-        query = query.where(Verificacion.linea_id == linea_id)
+    """Antes no dependía de ninguna sesión: sin `X-Session-Id`, y sin
+    importar los filtros de query, devolvía TODOS los expedientes de TODOS
+    los centros del sistema (usado por CapturaView/PruebaView, que sí
+    mandan sus propios `centro_id`/`linea_id`, pero nada del lado del
+    servidor los validaba contra la sesión real). Ahora, igual que
+    `assert_linea_permitida`: si se pide un `centro_id`/`linea_id` fuera de
+    lo que la sesión puede ver, 403; si se omiten, se acota por default a
+    lo que la sesión puede ver, nunca a todo el sistema."""
+
+    if centro_id is not None and centro_id != session.center_id:
+        raise HTTPException(
+            status_code=403, detail="Acceso denegado a expedientes de otro centro."
+        )
+    if linea_id is not None and linea_id not in session.lineas_visibles():
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado. Este expediente pertenece a otra línea.",
+        )
+
+    lineas = {linea_id} if linea_id is not None else session.lineas_visibles()
+    query = select(Verificacion).where(
+        Verificacion.centro_id == session.center_id,
+        Verificacion.linea_id.in_(lineas),
+    )
     if estado is not None:
         query = query.where(Verificacion.estado == estado)
     result = await db.execute(query.order_by(Verificacion.created_at.desc()))

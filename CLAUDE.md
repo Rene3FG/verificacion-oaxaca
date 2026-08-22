@@ -440,3 +440,68 @@ folio→imprimir→cerrar exitoso sigue sin probarse**:
 hardcodeado a devolver `{"status": "error"}` — no hay sistema externo de
 folios real ni mecanismo de mock todavía (pendiente de definir con el
 equipo de backend). Build de producción sin errores.
+
+### Visibilidad de sincronización para el operador (2026-08-20)
+
+El diseño original pedía que el operador viera "En línea / Sin internet / N
+pendientes / Sincronizando / Todo sincronizado", pero nada lo exponía:
+`session.conexion` en el frontend estaba fijo en `"en_linea"` y Supervisor
+no tenía botón para disparar `/api/sync/procesar` (el endpoint ya existía).
+
+- **`GET /api/sync/estado`** (`app/api/routers/sync.py`): conteos de
+  `sync_outbox` por `sync_status` (`pendientes` = PENDING+ERROR,
+  `sincronizando`, `en_error`, `sincronizados`, `pendiente_mas_antiguo`).
+  A diferencia de `/procesar`, usa `get_current_session` (no
+  `requiere_supervisor`): es de solo lectura y lo consume el Top App Bar
+  en cualquier estación, no solo Supervisor.
+- **`TopAppBar.vue`**: refresca `session.actualizarEstadoSync()` cada 30s
+  (mismo patrón de polling que el resto del sistema); el chip de conexión
+  ahora muestra "Sincronizando…" / "N pendientes" / "Todo sincronizado" /
+  "M en error" según la respuesta real, en vez del texto fijo anterior.
+- **`SupervisorView.vue`**: nueva pestaña "Sincronización" con los mismos
+  conteos y un botón "Sincronizar ahora" (`POST /api/sync/procesar`).
+
+### Bug real encontrado al investigar la colisión demo/pruebas (2026-08-21)
+
+Al construir lo de arriba, sembrar `seed_demo` (centro `reforma`) rompía 3
+pruebas que usan centro `OAX-01`. La causa NO era solo "misma base para
+dev y test" (eso sigue siendo cierto, ver Etapa 2): era que **el número de
+línea nunca se comparaba junto con el centro**, pese a que
+`Workstation.center_id`/`Verificacion.centro_id` existen justo para eso.
+Una estación de la "línea 1" del centro `OAX-01` podía ver y operar
+expedientes de la "línea 1" de CUALQUIER OTRO centro (`reforma` incluido)
+con el mismo número de línea — el 403 de HU-008 ("Este expediente
+pertenece a otra línea") nunca se disparaba entre centros porque
+`assert_linea_permitida` y las colas de Prueba/Impresión solo miraban
+`linea_id`, nunca `centro_id`.
+
+- **`assert_linea_permitida(session, centro_id, linea_id)`**
+  (`app/api/deps.py`): ahora exige `session.center_id == centro_id`
+  además del número de línea. Cambió la firma (antes solo `linea_id`);
+  actualizados los 11 llamadores (`expedientes`, `pruebas`, `impresion`,
+  `folios`, `obd`, `inspeccion`, `siox`) para pasar
+  `verificacion.centro_id`.
+- **`cola_prueba`** (`app/api/routers/pruebas.py`) y **`cola_impresion`**
+  (`app/api/routers/impresion.py`): ahora filtran también por
+  `Verificacion.centro_id == session.center_id`.
+- **Hallazgo más serio en el camino**: `GET /api/expedientes`
+  (`listar_expedientes`, usado por `CapturaView`/`PruebaView`) **no
+  dependía de ninguna sesión** — sin `X-Session-Id`, y sin importar los
+  filtros `?centro_id=&linea_id=` de la query (el frontend manda los
+  suyos, pero nada del lado del servidor los validaba), devolvía TODOS
+  los expedientes de TODOS los centros del sistema. Ahora exige sesión
+  activa, valida que `centro_id`/`linea_id` de la query (si se mandan)
+  coincidan con lo que la sesión puede ver (403 si no), y si se omiten se
+  acota por default al centro/líneas de la sesión — nunca a todo el
+  sistema.
+- Pruebas nuevas: `tests/test_expedientes.py` (4, incluye 401 sin sesión y
+  403 por centro/línea ajenos), `tests/test_colas_y_lineas.py` (2, "misma
+  línea, otro centro" en cola de Prueba y en el 403 de HU-008), y
+  `tests/test_siox_router.py::test_historial_consultas_ordena_mas_reciente_primero`
+  corregido (escaneaba `SioxConsulta` sin filtrar por expediente — un bug
+  de aislamiento del test, no de producción).
+
+**Resultado**: 111 pruebas, todas pasan — incluso con `seed_demo` ya
+sembrado. La advertencia anterior ("no correr `seed_demo` antes de
+`pytest`") ya no aplica: era sintomática de este bug, no un límite
+permanente del setup de pruebas.
