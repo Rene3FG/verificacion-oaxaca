@@ -103,6 +103,15 @@ async def solicitar_obd(
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
 
+    if verificacion.estado != EstadoVerificacion.OBD_PENDIENTE:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No se puede solicitar OBD: el expediente está en estado "
+                f"{verificacion.estado}, no OBD_PENDIENTE."
+            ),
+        )
+
     await state_machine.transition(
         db,
         verificacion,
@@ -126,6 +135,15 @@ async def guardar_resultado_obd(
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
+
+    if verificacion.estado != EstadoVerificacion.OBD_SOLICITADO:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No se puede guardar el resultado OBD: el expediente está "
+                f"en estado {verificacion.estado}, no OBD_SOLICITADO."
+            ),
+        )
 
     await state_machine.transition(
         db,

@@ -84,3 +84,70 @@ async def test_evaluar_obd_no_aplica_combustible_validado_igual(client, db_sessi
     await db_session.refresh(expediente)
     assert expediente.combustible_validado == "diesel"
     assert expediente.estado == EstadoVerificacion.LISTO_PARA_PRUEBA
+
+
+async def test_solicitar_obd_sin_evaluar_responde_409(client, db_session):
+    """Antes tiraba un TransitionNotAllowed sin manejar (500): no se puede
+    solicitar OBD sin haberlo evaluado primero (OBD_PENDIENTE)."""
+
+    sesion = await _sesion_prueba(db_session)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.INSPECCION_VISUAL_APROBADA,
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/obd/solicitar/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 409
+
+    await db_session.refresh(expediente)
+    assert expediente.estado == EstadoVerificacion.INSPECCION_VISUAL_APROBADA
+
+
+async def test_guardar_resultado_obd_sin_solicitar_responde_409(client, db_session):
+    sesion = await _sesion_prueba(db_session)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.OBD_PENDIENTE,
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/obd/resultado/{expediente.id}",
+        json={"resultado": "APROBADO"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 409
+
+    await db_session.refresh(expediente)
+    assert expediente.estado == EstadoVerificacion.OBD_PENDIENTE
+
+
+async def test_solicitar_y_guardar_resultado_obd_camino_completo(client, db_session):
+    sesion = await _sesion_prueba(db_session)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.OBD_PENDIENTE,
+    )
+    await db_session.commit()
+
+    resp_solicitar = await client.post(
+        f"/api/obd/solicitar/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp_solicitar.status_code == 200
+    assert resp_solicitar.json()["estado_expediente"] == EstadoVerificacion.OBD_SOLICITADO.value
+
+    resp_resultado = await client.post(
+        f"/api/obd/resultado/{expediente.id}",
+        json={"resultado": "APROBADO"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp_resultado.status_code == 200
+    assert resp_resultado.json()["estado_expediente"] == EstadoVerificacion.LISTO_PARA_PRUEBA.value

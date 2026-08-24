@@ -79,6 +79,41 @@ async def configurar_prueba(
 
     verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
 
+    if verificacion.estado != EstadoVerificacion.LISTO_PARA_PRUEBA:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No se puede configurar la prueba: el expediente está en "
+                f"estado {verificacion.estado}, no LISTO_PARA_PRUEBA."
+            ),
+        )
+
+    es_gasolina = (verificacion.combustible_validado or "").upper() == "GASOLINA"
+    tipo_default = TipoPrueba.DINAMICA if es_gasolina else TipoPrueba.OPACIDAD
+
+    if tipo_prueba != tipo_default:
+        if not es_gasolina:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Un vehículo que no es a gasolina solo admite prueba de "
+                    "OPACIDAD; no se permite cambiar el tipo de prueba."
+                ),
+            )
+        if tipo_prueba != TipoPrueba.ESTATICA:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Un vehículo a gasolina solo puede cambiar de DINAMICA a "
+                    f"ESTATICA, no a {tipo_prueba}."
+                ),
+            )
+        if not cambio_manual or not motivo:
+            raise HTTPException(
+                status_code=409,
+                detail="El cambio de dinámica a estática requiere cambio_manual=true y un motivo.",
+            )
+
     verificacion.tipo_prueba_final = tipo_prueba
     await state_machine.transition(
         db,
@@ -120,6 +155,15 @@ async def iniciar_prueba(
 ) -> dict:
     verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
 
+    if verificacion.estado != EstadoVerificacion.PRUEBA_CONFIGURADA:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No se puede iniciar la prueba: el expediente está en "
+                f"estado {verificacion.estado}, no PRUEBA_CONFIGURADA."
+            ),
+        )
+
     await state_machine.transition(
         db,
         verificacion,
@@ -147,6 +191,15 @@ async def guardar_resultado_prueba(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
+
+    if verificacion.estado != EstadoVerificacion.PRUEBA_EN_PROCESO:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No se puede guardar el resultado: el expediente está en "
+                f"estado {verificacion.estado}, no PRUEBA_EN_PROCESO."
+            ),
+        )
 
     # HU-017: combustible es obligatorio; Captura lo garantiza al normalizar
     # (ver expedientes.normalizar_expediente), pero Prueba también lo
