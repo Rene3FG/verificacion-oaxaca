@@ -16,6 +16,13 @@ from app.models.integration_log import (
 )
 from app.models.verificacion import Verificacion
 from app.services import state_machine
+from app.services.folios_client import (
+    FoliosExternoClient,
+    TimeoutFolioExterno,
+    folio_tiene_formato_valido,
+    get_folios_client,
+    mensaje_error_folio,
+)
 
 router = APIRouter(prefix="/api/folios", tags=["folios"])
 
@@ -29,15 +36,6 @@ ESTADOS_SOLICITABLES = {
 }
 
 
-async def _consultar_sistema_externo_folios(payload: dict) -> dict:
-    """PENDIENTE: integración real con el sistema externo de folios (no
-    definido aún — ver 'Qué sucede con los folios' en el proyecto). El
-    sistema de verificación NUNCA administra inventario de folios, solo
-    solicita/recibe/asigna (regla de negocio #7)."""
-
-    return {"folio": None, "external_reference_id": None, "status": "error"}
-
-
 @router.post("/solicitar/{expediente_id}")
 async def solicitar_folio(
     expediente_id: uuid.UUID,
@@ -46,6 +44,7 @@ async def solicitar_folio(
     print_job_id: uuid.UUID | None = None,
     session: SessionContext = Depends(requiere_estacion(StationType.IMPRESION)),
     db: AsyncSession = Depends(get_db),
+    folios_client: FoliosExternoClient = Depends(get_folios_client),
 ) -> dict:
     """Idempotente (regla #12): un expediente cerrado solo puede tener un
     folio activo por tipo de certificado. Antes de solicitar uno nuevo se
@@ -102,23 +101,27 @@ async def solicitar_folio(
             evento="folio_solicitado",
         )
 
-        respuesta = await _consultar_sistema_externo_folios(solicitud.request_payload)
+        try:
+            respuesta = await folios_client.consultar(solicitud.request_payload)
+        except TimeoutFolioExterno:
+            respuesta = {"folio": None, "external_reference_id": None, "status": "timeout"}
+
+        folio_valido = respuesta["status"] == "asignado" and folio_tiene_formato_valido(
+            respuesta.get("folio")
+        )
+
         db.add(
             IntegrationLog(
                 verificacion_id=expediente_id,
                 integration_name="sistema_folios",
                 direction=IntegrationDirection.RESPONSE,
                 payload=respuesta,
-                status=IntegrationStatus.OK
-                if respuesta["status"] == "asignado"
-                else IntegrationStatus.ERROR,
-                error_message=None
-                if respuesta["status"] == "asignado"
-                else "El sistema externo de folios no respondió",
+                status=IntegrationStatus.OK if folio_valido else IntegrationStatus.ERROR,
+                error_message=None if folio_valido else mensaje_error_folio(respuesta),
             )
         )
 
-        if respuesta["status"] == "asignado":
+        if folio_valido:
             solicitud.status = EstadoFolioRequest.ASIGNADO
             solicitud.response_payload = respuesta
             solicitud.folio_recibido = respuesta["folio"]
