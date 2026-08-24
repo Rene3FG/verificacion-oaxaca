@@ -505,3 +505,66 @@ pertenece a otra línea") nunca se disparaba entre centros porque
 sembrado. La advertencia anterior ("no correr `seed_demo` antes de
 `pytest`") ya no aplica: era sintomática de este bug, no un límite
 permanente del setup de pruebas.
+
+## Unificación de ramas y simulador de folios (2026-08-24)
+
+`etapa1-y-siox` y `frontend-impresion-central` estaban separadas por 4
+commits. Al momento de unificar resultó que `frontend-impresion-central`
+ya había hecho merge de `etapa1-y-siox` por su cuenta (commit `07c6417`,
+2026-08-21) — `etapa1-y-siox` era ancestro directo, así que unificar fue
+un fast-forward limpio, sin conflicto que resolver en `ImpresionView.vue`
+ni en `CLAUDE.md`.
+
+**Flujo completo verificado contra el backend real** (crear expediente →
+SIOX → normalizar → inspección visual → OBD → configurar/iniciar/resultado
+de prueba → determinar certificado → solicitar folio → imprimir → cerrar):
+se corta exactamente en "solicitar folio", como se esperaba —
+`_consultar_sistema_externo_folios` devolvía siempre error.
+
+- **Simulador de folios configurable** (`app/services/folios_client.py`):
+  reemplaza el stub hardcodeado por `FoliosExternoClient`, inyectable vía
+  `Depends(get_folios_client)`, con 5 modos (`ModoFolioExterno`: EXITO,
+  ERROR, TIMEOUT, FOLIO_DUPLICADO, FOLIO_INVALIDO). El modo se selecciona
+  sobrescribiendo la dependencia en pruebas
+  (`app.dependency_overrides[get_folios_client]`, limpiado automáticamente
+  por el fixture `client`), nunca con una variable global compartida.
+  Default de producción: ERROR (mismo comportamiento observable que antes
+  — sigue sin haber sistema externo real).
+- Se agrega validación de formato del folio recibido
+  (`folio_tiene_formato_valido`) — antes se confiaba ciegamente en
+  `respuesta["folio"]` cuando `status == "asignado"`. Un folio con formato
+  inválido ahora deja el expediente en `FOLIO_ERROR` con el motivo en
+  `integration_logs`, no se asigna sin más.
+- `tests/test_folios.py`: 4 pruebas nuevas — éxito asigna y transiciona,
+  timeout/duplicado/formato inválido dejan `FOLIO_ERROR` con el mensaje
+  correcto, y un expediente completo llega a `CERRADO` pasando de verdad
+  por `/folios/solicitar` (las pruebas de impresión existentes inyectaban
+  `FOLIO_ASIGNADO` directo en la fixture, sin ejercer nunca ese endpoint
+  en la cadena completa).
+
+**Guards de estado en Prueba y OBD**: al recorrer el flujo real se
+encontraron varios `TransitionNotAllowed` sin manejar (500) en
+`pruebas.py` (`configurar`/`iniciar`/`resultado`) y `obd.py`
+(`solicitar`/`resultado`) — llamar cualquiera de estos fuera de su estado
+de origen esperado tiraba 500 en vez de un 409 claro, mismo patrón ya
+corregido antes en `folios.py`. Se agregaron guards explícitos de estado
+antes de cada `state_machine.transition()`.
+
+**Regla #5/#9 implementada en el backend, no solo en el frontend**:
+`configurar_prueba` no validaba nada contra el combustible — aceptaba
+cualquier `tipo_prueba`. Ahora sí: gasolina propone `DINAMICA` por
+defecto (cambiable a `ESTATICA` solo con `cambio_manual=true` y `motivo`,
+auditado en `event_log` con usuario/motivo/fecha); cualquier otro
+combustible usa `OPACIDAD` sin cambio permitido.
+
+- `tests/test_pruebas.py`: 6 pruebas nuevas (default por combustible,
+  bloqueo de cambio inválido, auditoría del cambio dinámica→estática, no
+  se puede iniciar prueba sin pasar por inspección/OBD, no se puede
+  guardar resultado sin haber iniciado la prueba).
+- `tests/test_obd.py`: 3 pruebas nuevas (guards de `solicitar`/`resultado`
+  fuera de estado, camino completo solicitar→resultado).
+
+**Resultado**: 124 pruebas, todas pasan. Commits sobre `etapa1-y-siox`,
+**NO pusheados todavía** (pendiente de confirmación explícita, como
+siempre en este proyecto). Pendiente real que sigue abierto:
+`enviar_uno_a_central` sigue sin integración real (sin cambios).
