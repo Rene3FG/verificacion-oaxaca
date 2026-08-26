@@ -23,9 +23,21 @@ const cargandoVistaPrevia = ref(false);
 const imprimiendo = ref(false);
 const cerrando = ref(false);
 
+// Handoff (confirmado 2026-08-24): un resultado RECHAZADO tiene un único
+// tipo posible y se infiere solo; APROBADO no tiene regla de elegibilidad
+// automática entre estos tres — la selección correcta queda bajo
+// responsabilidad del Operador de Impresión.
+const TIPOS_CERTIFICADO_APROBADO = ["PARTICULAR", "DOBLE_CERO", "INTENSIVO"];
+const tipoCertificadoSeleccionado = ref(null);
+
+const requiereSeleccionManual = computed(
+  () => expediente.value?.resultado_final === "APROBADO"
+);
 const puedeCalcularTipo = computed(
   () =>
-    expediente.value && ESTADOS_SOLICITABLES.includes(expediente.value.estado)
+    expediente.value &&
+    ESTADOS_SOLICITABLES.includes(expediente.value.estado) &&
+    (!requiereSeleccionManual.value || tipoCertificadoSeleccionado.value)
 );
 const puedeSolicitarFolio = computed(
   () =>
@@ -75,7 +87,14 @@ async function calcularTipoCertificado() {
   calculandoTipo.value = true;
   error.value = null;
   try {
-    const { data } = await api.post(`/impresion/tipo-certificado/${expediente.value.id}`);
+    const params = requiereSeleccionManual.value
+      ? { tipo_certificado: tipoCertificadoSeleccionado.value }
+      : {};
+    const { data } = await api.post(
+      `/impresion/tipo-certificado/${expediente.value.id}`,
+      null,
+      { params }
+    );
     expediente.value.certificado_tipo = data.certificado_tipo;
     aviso.value = `Tipo de certificado: ${data.certificado_tipo}`;
   } catch (err) {
@@ -99,13 +118,11 @@ async function solicitarFolio() {
       { params: { tipo_certificado: expediente.value.certificado_tipo } }
     );
     expediente.value.estado = data.estado_expediente;
-    if (data.folio) {
-      expediente.value.folio_externo = data.folio;
-      aviso.value = `Folio asignado: ${data.folio}`;
-    } else {
-      error.value = "El sistema externo de folios no respondió. El expediente quedó en FOLIO_ERROR.";
-    }
+    expediente.value.folio_externo = data.folio;
+    aviso.value = `Folio asignado: ${data.folio}`;
   } catch (err) {
+    // 409 típico: "Sin folio disponible" — el inventario local de ese tipo
+    // se agotó (ver app/services/folio_inventario.py), no un timeout de red.
     error.value = err.response?.data?.detail || "No se pudo solicitar el folio.";
   } finally {
     solicitandoFolio.value = false;
@@ -211,6 +228,15 @@ onMounted(cargarCola);
           <p class="mb-2">
             Tipo: {{ expediente.certificado_tipo ?? "sin determinar" }}
           </p>
+          <v-select
+            v-if="requiereSeleccionManual && !expediente.certificado_tipo"
+            v-model="tipoCertificadoSeleccionado"
+            :items="TIPOS_CERTIFICADO_APROBADO"
+            label="Tipo de certificado (resultado aprobado, selección manual)"
+            density="compact"
+            class="mb-2"
+            style="max-width: 360px"
+          />
           <v-btn
             variant="outlined"
             :disabled="!puedeCalcularTipo"

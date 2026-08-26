@@ -5,8 +5,7 @@ from app.models.catalogos import (
     CatParametroSistema,
 )
 from app.models.event_log import EventLog
-from app.models.folio_assignment import FolioAssignment
-from app.models.folio_request import FolioRequest
+from app.models.folio import Folio, FolioLote
 from app.models.inspeccion_visual import InspeccionVisual
 from app.models.integration_log import IntegrationLog
 from app.models.print_attempt import PrintAttempt
@@ -27,8 +26,8 @@ __all__ = [
     "CatParametroSistema",
     "CatUsuario",
     "EventLog",
-    "FolioAssignment",
-    "FolioRequest",
+    "Folio",
+    "FolioLote",
     "InspeccionVisual",
     "IntegrationLog",
     "PrintAttempt",

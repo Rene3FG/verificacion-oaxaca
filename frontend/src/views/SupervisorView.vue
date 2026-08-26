@@ -221,11 +221,48 @@ async function sincronizarAhora() {
   }
 }
 
+// --- Folios (inventario local, revisión Figma 2026-08-24) ---
+const TIPOS_CERTIFICADO = ["PARTICULAR", "DOBLE_CERO", "INTENSIVO", "RECHAZO"];
+const inventarioFolios = ref([]);
+const cargandoInventario = ref(false);
+const loteForm = reactive({ tipo_certificado: "PARTICULAR", folio_inicio: "", folio_fin: "" });
+const registrandoLote = ref(false);
+
+async function cargarInventarioFolios() {
+  cargandoInventario.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.get("/folios/inventario");
+    inventarioFolios.value = data;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo cargar el inventario de folios.";
+  } finally {
+    cargandoInventario.value = false;
+  }
+}
+
+async function registrarLoteFolios() {
+  registrandoLote.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post("/folios/lotes", null, { params: { ...loteForm } });
+    aviso.value = `${data.cantidad} folio(s) ${data.tipo_certificado} registrados.`;
+    loteForm.folio_inicio = "";
+    loteForm.folio_fin = "";
+    await cargarInventarioFolios();
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo registrar el lote de folios.";
+  } finally {
+    registrandoLote.value = false;
+  }
+}
+
 onMounted(() => {
   cargarMonitor();
   cargarUsuarios();
   cargarPermisos();
   cargarEstadoSync();
+  cargarInventarioFolios();
 });
 </script>
 
@@ -246,6 +283,7 @@ onMounted(() => {
       <v-tab value="monitor">Monitor</v-tab>
       <v-tab value="permisos">Permisos</v-tab>
       <v-tab value="sincronizacion">Sincronización</v-tab>
+      <v-tab value="folios">Folios</v-tab>
     </v-tabs>
 
     <v-window v-model="tab">
@@ -430,6 +468,79 @@ onMounted(() => {
                 exista esa integración.
               </p>
             </template>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+
+      <v-window-item value="folios">
+        <v-card class="mb-4" variant="outlined">
+          <v-card-title class="d-flex align-center ga-2">
+            Inventario local de folios
+            <v-spacer />
+            <v-btn
+              variant="text"
+              icon="mdi-refresh"
+              :loading="cargandoInventario"
+              @click="cargarInventarioFolios"
+            />
+          </v-card-title>
+          <v-card-text>
+            <v-progress-linear v-if="cargandoInventario" indeterminate class="mb-4" />
+            <v-table v-else density="compact">
+              <thead>
+                <tr>
+                  <th>Tipo</th>
+                  <th>Disponibles</th>
+                  <th>Asignados</th>
+                  <th>Impresos</th>
+                  <th>Dañados</th>
+                  <th>Invalidados</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="fila in inventarioFolios" :key="fila.tipo_certificado">
+                  <td>{{ fila.tipo_certificado }}</td>
+                  <td>{{ fila.disponibles }}</td>
+                  <td>{{ fila.asignados }}</td>
+                  <td>{{ fila.impresos }}</td>
+                  <td>{{ fila.danados }}</td>
+                  <td>{{ fila.invalidados }}</td>
+                </tr>
+              </tbody>
+            </v-table>
+          </v-card-text>
+        </v-card>
+
+        <v-card variant="outlined">
+          <v-card-title>Registrar lote por rango</v-card-title>
+          <v-card-text>
+            <v-select
+              v-model="loteForm.tipo_certificado"
+              :items="TIPOS_CERTIFICADO"
+              label="Tipo de certificado"
+              variant="outlined"
+              density="comfortable"
+            />
+            <v-text-field
+              v-model="loteForm.folio_inicio"
+              label="Folio inicial (ej. OAX-000001)"
+              variant="outlined"
+              density="comfortable"
+            />
+            <v-text-field
+              v-model="loteForm.folio_fin"
+              label="Folio final (ej. OAX-000500)"
+              variant="outlined"
+              density="comfortable"
+            />
+            <v-btn
+              color="primary"
+              :loading="registrandoLote"
+              :disabled="!loteForm.folio_inicio || !loteForm.folio_fin"
+              @click="registrarLoteFolios"
+            >
+              Registrar lote
+            </v-btn>
           </v-card-text>
         </v-card>
       </v-window-item>

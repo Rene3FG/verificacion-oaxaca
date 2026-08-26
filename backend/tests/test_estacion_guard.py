@@ -70,9 +70,10 @@ async def test_folios_solicitar_desde_captura_responde_403(client, db_session):
 
 
 async def test_folios_solicitar_desde_impresion_no_es_403(client, db_session):
-    """Confirma que el guard no bloquea a la estación correcta; el sistema
-    externo de folios sigue siendo un stub que responde error, pero eso es
-    un 200 con status de error, no un 403 de permisos."""
+    """Confirma que el guard no bloquea a la estación correcta; sin ningún
+    lote de folios registrado, el inventario local está vacío, así que la
+    respuesta correcta es 409 (sin folio disponible), nunca un 403 de
+    permisos."""
 
     sesion = await _sesion(
         db_session,
@@ -88,10 +89,10 @@ async def test_folios_solicitar_desde_impresion_no_es_403(client, db_session):
 
     resp = await client.post(
         f"/api/folios/solicitar/{expediente.id}",
-        params={"tipo_certificado": "APROBADO"},
+        params={"tipo_certificado": "PARTICULAR"},
         headers={"X-Session-Id": str(sesion.id)},
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 409
 
 
 async def test_inspeccion_desde_captura_responde_403(client, db_session):

@@ -25,7 +25,11 @@ async def _sesion_impresion(db_session, *, allowed_line_ids=None):
     return await crear_sesion_activa(db_session, estacion=estacion)
 
 
-async def test_tipo_certificado_aprobacion(client, db_session):
+async def test_tipo_certificado_aprobado_requiere_seleccion_manual(client, db_session):
+    """Handoff (confirmado 2026-08-24): no hay regla automática de
+    elegibilidad para Particular/Doble Cero/Intensivo; sin que el Operador
+    mande `tipo_certificado`, un aprobado no puede resolverse solo."""
+
     sesion = await _sesion_impresion(db_session)
     expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
@@ -39,11 +43,50 @@ async def test_tipo_certificado_aprobacion(client, db_session):
         headers={"X-Session-Id": str(sesion.id)},
     )
 
+    assert resp.status_code == 422
+
+
+async def test_tipo_certificado_aprobado_con_seleccion_manual(client, db_session):
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
+    )
+    expediente.resultado_final = ResultadoFinal.APROBADO
+    db_session.add(expediente)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/impresion/tipo-certificado/{expediente.id}",
+        params={"tipo_certificado": "INTENSIVO"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
     assert resp.status_code == 200
-    assert resp.json()["certificado_tipo"] == "APROBACION"
+    assert resp.json()["certificado_tipo"] == "INTENSIVO"
 
 
-async def test_tipo_certificado_rechazo_prueba(client, db_session):
+async def test_tipo_certificado_no_permite_rechazo_manual_en_aprobado(client, db_session):
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
+    )
+    expediente.resultado_final = ResultadoFinal.APROBADO
+    db_session.add(expediente)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/impresion/tipo-certificado/{expediente.id}",
+        params={"tipo_certificado": "RECHAZO"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 422
+
+
+async def test_tipo_certificado_rechazo_prueba_se_infiere_solo(client, db_session):
+    """RECHAZO es el único tipo posible en este camino — no requiere
+    selección manual, y una selección manual distinta se ignora."""
+
     sesion = await _sesion_impresion(db_session)
     expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
@@ -58,7 +101,7 @@ async def test_tipo_certificado_rechazo_prueba(client, db_session):
     )
 
     assert resp.status_code == 200
-    assert resp.json()["certificado_tipo"] == "RECHAZO_PRUEBA"
+    assert resp.json()["certificado_tipo"] == "RECHAZO"
 
 
 async def test_tipo_certificado_rechazo_visual_sin_resultado_final(client, db_session):
@@ -85,7 +128,7 @@ async def test_tipo_certificado_rechazo_visual_sin_resultado_final(client, db_se
     )
 
     assert resp.status_code == 200
-    assert resp.json()["certificado_tipo"] == "RECHAZO_VISUAL"
+    assert resp.json()["certificado_tipo"] == "RECHAZO"
 
 
 async def test_tipo_certificado_indeterminado_responde_409(client, db_session):
@@ -103,6 +146,23 @@ async def test_tipo_certificado_indeterminado_responde_409(client, db_session):
     assert resp.status_code == 409
 
 
+async def test_vista_previa_sin_tipo_certificado_responde_409(client, db_session):
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.FOLIO_ASIGNADO
+    )
+    expediente.resultado_final = ResultadoFinal.APROBADO
+    expediente.folio_externo = "F-0001"
+    db_session.add(expediente)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/impresion/vista-previa/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 409
+
+
 async def test_vista_previa_devuelve_pdf(client, db_session):
     sesion = await _sesion_impresion(db_session)
     expediente = await crear_expediente(
@@ -113,6 +173,7 @@ async def test_vista_previa_devuelve_pdf(client, db_session):
     )
     expediente.resultado_final = ResultadoFinal.APROBADO
     expediente.folio_externo = "F-0001"
+    expediente.certificado_tipo = "PARTICULAR"
     db_session.add(expediente)
     await db_session.commit()
 
@@ -125,9 +186,9 @@ async def test_vista_previa_devuelve_pdf(client, db_session):
     assert resp.headers["content-type"] == "application/pdf"
     assert resp.content.startswith(b"%PDF")
 
-    # La vista previa no debe tocar estado ni persistir certificado_tipo.
+    # La vista previa no debe tocar estado ni el certificado_tipo ya fijado.
     await db_session.refresh(expediente)
-    assert expediente.certificado_tipo is None
+    assert expediente.certificado_tipo == "PARTICULAR"
     assert expediente.estado == EstadoVerificacion.FOLIO_ASIGNADO
 
 
@@ -146,6 +207,22 @@ async def test_imprimir_sin_folio_responde_409(client, db_session):
     assert resp.status_code == 409
 
 
+async def test_imprimir_sin_tipo_certificado_responde_409(client, db_session):
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.FOLIO_ASIGNADO
+    )
+    expediente.folio_externo = "F-0001"
+    db_session.add(expediente)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/impresion/imprimir/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 409
+
+
 async def test_imprimir_exitoso_crea_print_job_y_transiciona_a_impreso(client, db_session):
     sesion = await _sesion_impresion(db_session)
     expediente = await crear_expediente(
@@ -153,6 +230,7 @@ async def test_imprimir_exitoso_crea_print_job_y_transiciona_a_impreso(client, d
     )
     expediente.resultado_final = ResultadoFinal.APROBADO
     expediente.folio_externo = "F-0001"
+    expediente.certificado_tipo = "PARTICULAR"
     db_session.add(expediente)
     await db_session.commit()
 
@@ -171,10 +249,10 @@ async def test_imprimir_exitoso_crea_print_job_y_transiciona_a_impreso(client, d
         )
     ).scalars().one()
     assert print_job.estado == EstadoPrintJob.IMPRESO
-    assert print_job.tipo_documento == "APROBACION"
+    assert print_job.tipo_documento == "PARTICULAR"
 
     await db_session.refresh(expediente)
-    assert expediente.certificado_tipo == "APROBACION"
+    assert expediente.certificado_tipo == "PARTICULAR"
 
 
 async def test_reintento_impresion_tras_fallo_no_pide_folio_nuevo(
@@ -190,6 +268,7 @@ async def test_reintento_impresion_tras_fallo_no_pide_folio_nuevo(
     )
     expediente.resultado_final = ResultadoFinal.APROBADO
     expediente.folio_externo = "F-0001"
+    expediente.certificado_tipo = "PARTICULAR"
     db_session.add(expediente)
     await db_session.commit()
 
@@ -268,6 +347,7 @@ async def test_cerrar_expediente_exitoso_tras_imprimir(client, db_session):
     )
     expediente.resultado_final = ResultadoFinal.APROBADO
     expediente.folio_externo = "F-0001"
+    expediente.certificado_tipo = "PARTICULAR"
     db_session.add(expediente)
     await db_session.commit()
 

@@ -70,17 +70,29 @@ class EstadoPrintJob(str, enum.Enum):
     REINTENTO = "REINTENTO"
 
 
-class EstadoFolioRequest(str, enum.Enum):
-    SOLICITADO = "SOLICITADO"
-    ASIGNADO = "ASIGNADO"
-    ERROR = "ERROR"
+class TipoCertificado(str, enum.Enum):
+    """Revisión Figma 2026-08-24: los 4 tipos reales de folio/certificado —
+    reemplaza los nombres inventados (APROBACION/RECHAZO_VISUAL/
+    RECHAZO_PRUEBA) que usaba `app.services.certificado` antes de leer el
+    Developer Handoff a fondo."""
+
+    PARTICULAR = "PARTICULAR"
+    DOBLE_CERO = "DOBLE_CERO"
+    INTENSIVO = "INTENSIVO"
+    RECHAZO = "RECHAZO"
 
 
-class EstadoFolioAssignment(str, enum.Enum):
+class EstadoFolio(str, enum.Enum):
+    """Estado de un folio dentro del inventario LOCAL (ver app.models.folio).
+    Reemplaza el modelo anterior de 'solicitud a sistema externo' —
+    confirmado en el handoff: este sistema es la fuente de verdad del
+    inventario, no hay sincronización con otro sistema."""
+
+    DISPONIBLE = "DISPONIBLE"
     ASIGNADO = "ASIGNADO"
     IMPRESO = "IMPRESO"
-    ANULADO = "ANULADO"
-    ERROR = "ERROR"
+    DANADO = "DANADO"
+    INVALIDADO = "INVALIDADO"
 
 
 class StationType(str, enum.Enum):

@@ -1,18 +1,13 @@
 from sqlalchemy import select
 
-from app.api.routers.folios import get_folios_client
-from app.main import app
-from app.models.enums import (
-    EstadoFolioRequest,
-    EstadoVerificacion,
-    ResultadoFinal,
-    StationType,
+from app.models.enums import EstadoFolio, EstadoVerificacion, ResultadoFinal, StationType
+from app.models.folio import Folio, FolioLote
+from tests.conftest import (
+    crear_estacion,
+    crear_expediente,
+    crear_sesion_activa,
+    crear_sesion_supervisor,
 )
-from app.models.folio_assignment import FolioAssignment
-from app.models.folio_request import FolioRequest
-from app.models.integration_log import IntegrationLog, IntegrationStatus
-from app.services.folios_client import FoliosExternoClient, ModoFolioExterno
-from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa
 
 
 async def _sesion_impresion(db_session, *, allowed_line_ids=None):
@@ -27,39 +22,69 @@ async def _sesion_impresion(db_session, *, allowed_line_ids=None):
     return await crear_sesion_activa(db_session, estacion=estacion)
 
 
-class _ClienteFolioExitoso(FoliosExternoClient):
-    """Doble de prueba: siempre asigna el mismo folio fijo, para poder
-    aserter contra un valor conocido (el modo EXITO real genera folios
-    aleatorios)."""
-
-    def __init__(self, *, folio="F-0001", ref="EXT-1"):
-        super().__init__(modo=ModoFolioExterno.EXITO)
-        self._folio = folio
-        self._ref = ref
-
-    async def consultar(self, payload: dict) -> dict:
-        return {"folio": self._folio, "external_reference_id": self._ref, "status": "asignado"}
-
-
-def _mock_sistema_externo_exitoso(*, folio="F-0001", ref="EXT-1"):
-    """El modo se fija sobrescribiendo la dependencia de FastAPI
-    (`app.dependency_overrides[get_folios_client]`), no con una variable
-    global — el fixture `client` limpia el override al final de cada
-    prueba (ver conftest.py), así que dos pruebas nunca se pisan entre sí."""
-
-    app.dependency_overrides[get_folios_client] = lambda: _ClienteFolioExitoso(
-        folio=folio, ref=ref
+async def _registrar_lote(
+    client, sesion_supervisor, *, tipo_certificado="PARTICULAR", folio_inicio="OAX-000001", folio_fin="OAX-000003"
+):
+    return await client.post(
+        "/api/folios/lotes",
+        params={
+            "tipo_certificado": tipo_certificado,
+            "folio_inicio": folio_inicio,
+            "folio_fin": folio_fin,
+        },
+        headers={"X-Session-Id": str(sesion_supervisor.id)},
     )
 
 
-async def test_reintentar_solicitud_cinco_veces_produce_un_solo_folio(
-    client, db_session
-):
-    """El sistema externo de folios es un stub en este proyecto (no hay
-    integración real definida), pero la idempotencia del lado del sistema
-    de verificación sí debe sostenerse: 5 llamadas a /solicitar con éxito
-    deben producir un único FolioRequest ASIGNADO y una única
-    FolioAssignment, nunca cinco folios distintos."""
+async def test_registrar_lote_crea_folios_disponibles_en_orden(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session)
+
+    resp = await _registrar_lote(client, sesion, folio_inicio="OAX-000010", folio_fin="OAX-000012")
+    assert resp.status_code == 200
+    assert resp.json()["cantidad"] == 3
+
+    folios = (
+        await db_session.execute(select(Folio).order_by(Folio.orden))
+    ).scalars().all()
+    assert [f.folio for f in folios] == ["OAX-000010", "OAX-000011", "OAX-000012"]
+    assert all(f.estatus == EstadoFolio.DISPONIBLE for f in folios)
+
+    lote = (await db_session.execute(select(FolioLote))).scalar_one()
+    assert lote.cantidad == 3
+    assert lote.registrado_por == sesion.user_id
+
+
+async def test_registrar_lote_sin_supervisor_responde_403(client, db_session):
+    estacion = await crear_estacion(db_session, station_type=StationType.IMPRESION)
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+
+    resp = await _registrar_lote(client, sesion)
+    assert resp.status_code == 403
+
+
+async def test_registrar_lote_duplicado_responde_422(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session)
+
+    resp1 = await _registrar_lote(client, sesion, folio_inicio="OAX-000020", folio_fin="OAX-000022")
+    assert resp1.status_code == 200
+
+    resp2 = await _registrar_lote(client, sesion, folio_inicio="OAX-000021", folio_fin="OAX-000023")
+    assert resp2.status_code == 422
+
+
+async def test_registrar_lote_con_rango_invalido_responde_422(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session)
+
+    resp = await _registrar_lote(client, sesion, folio_inicio="OAX-000050", folio_fin="RCH-000060")
+    assert resp.status_code == 422
+
+
+async def test_solicitar_folio_toma_el_siguiente_disponible_del_tipo(client, db_session):
+    sesion_supervisor = await crear_sesion_supervisor(db_session)
+    await _registrar_lote(
+        client, sesion_supervisor, tipo_certificado="PARTICULAR",
+        folio_inicio="OAX-000001", folio_fin="OAX-000003",
+    )
 
     sesion = await _sesion_impresion(db_session)
     expediente = await crear_expediente(
@@ -67,79 +92,93 @@ async def test_reintentar_solicitud_cinco_veces_produce_un_solo_folio(
     )
     await db_session.commit()
 
-    _mock_sistema_externo_exitoso()
+    resp = await client.post(
+        f"/api/folios/solicitar/{expediente.id}",
+        params={"tipo_certificado": "PARTICULAR"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["folio"] == "OAX-000001"
+    assert resp.json()["estado_expediente"] == EstadoVerificacion.FOLIO_ASIGNADO.value
 
+    await db_session.refresh(expediente)
+    assert expediente.folio_externo == "OAX-000001"
+    assert expediente.folio_asignado_at is not None
+
+    folio_asignado = (
+        await db_session.execute(select(Folio).where(Folio.folio == "OAX-000001"))
+    ).scalar_one()
+    assert folio_asignado.estatus == EstadoFolio.ASIGNADO
+    assert folio_asignado.verificacion_id == expediente.id
+
+
+async def test_reintentar_solicitud_cinco_veces_produce_un_solo_folio_asignado(
+    client, db_session
+):
+    """El inventario es local ahora, pero la idempotencia sigue siendo una
+    regla de negocio: reintentar /solicitar no debe tomar un folio nuevo
+    del inventario en cada llamada."""
+
+    sesion_supervisor = await crear_sesion_supervisor(db_session)
+    await _registrar_lote(
+        client, sesion_supervisor, tipo_certificado="PARTICULAR",
+        folio_inicio="OAX-000001", folio_fin="OAX-000005",
+    )
+
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
+    )
+    await db_session.commit()
+
+    folios_recibidos = set()
     for _ in range(5):
         resp = await client.post(
             f"/api/folios/solicitar/{expediente.id}",
-            params={"tipo_certificado": "APROBACION"},
+            params={"tipo_certificado": "PARTICULAR"},
             headers={"X-Session-Id": str(sesion.id)},
         )
         assert resp.status_code == 200
-        body = resp.json()
-        assert body["folio"] == "F-0001"
-        assert body["estado_expediente"] == EstadoVerificacion.FOLIO_ASIGNADO.value
+        folios_recibidos.add(resp.json()["folio"])
 
-    solicitudes = (
+    assert folios_recibidos == {"OAX-000001"}
+
+    asignados = (
         await db_session.execute(
-            select(FolioRequest).where(FolioRequest.verificacion_id == expediente.id)
+            select(Folio).where(Folio.estatus == EstadoFolio.ASIGNADO)
         )
     ).scalars().all()
-    assert len(solicitudes) == 1
-    assert solicitudes[0].status == EstadoFolioRequest.ASIGNADO
-    assert solicitudes[0].request_payload["solicitud_id"] == str(solicitudes[0].id)
-
-    asignaciones = (
-        await db_session.execute(
-            select(FolioAssignment).where(FolioAssignment.verificacion_id == expediente.id)
-        )
-    ).scalars().all()
-    assert len(asignaciones) == 1
-    assert asignaciones[0].folio == "F-0001"
-
-    await db_session.refresh(expediente)
-    assert expediente.folio_externo == "F-0001"
+    assert len(asignados) == 1
 
 
-async def test_solicitud_fallida_no_impide_reintento_posterior_exitoso(
-    client, db_session
-):
-    """Un primer intento con error (el stub por default) no debe dejar el
-    expediente varado: un reintento posterior con éxito sí asigna folio,
-    y solo ese segundo intento queda ASIGNADO."""
+async def test_folio_de_otro_expediente_no_se_reutiliza(client, db_session):
+    sesion_supervisor = await crear_sesion_supervisor(db_session)
+    await _registrar_lote(
+        client, sesion_supervisor, tipo_certificado="PARTICULAR",
+        folio_inicio="OAX-000001", folio_fin="OAX-000002",
+    )
 
     sesion = await _sesion_impresion(db_session)
-    expediente = await crear_expediente(
+    expediente_a = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
+    )
+    expediente_b = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
     )
     await db_session.commit()
 
-    resp_error = await client.post(
-        f"/api/folios/solicitar/{expediente.id}",
-        params={"tipo_certificado": "APROBACION"},
+    resp_a = await client.post(
+        f"/api/folios/solicitar/{expediente_a.id}",
+        params={"tipo_certificado": "PARTICULAR"},
         headers={"X-Session-Id": str(sesion.id)},
     )
-    assert resp_error.status_code == 200
-    assert resp_error.json()["estado_expediente"] == EstadoVerificacion.FOLIO_ERROR.value
-
-    _mock_sistema_externo_exitoso(folio="F-0002")
-
-    resp_ok = await client.post(
-        f"/api/folios/solicitar/{expediente.id}",
-        params={"tipo_certificado": "APROBACION"},
+    resp_b = await client.post(
+        f"/api/folios/solicitar/{expediente_b.id}",
+        params={"tipo_certificado": "PARTICULAR"},
         headers={"X-Session-Id": str(sesion.id)},
     )
-    assert resp_ok.status_code == 200
-    assert resp_ok.json()["folio"] == "F-0002"
-    assert resp_ok.json()["estado_expediente"] == EstadoVerificacion.FOLIO_ASIGNADO.value
-
-    asignaciones = (
-        await db_session.execute(
-            select(FolioAssignment).where(FolioAssignment.verificacion_id == expediente.id)
-        )
-    ).scalars().all()
-    assert len(asignaciones) == 1
-    assert asignaciones[0].folio == "F-0002"
+    assert resp_a.json()["folio"] == "OAX-000001"
+    assert resp_b.json()["folio"] == "OAX-000002"
 
 
 async def test_solicitar_segundo_tipo_con_folio_ya_asignado_responde_409(
@@ -149,16 +188,19 @@ async def test_solicitar_segundo_tipo_con_folio_ya_asignado_responde_409(
     expediente ya está en FOLIO_ASIGNADO (por otro tipo) tiraba un
     TransitionNotAllowed sin manejar (500) en vez de un 409 limpio."""
 
+    sesion_supervisor = await crear_sesion_supervisor(db_session)
+    await _registrar_lote(client, sesion_supervisor, tipo_certificado="PARTICULAR")
+    await _registrar_lote(client, sesion_supervisor, tipo_certificado="RECHAZO", folio_inicio="RCH-000001", folio_fin="RCH-000003")
+
     sesion = await _sesion_impresion(db_session)
     expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
     )
     await db_session.commit()
 
-    _mock_sistema_externo_exitoso(folio="F-APROBACION")
     resp1 = await client.post(
         f"/api/folios/solicitar/{expediente.id}",
-        params={"tipo_certificado": "APROBACION"},
+        params={"tipo_certificado": "PARTICULAR"},
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp1.json()["estado_expediente"] == EstadoVerificacion.FOLIO_ASIGNADO.value
@@ -171,80 +213,10 @@ async def test_solicitar_segundo_tipo_con_folio_ya_asignado_responde_409(
     assert resp2.status_code == 409
 
 
-async def test_folio_de_otro_expediente_no_se_reutiliza(client, db_session):
-    """La deduplicación de HU-066/HU-071 filtra por verificacion_id Y
-    tipo_certificado: dos expedientes distintos pidiendo el mismo tipo de
-    certificado nunca deben compartir folio ni FolioRequest."""
-
-    sesion = await _sesion_impresion(db_session)
-    expediente_a = await crear_expediente(
-        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
-    )
-    expediente_b = await crear_expediente(
-        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
-    )
-    await db_session.commit()
-
-    _mock_sistema_externo_exitoso(folio="F-A")
-    resp_a = await client.post(
-        f"/api/folios/solicitar/{expediente_a.id}",
-        params={"tipo_certificado": "APROBACION"},
-        headers={"X-Session-Id": str(sesion.id)},
-    )
-    assert resp_a.json()["folio"] == "F-A"
-
-    _mock_sistema_externo_exitoso(folio="F-B")
-    resp_b = await client.post(
-        f"/api/folios/solicitar/{expediente_b.id}",
-        params={"tipo_certificado": "APROBACION"},
-        headers={"X-Session-Id": str(sesion.id)},
-    )
-    assert resp_b.json()["folio"] == "F-B"
-
-    asignaciones = (
-        await db_session.execute(
-            select(FolioAssignment).where(
-                FolioAssignment.verificacion_id.in_([expediente_a.id, expediente_b.id])
-            )
-        )
-    ).scalars().all()
-    assert {a.verificacion_id: a.folio for a in asignaciones} == {
-        expediente_a.id: "F-A",
-        expediente_b.id: "F-B",
-    }
-
-
-async def test_solicitar_folio_con_exito_asigna_y_pasa_a_folio_asignado(client, db_session):
-    sesion = await _sesion_impresion(db_session)
-    expediente = await crear_expediente(
-        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
-    )
-    await db_session.commit()
-
-    _mock_sistema_externo_exitoso(folio="F-9001")
-
-    resp = await client.post(
-        f"/api/folios/solicitar/{expediente.id}",
-        params={"tipo_certificado": "APROBACION"},
-        headers={"X-Session-Id": str(sesion.id)},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["folio"] == "F-9001"
-    assert resp.json()["estado_expediente"] == EstadoVerificacion.FOLIO_ASIGNADO.value
-
-    await db_session.refresh(expediente)
-    assert expediente.folio_externo == "F-9001"
-    assert expediente.folio_asignado_at is not None
-
-
-async def test_folio_con_formato_invalido_bloquea_impresion_y_registra_error(
-    client, db_session
-):
-    """El sistema externo puede responder 'asignado' con un folio que no
-    cumple el formato esperado — no basta con mirar `status`, hay que
-    validar el folio mismo. El expediente debe quedar en FOLIO_ERROR (no
-    FOLIO_ASIGNADO), sin folio_externo, y con el error visible en
-    integration_logs; imprimir debe seguir bloqueado."""
+async def test_sin_folio_disponible_deja_expediente_en_folio_error(client, db_session):
+    """Handoff: 'Sin folio disponible' significa que la lista local de ese
+    tipo se agotó — no un timeout ni error de red. Sin ningún lote
+    registrado, el inventario de INTENSIVO está vacío desde el inicio."""
 
     sesion = await _sesion_impresion(db_session)
     expediente = await crear_expediente(
@@ -252,100 +224,89 @@ async def test_folio_con_formato_invalido_bloquea_impresion_y_registra_error(
     )
     await db_session.commit()
 
-    app.dependency_overrides[get_folios_client] = lambda: FoliosExternoClient(
-        modo=ModoFolioExterno.FOLIO_INVALIDO
-    )
-
     resp = await client.post(
         f"/api/folios/solicitar/{expediente.id}",
-        params={"tipo_certificado": "APROBACION"},
+        params={"tipo_certificado": "INTENSIVO"},
         headers={"X-Session-Id": str(sesion.id)},
     )
-    assert resp.status_code == 200
-    assert resp.json()["folio"] is None
-    assert resp.json()["estado_expediente"] == EstadoVerificacion.FOLIO_ERROR.value
+    assert resp.status_code == 409
+    assert "Sin folio disponible" in resp.json()["detail"]
 
     await db_session.refresh(expediente)
+    assert expediente.estado == EstadoVerificacion.FOLIO_ERROR
     assert expediente.folio_externo is None
 
-    logs = (
-        await db_session.execute(
-            select(IntegrationLog).where(IntegrationLog.verificacion_id == expediente.id)
-        )
-    ).scalars().all()
-    assert len(logs) == 1
-    assert logs[0].status == IntegrationStatus.ERROR
-    assert "formato inválido" in logs[0].error_message
 
-    resp_imprimir = await client.post(
-        f"/api/impresion/imprimir/{expediente.id}",
-        headers={"X-Session-Id": str(sesion.id)},
-    )
-    assert resp_imprimir.status_code == 409
-
-
-async def test_folio_timeout_y_duplicado_dejan_expediente_en_folio_error(client, db_session):
-    """Timeout y folio duplicado son modos distintos del error genérico,
-    pero ambos deben resolver igual desde la perspectiva del expediente:
-    FOLIO_ERROR, reintentable, con el motivo correcto en el log."""
-
+async def test_reintento_tras_folio_error_toma_folio_cuando_ya_hay_inventario(
+    client, db_session
+):
+    sesion_supervisor = await crear_sesion_supervisor(db_session)
     sesion = await _sesion_impresion(db_session)
-
-    expediente_timeout = await crear_expediente(
-        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
-    )
-    expediente_duplicado = await crear_expediente(
+    expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
     )
     await db_session.commit()
 
-    app.dependency_overrides[get_folios_client] = lambda: FoliosExternoClient(
-        modo=ModoFolioExterno.TIMEOUT
-    )
-    resp_timeout = await client.post(
-        f"/api/folios/solicitar/{expediente_timeout.id}",
-        params={"tipo_certificado": "APROBACION"},
+    resp_error = await client.post(
+        f"/api/folios/solicitar/{expediente.id}",
+        params={"tipo_certificado": "DOBLE_CERO"},
         headers={"X-Session-Id": str(sesion.id)},
     )
-    assert resp_timeout.status_code == 200
-    assert resp_timeout.json()["estado_expediente"] == EstadoVerificacion.FOLIO_ERROR.value
+    assert resp_error.status_code == 409
 
-    log_timeout = (
-        await db_session.execute(
-            select(IntegrationLog).where(
-                IntegrationLog.verificacion_id == expediente_timeout.id
-            )
-        )
-    ).scalar_one()
-    assert "no respondió a tiempo" in log_timeout.error_message
-
-    app.dependency_overrides[get_folios_client] = lambda: FoliosExternoClient(
-        modo=ModoFolioExterno.FOLIO_DUPLICADO
+    await _registrar_lote(
+        client, sesion_supervisor, tipo_certificado="DOBLE_CERO",
+        folio_inicio="DBC-000001", folio_fin="DBC-000001",
     )
-    resp_dup = await client.post(
-        f"/api/folios/solicitar/{expediente_duplicado.id}",
-        params={"tipo_certificado": "APROBACION"},
+
+    resp_ok = await client.post(
+        f"/api/folios/solicitar/{expediente.id}",
+        params={"tipo_certificado": "DOBLE_CERO"},
         headers={"X-Session-Id": str(sesion.id)},
     )
-    assert resp_dup.status_code == 200
-    assert resp_dup.json()["estado_expediente"] == EstadoVerificacion.FOLIO_ERROR.value
+    assert resp_ok.status_code == 200
+    assert resp_ok.json()["folio"] == "DBC-000001"
+    assert resp_ok.json()["estado_expediente"] == EstadoVerificacion.FOLIO_ASIGNADO.value
 
-    log_dup = (
-        await db_session.execute(
-            select(IntegrationLog).where(
-                IntegrationLog.verificacion_id == expediente_duplicado.id
-            )
-        )
-    ).scalar_one()
-    assert "duplicado" in log_dup.error_message
+
+async def test_inventario_folios_resume_conteos_por_tipo_y_estatus(client, db_session):
+    sesion_supervisor = await crear_sesion_supervisor(db_session)
+    await _registrar_lote(
+        client, sesion_supervisor, tipo_certificado="PARTICULAR",
+        folio_inicio="OAX-000001", folio_fin="OAX-000003",
+    )
+
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
+    )
+    await db_session.commit()
+    await client.post(
+        f"/api/folios/solicitar/{expediente.id}",
+        params={"tipo_certificado": "PARTICULAR"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    resp = await client.get(
+        "/api/folios/inventario", headers={"X-Session-Id": str(sesion_supervisor.id)}
+    )
+    assert resp.status_code == 200
+    resumen = {fila["tipo_certificado"]: fila for fila in resp.json()}
+    assert resumen["PARTICULAR"]["disponibles"] == 2
+    assert resumen["PARTICULAR"]["asignados"] == 1
+    assert resumen["RECHAZO"]["disponibles"] == 0
 
 
 async def test_expediente_completo_llega_a_cerrado(client, db_session):
-    """Camino feliz de punta a punta pasando por el endpoint real de
-    solicitud de folio (no por estado inyectado directo en la fixture,
-    que es lo que hacían las pruebas de impresión hasta ahora): folio
-    exitoso → imprimir → cerrar. Antes de este cambio, ningún expediente
-    llegaba a CERRADO habiendo pasado de verdad por /folios/solicitar."""
+    """Camino feliz de punta a punta: alta de lote, tipo de certificado
+    manual (aprobado), solicitud de folio real del inventario local,
+    imprimir, cerrar."""
+
+    sesion_supervisor = await crear_sesion_supervisor(db_session)
+    await _registrar_lote(
+        client, sesion_supervisor, tipo_certificado="PARTICULAR",
+        folio_inicio="OAX-000001", folio_fin="OAX-000001",
+    )
 
     sesion = await _sesion_impresion(db_session)
     expediente = await crear_expediente(
@@ -355,18 +316,17 @@ async def test_expediente_completo_llega_a_cerrado(client, db_session):
     db_session.add(expediente)
     await db_session.commit()
 
-    _mock_sistema_externo_exitoso(folio="F-CIERRE")
-
     resp_certificado = await client.post(
         f"/api/impresion/tipo-certificado/{expediente.id}",
+        params={"tipo_certificado": "PARTICULAR"},
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp_certificado.status_code == 200
-    tipo_certificado = resp_certificado.json()["certificado_tipo"]
+    assert resp_certificado.json()["certificado_tipo"] == "PARTICULAR"
 
     resp_folio = await client.post(
         f"/api/folios/solicitar/{expediente.id}",
-        params={"tipo_certificado": tipo_certificado},
+        params={"tipo_certificado": "PARTICULAR"},
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp_folio.status_code == 200

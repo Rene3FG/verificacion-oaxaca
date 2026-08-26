@@ -1,40 +1,38 @@
 """HU-061/HU-062: determinación del tipo de certificado y generación del
 documento con WeasyPrint.
 
-El documento de diseño del proyecto que definiría estas reglas y el
-contenido exacto del certificado no está en este repo (referenciado desde
-`app/seed.py` pero nunca incluido). Las reglas de abajo son una propuesta
-razonable a partir de lo que el modelo de datos ya distingue
-(resultado_final / InspeccionVisual.resultado) — a confirmar o corregir
-contra el diseño real cuando esté disponible."""
+Regla vigente ('Developer Handoff — Approved Certificate Printing Rules',
+confirmada en la revisión del Figma 2026-08-24): un resultado RECHAZADO
+(por prueba o por inspección visual) es la única parte que se infiere sola
+— un solo tipo posible, RECHAZO. Un resultado APROBADO no tiene regla de
+elegibilidad automática entre Particular/Doble Cero/Intensivo todavía; la
+selección correcta queda bajo responsabilidad del Operador de Impresión."""
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from weasyprint import HTML
 
-from app.models.enums import ResultadoFinal, ResultadoInspeccionVisual
+from app.models.enums import ResultadoFinal, ResultadoInspeccionVisual, TipoCertificado
 from app.models.inspeccion_visual import InspeccionVisual
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
-
-CERTIFICADO_APROBACION = "APROBACION"
-CERTIFICADO_RECHAZO_VISUAL = "RECHAZO_VISUAL"
-CERTIFICADO_RECHAZO_PRUEBA = "RECHAZO_PRUEBA"
 
 
 class TipoCertificadoIndeterminado(Exception):
     pass
 
 
-async def determinar_tipo_certificado(db: AsyncSession, verificacion: Verificacion) -> str:
-    """Regla propuesta: resultado_final manda si existe (viene de Prueba);
-    si es None, el expediente solo pudo llegar a Impresión por la vía de
-    rechazo en Inspección Visual (regla de negocio #3, salta Prueba)."""
+class TipoCertificadoRequiereSeleccionManual(Exception):
+    pass
 
-    if verificacion.resultado_final == ResultadoFinal.APROBADO:
-        return CERTIFICADO_APROBACION
+
+async def determinar_tipo_certificado(
+    db: AsyncSession,
+    verificacion: Verificacion,
+    tipo_certificado_manual: TipoCertificado | None = None,
+) -> TipoCertificado:
     if verificacion.resultado_final == ResultadoFinal.RECHAZADO:
-        return CERTIFICADO_RECHAZO_PRUEBA
+        return TipoCertificado.RECHAZO
 
     inspeccion = (
         await db.execute(
@@ -44,7 +42,18 @@ async def determinar_tipo_certificado(db: AsyncSession, verificacion: Verificaci
         )
     ).scalars().first()
     if inspeccion is not None and inspeccion.resultado == ResultadoInspeccionVisual.RECHAZADA:
-        return CERTIFICADO_RECHAZO_VISUAL
+        return TipoCertificado.RECHAZO
+
+    if verificacion.resultado_final == ResultadoFinal.APROBADO:
+        if tipo_certificado_manual is None:
+            raise TipoCertificadoRequiereSeleccionManual(
+                "Resultado aprobado: seleccione manualmente Particular, Doble Cero o Intensivo."
+            )
+        if tipo_certificado_manual == TipoCertificado.RECHAZO:
+            raise TipoCertificadoRequiereSeleccionManual(
+                "No se puede asignar el tipo RECHAZO a un expediente aprobado."
+            )
+        return tipo_certificado_manual
 
     raise TipoCertificadoIndeterminado(
         f"No se pudo determinar el tipo de certificado para el expediente {verificacion.id}"
@@ -55,7 +64,9 @@ def generar_pdf_certificado(
     verificacion: Verificacion, vehiculo: Vehiculo, tipo_certificado: str
 ) -> bytes:
     """Contenido mínimo de trazabilidad — no es el layout final del
-    certificado oficial (eso también depende del documento de diseño)."""
+    certificado oficial ('Certificate Result Projection Contract v1' en el
+    Figma define el contrato completo de sobreimpresión, pendiente de
+    implementar)."""
 
     html = f"""
     <html>

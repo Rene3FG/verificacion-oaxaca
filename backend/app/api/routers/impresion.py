@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
-from app.models.enums import EstadoPrintJob, EstadoVerificacion, StationType
+from app.models.enums import EstadoPrintJob, EstadoVerificacion, StationType, TipoCertificado
 from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
 from app.models.vehiculo import Vehiculo
@@ -16,6 +16,7 @@ from app.schemas.verificacion import ExpedienteCompleto
 from app.services import state_machine
 from app.services.certificado import (
     TipoCertificadoIndeterminado,
+    TipoCertificadoRequiereSeleccionManual,
     determinar_tipo_certificado,
     generar_pdf_certificado,
 )
@@ -80,22 +81,28 @@ async def _obtener_expediente_y_vehiculo(
 @router.post("/tipo-certificado/{expediente_id}")
 async def calcular_tipo_certificado(
     expediente_id: uuid.UUID,
+    tipo_certificado: TipoCertificado | None = None,
     session: SessionContext = Depends(requiere_estacion(StationType.IMPRESION)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """HU-061: determina certificado_tipo por reglas (ver
-    app.services.certificado) y lo persiste en el expediente."""
+    """HU-061: determina certificado_tipo (ver app.services.certificado) y
+    lo persiste en el expediente. Un resultado RECHAZADO se infiere solo;
+    uno APROBADO requiere que el Operador mande `tipo_certificado`
+    (Particular/Doble Cero/Intensivo) — no hay regla de elegibilidad
+    automática todavía (Developer Handoff, confirmado 2026-08-24)."""
 
     verificacion, _ = await _obtener_expediente_y_vehiculo(db, session, expediente_id)
     try:
-        tipo = await determinar_tipo_certificado(db, verificacion)
+        tipo = await determinar_tipo_certificado(db, verificacion, tipo_certificado)
+    except TipoCertificadoRequiereSeleccionManual as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except TipoCertificadoIndeterminado as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    verificacion.certificado_tipo = tipo
+    verificacion.certificado_tipo = tipo.value
     db.add(verificacion)
     await db.commit()
-    return {"certificado_tipo": tipo}
+    return {"certificado_tipo": tipo.value}
 
 
 @router.get("/vista-previa/{expediente_id}")
@@ -105,17 +112,18 @@ async def vista_previa_certificado(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """HU-062: genera el PDF y lo devuelve para previsualizar, sin tocar
-    estado ni crear un PrintJob — no es la impresión definitiva."""
+    estado ni crear un PrintJob — no es la impresión definitiva. Requiere
+    que `certificado_tipo` ya se haya calculado/seleccionado antes (ya no
+    se infiere aquí: un aprobado no tiene un único tipo posible)."""
 
     verificacion, vehiculo = await _obtener_expediente_y_vehiculo(db, session, expediente_id)
-    tipo = verificacion.certificado_tipo
-    if tipo is None:
-        try:
-            tipo = await determinar_tipo_certificado(db, verificacion)
-        except TipoCertificadoIndeterminado as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if verificacion.certificado_tipo is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Primero debe calcularse/seleccionarse el tipo de certificado.",
+        )
 
-    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, tipo)
+    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, verificacion.certificado_tipo)
     return Response(content=pdf_bytes, media_type="application/pdf")
 
 
@@ -157,10 +165,10 @@ async def imprimir_certificado(
         )
 
     if verificacion.certificado_tipo is None:
-        try:
-            verificacion.certificado_tipo = await determinar_tipo_certificado(db, verificacion)
-        except TipoCertificadoIndeterminado as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail="Primero debe calcularse/seleccionarse el tipo de certificado.",
+        )
 
     print_job = (
         await db.execute(

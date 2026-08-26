@@ -568,3 +568,110 @@ combustible usa `OPACIDAD` sin cambio permitido.
 **NO pusheados todavía** (pendiente de confirmación explícita, como
 siempre en este proyecto). Pendiente real que sigue abierto:
 `enviar_uno_a_central` sigue sin integración real (sin cambios).
+
+## Inventario local de folios (2026-08-25) — corrige el hallazgo #1 del Figma
+
+La revisión del Figma del 2026-08-24 (`~/Descargas/Revision_Figma_Verificentros_
+Oaxaca_2026-08-24.pdf`) encontró que `folios_client.py`/`certificado.py`
+construidos ese mismo día simulaban un sistema externo de folios que no
+existe en el diseño real: el handoff dice explícitamente que este backend
+ES la fuente de verdad del inventario, con 4 tipos de certificado
+(PARTICULAR/DOBLE_CERO/INTENSIVO/RECHAZO, no los 3 nombres inventados que
+usaba `certificado.py`). Esta sesión implementa los puntos 1 y 2 del orden
+sugerido en esa revisión (sección 14): inventario local + selección manual
+de tipo de certificado. Puntos 3-5 (split de `CERRADO`, campos de
+propietario/domicilio/PBV/Tracción, checklist real de inspección visual)
+siguen pendientes — ver "Pendiente real" al final de esta sección.
+
+- **`app/models/folio.py`** (nuevo, reemplaza `folio_request.py`/
+  `folio_assignment.py`, eliminados): `FolioLote` (alta masiva por rango —
+  el usuario eligió rango sobre archivo, ya que el handoff deja el método
+  sin definir) y `Folio` (una fila por folio físico, `estatus` en
+  DISPONIBLE/ASIGNADO/IMPRESO/DANADO/INVALIDADO). `Folio.orden` es una
+  `IDENTITY` de Postgres — asignar "el siguiente folio disponible" es
+  tomar el de menor `orden` con `estatus=DISPONIBLE` vía `FOR UPDATE SKIP
+  LOCKED` (`app/services/folio_inventario.py::asignar_siguiente_folio`),
+  así dos asignaciones concurrentes del mismo tipo nunca chocan.
+- **`POST /api/folios/lotes`** (`requiere_supervisor`): registra un rango
+  (`folio_inicio`..`folio_fin`, deben compartir prefijo y terminar en un
+  número) como folios DISPONIBLE. El handoff pide que sea el "Superadmin"
+  quien registre folios, pero ese rol de plataforma (separado de
+  Supervisor por-verificentro) no existe en este sistema todavía — el
+  usuario, preguntado explícitamente, eligió `requiere_supervisor` como
+  aproximación temporal. Si se construye un Superadmin global más
+  adelante, este endpoint es el primer candidato a migrarle el guard.
+- **`GET /api/folios/inventario`** (`requiere_supervisor`): conteo por
+  tipo/estatus, consumido por la pestaña "Folios" de `SupervisorView.vue`.
+- **`POST /api/folios/solicitar/{id}`**: ya no llama a un cliente externo
+  simulado — toma atómicamente el siguiente folio local del tipo pedido.
+  Sin conservar la idempotencia de antes (reintentar reutiliza cualquier
+  folio ya ASIGNADO/IMPRESO del mismo tipo para ese expediente). Sin
+  inventario del tipo, 409 "Sin folio disponible... registre un nuevo
+  lote" — verificado en vivo que es exactamente el mensaje que exige el
+  handoff (no un timeout de red). Las transiciones de estado
+  (PENDIENTE_IMPRESION/FOLIO_ERROR → FOLIO_SOLICITADO → FOLIO_ASIGNADO/
+  FOLIO_ERROR) no cambiaron — se conservó el `state_machine.py` existente
+  a propósito, solo cambió qué pasa *entre* esas transiciones.
+- **`app/services/certificado.py`**: `determinar_tipo_certificado` ahora
+  distingue lo confirmado en el handoff — RECHAZADO (por prueba o por
+  inspección visual) es el único caso que se infiere solo (un solo tipo
+  posible); un resultado APROBADO exige que el Operador de Impresión mande
+  `tipo_certificado` (Particular/Doble Cero/Intensivo) porque no hay regla
+  de elegibilidad automática todavía. `POST /impresion/tipo-certificado/
+  {id}` devuelve 422 (`TipoCertificadoRequiereSeleccionManual`) si un
+  aprobado no manda el parámetro, o si alguien intenta mandar RECHAZO en
+  un aprobado. `vista-previa`/`imprimir` ya NO infieren el tipo por su
+  cuenta (antes tenían un fallback a `determinar_tipo_certificado` sin
+  selección manual) — ahora exigen que `certificado_tipo` ya esté fijado,
+  409 si no.
+- **Frontend**: `ImpresionView.vue` muestra un `v-select` con los 3 tipos
+  aprobados solo cuando `resultado_final === "APROBADO"` (nunca para
+  RECHAZO, que se sigue infiriendo solo); `SupervisorView.vue` tiene una
+  pestaña nueva "Folios" con el resumen de inventario y el formulario de
+  alta de lote por rango.
+- **Migración** `5519017f44f2`: dropea `folio_requests`/`folio_assignments`
+  (y sus tipos ENUM de Postgres) y crea `folio_lotes`/`folios`.
+- Probado end-to-end contra el backend real con Chrome (no solo pytest):
+  login como `supervisor1`, alta de lote `OAX-000001..5` PARTICULAR desde
+  la pestaña Folios, login como `operador1` en la estación de Impresión
+  simulada (`VITE_DEVICE_IDENTIFIER=IMPRESION-REFORMA-01`), selección
+  manual PARTICULAR para el expediente diésel aprobado de `seed_demo`
+  (`MKD-674-D`) → folio real `OAX-000001` asignado → imprimir → cerrar;
+  y el camino RECHAZO de `RSC-238-F` (se infiere solo, sin selector) contra
+  un inventario RECHAZO vacío → 409 "Sin folio disponible" correcto. Ambos
+  expedientes de `seed_demo` se restauraron a mano a `PENDIENTE_IMPRESION`
+  (sin `certificado_tipo`/`folio_externo`/`cerrado_at`) y se borraron las
+  filas de `event_log`/`sync_outbox` que generó la prueba manual, mismo
+  cuidado documentado en la sesión del 2026-08-18 (la BD de dev es la
+  misma que usa `pytest`). 132 pruebas, todas pasan.
+- Commits sobre `etapa1-y-siox`, **NO pusheados todavía** (pendiente de
+  confirmación explícita).
+
+**Pendiente real (puntos 3-5 del orden sugerido, sin tocar en esta
+sesión)** — ver el PDF de la revisión del Figma para el detalle exacto de
+cada uno:
+1. Dividir `EstadoVerificacion.CERRADO` en `CERRADO_APROBADO`/
+   `CERRADO_RECHAZADO`, más `PENDIENTE_DE_IMPRESION_RECHAZO` como estado
+   propio del camino de rechazo.
+2. El modelo de reimpresión completo del handoff (sección 3): folio
+   DAÑADO antes de imprimir (el operador lo marca, sin motivo, no cuenta
+   como reimpresión), corrección de tipo ANTES de imprimir (libera el
+   folio viejo a DISPONIBLE), corrección de tipo o reimpresión DESPUÉS de
+   imprimir (exclusiva de Supervisor, sin motivo obligatorio en corrección
+   de tipo, con motivo en reimpresión por daño; el folio usado pasa a
+   INVALIDADO, se conserva Hora Salida). El modelo `Folio` ya tiene los
+   campos (`danado_at`, `invalidado_at`, `reemplazado_por_folio_id`) pero
+   ningún endpoint los usa todavía.
+3. `Certificate Result Projection Contract v1` (sección 4 del PDF):
+   sobreimpresión con `projection_version`/`layout_version` por tipo de
+   prueba, fuente única `resultado_prueba.normalized_payload` — hoy
+   `generar_pdf_certificado` es un HTML mínimo de trazabilidad, no el
+   contrato real.
+4. Semestre y prórroga del certificado (concepto de negocio nuevo, sin
+   representación en el backend — ver sección 5 del PDF).
+5. Campos de propietario/domicilio y `PBV`/`Tracción` en `Vehiculo`
+   (regla #5 del handoff, lista exacta de campos permitidos en la sección
+   7 del PDF).
+6. Checklist real de inspección visual (8 puntos específicos con
+   Bueno/Malo/No aplica, sección 8 del PDF) — hoy sigue siendo el
+   checklist de 8 puntos inventado en la sesión del 2026-08-14.
