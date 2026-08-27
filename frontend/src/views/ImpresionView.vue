@@ -46,6 +46,14 @@ const puedeCerrar = computed(
     !expediente.value.cerrado_at
 );
 
+function formatearFecha(iso) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString("es-MX", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
 async function cargarCola() {
   cargandoLista.value = true;
   error.value = null;
@@ -206,6 +214,48 @@ onMounted(cargarCola);
       </v-alert>
 
       <v-card class="mb-4" variant="outlined">
+        <v-card-title>Datos del expediente</v-card-title>
+        <v-card-text>
+          <v-row dense>
+            <v-col cols="12" sm="6" md="4">
+              <span class="text-caption text-medium-emphasis d-block">NIV</span>
+              <span>{{ expediente.vehiculo?.niv ?? "—" }}</span>
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <span class="text-caption text-medium-emphasis d-block">Marca / Línea</span>
+              <span>
+                {{ expediente.vehiculo?.marca ?? "—" }}
+                {{ expediente.vehiculo?.linea ?? "" }}
+              </span>
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <span class="text-caption text-medium-emphasis d-block">Tipo de vehículo</span>
+              <span>{{ expediente.vehiculo?.tipo_vehiculo ?? "—" }}</span>
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <span class="text-caption text-medium-emphasis d-block">Razón social</span>
+              <span>{{ expediente.vehiculo?.razon_social ?? "—" }}</span>
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <span class="text-caption text-medium-emphasis d-block">Centro / Línea de origen</span>
+              <span>{{ expediente.centro_id }} · Línea {{ expediente.linea_id }}</span>
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <span class="text-caption text-medium-emphasis d-block">Resultado final</span>
+              <span>{{ expediente.resultado_final ?? "—" }}</span>
+            </v-col>
+          </v-row>
+          <p class="text-caption text-medium-emphasis mt-3 mb-0">
+            El diseño (Figma) también pide domicilio, municipio, tarjeta de
+            circulación, peso bruto vehicular y tracción — esos campos no
+            existen todavía en el backend (pendiente #5 que René levantó tras
+            revisar el Figma), así que no se muestran aquí hasta que se
+            capturen en algún punto anterior del flujo.
+          </p>
+        </v-card-text>
+      </v-card>
+
+      <v-card class="mb-4" variant="outlined">
         <v-card-title>Certificado</v-card-title>
         <v-card-text>
           <p class="mb-2">
@@ -232,9 +282,15 @@ onMounted(cargarCola);
       </v-card>
 
       <v-card class="mb-4" variant="outlined">
-        <v-card-title>Folio externo</v-card-title>
+        <v-card-title>Folio</v-card-title>
         <v-card-text>
-          <p class="mb-2">Folio: {{ expediente.folio_externo ?? "sin asignar" }}</p>
+          <p class="mb-1">Folio: {{ expediente.folio_externo ?? "sin asignar" }}</p>
+          <p v-if="expediente.folio_asignado_at" class="text-caption text-medium-emphasis mb-2">
+            Asignado el {{ formatearFecha(expediente.folio_asignado_at) }}
+          </p>
+          <p v-else-if="solicitandoFolio" class="text-caption text-medium-emphasis mb-2">
+            Asignando siguiente folio disponible…
+          </p>
           <v-btn
             color="primary"
             :disabled="!puedeSolicitarFolio"
@@ -263,6 +319,9 @@ onMounted(cargarCola);
       <v-card variant="outlined">
         <v-card-title>Cierre</v-card-title>
         <v-card-text>
+          <p v-if="expediente.cerrado_at" class="text-caption text-medium-emphasis mb-2">
+            Cerrado el {{ formatearFecha(expediente.cerrado_at) }}
+          </p>
           <v-btn
             color="success"
             :disabled="!puedeCerrar"
