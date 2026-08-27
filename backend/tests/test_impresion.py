@@ -362,10 +362,40 @@ async def test_cerrar_expediente_exitoso_tras_imprimir(client, db_session):
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp_cerrar.status_code == 200
-    assert resp_cerrar.json()["estado_expediente"] == EstadoVerificacion.CERRADO.value
+    assert resp_cerrar.json()["estado_expediente"] == EstadoVerificacion.CERRADO_APROBADO.value
 
     resp_doble_cierre = await client.post(
         f"/api/impresion/cerrar/{expediente.id}",
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp_doble_cierre.status_code == 409
+
+
+async def test_cerrar_expediente_con_certificado_rechazo_llega_a_cerrado_rechazado(
+    client, db_session
+):
+    """Revisión Figma 2026-08-24, sección 14 punto 3: el cierre de un
+    certificado_tipo RECHAZO va a CERRADO_RECHAZADO, no CERRADO_APROBADO."""
+
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.FOLIO_ASIGNADO
+    )
+    expediente.resultado_final = ResultadoFinal.RECHAZADO
+    expediente.folio_externo = "F-0002"
+    expediente.certificado_tipo = "RECHAZO"
+    db_session.add(expediente)
+    await db_session.commit()
+
+    resp_imprimir = await client.post(
+        f"/api/impresion/imprimir/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp_imprimir.json()["estado_expediente"] == EstadoVerificacion.IMPRESO.value
+
+    resp_cerrar = await client.post(
+        f"/api/impresion/cerrar/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp_cerrar.status_code == 200
+    assert resp_cerrar.json()["estado_expediente"] == EstadoVerificacion.CERRADO_RECHAZADO.value

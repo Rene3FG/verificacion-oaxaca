@@ -19,6 +19,7 @@ router = APIRouter(prefix="/api/folios", tags=["folios"])
 # tiraba un TransitionNotAllowed sin manejar (500); ahora es un 409 claro.
 ESTADOS_SOLICITABLES = {
     EstadoVerificacion.PENDIENTE_IMPRESION,
+    EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO,
     EstadoVerificacion.FOLIO_ERROR,
 }
 

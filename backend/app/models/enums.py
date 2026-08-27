@@ -19,10 +19,17 @@ class EstadoVerificacion(str, enum.Enum):
     PRUEBA_EN_PROCESO = "PRUEBA_EN_PROCESO"
     PRUEBA_FINALIZADA = "PRUEBA_FINALIZADA"
     PENDIENTE_IMPRESION = "PENDIENTE_IMPRESION"
+    # Revisión Figma 2026-08-24, sección 14 punto 3: el camino de rechazo
+    # (inspección visual o prueba) tiene su propio estado de cola de
+    # impresión, distinto del de un expediente aprobado.
+    PENDIENTE_DE_IMPRESION_RECHAZO = "PENDIENTE_DE_IMPRESION_RECHAZO"
     FOLIO_SOLICITADO = "FOLIO_SOLICITADO"
     FOLIO_ASIGNADO = "FOLIO_ASIGNADO"
     IMPRESO = "IMPRESO"
-    CERRADO = "CERRADO"
+    # Reemplaza el CERRADO único: mismo hallazgo del Figma, un cierre
+    # necesita distinguir si el certificado fue de aprobación o de rechazo.
+    CERRADO_APROBADO = "CERRADO_APROBADO"
+    CERRADO_RECHAZADO = "CERRADO_RECHAZADO"
     ERROR_INTEGRACION = "ERROR_INTEGRACION"
     IMPRESION_FALLIDA = "IMPRESION_FALLIDA"
     FOLIO_ERROR = "FOLIO_ERROR"

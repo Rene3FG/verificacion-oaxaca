@@ -344,4 +344,4 @@ async def test_expediente_completo_llega_a_cerrado(client, db_session):
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp_cerrar.status_code == 200
-    assert resp_cerrar.json()["estado_expediente"] == EstadoVerificacion.CERRADO.value
+    assert resp_cerrar.json()["estado_expediente"] == EstadoVerificacion.CERRADO_APROBADO.value

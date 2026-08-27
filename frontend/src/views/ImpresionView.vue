@@ -6,7 +6,11 @@ import { useSessionStore } from "../stores/session";
 
 const session = useSessionStore();
 
-const ESTADOS_SOLICITABLES = ["PENDIENTE_IMPRESION", "FOLIO_ERROR"];
+const ESTADOS_SOLICITABLES = [
+  "PENDIENTE_IMPRESION",
+  "PENDIENTE_DE_IMPRESION_RECHAZO",
+  "FOLIO_ERROR",
+];
 const ESTADOS_IMPRIMIBLES = ["FOLIO_ASIGNADO", "IMPRESION_FALLIDA"];
 
 const expedientes = ref([]);

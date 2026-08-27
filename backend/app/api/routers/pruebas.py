@@ -244,7 +244,9 @@ async def guardar_resultado_prueba(
     await state_machine.transition(
         db,
         verificacion,
-        EstadoVerificacion.PENDIENTE_IMPRESION,
+        EstadoVerificacion.PENDIENTE_IMPRESION
+        if verificacion.resultado_final == ResultadoFinal.APROBADO
+        else EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO,
         usuario_id=session.user_id,
         modulo="prueba",
         evento="enviado_a_impresion",

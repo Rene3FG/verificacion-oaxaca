@@ -649,10 +649,10 @@ siguen pendientes — ver "Pendiente real" al final de esta sección.
 
 **Pendiente real (puntos 3-5 del orden sugerido, sin tocar en esta
 sesión)** — ver el PDF de la revisión del Figma para el detalle exacto de
-cada uno:
-1. Dividir `EstadoVerificacion.CERRADO` en `CERRADO_APROBADO`/
+cada uno. **Punto 1 resuelto el 2026-08-26, ver sección más abajo.**
+1. ~~Dividir `EstadoVerificacion.CERRADO` en `CERRADO_APROBADO`/
    `CERRADO_RECHAZADO`, más `PENDIENTE_DE_IMPRESION_RECHAZO` como estado
-   propio del camino de rechazo.
+   propio del camino de rechazo.~~
 2. El modelo de reimpresión completo del handoff (sección 3): folio
    DAÑADO antes de imprimir (el operador lo marca, sin motivo, no cuenta
    como reimpresión), corrección de tipo ANTES de imprimir (libera el
@@ -675,3 +675,83 @@ cada uno:
 6. Checklist real de inspección visual (8 puntos específicos con
    Bueno/Malo/No aplica, sección 8 del PDF) — hoy sigue siendo el
    checklist de 8 puntos inventado en la sesión del 2026-08-14.
+
+## Split de CERRADO en APROBADO/RECHAZADO (2026-08-26) — punto 1 del orden sugerido
+
+Implementa el punto 1 pendiente de la sección "Orden de trabajo sugerido"
+de la revisión del Figma (2026-08-24, sección 14): `EstadoVerificacion`
+ya no tiene un `CERRADO` único — se reemplaza por `CERRADO_APROBADO`/
+`CERRADO_RECHAZADO`, y el camino de rechazo (inspección visual o prueba)
+usa su propia cola `PENDIENTE_DE_IMPRESION_RECHAZO` en vez de compartir
+`PENDIENTE_IMPRESION` con el aprobado.
+
+- **`app/models/enums.py`**: `EstadoVerificacion.CERRADO` eliminado,
+  agregados `CERRADO_APROBADO`, `CERRADO_RECHAZADO`,
+  `PENDIENTE_DE_IMPRESION_RECHAZO`.
+- **`app/services/state_machine.py`**: `TERMINAL_STATES` ahora incluye
+  ambos cierres; `INSPECCION_VISUAL_RECHAZADA` transiciona a
+  `PENDIENTE_DE_IMPRESION_RECHAZO` (antes `PENDIENTE_IMPRESION`);
+  `PRUEBA_FINALIZADA` puede ir a cualquiera de las dos colas según el
+  resultado; `IMPRESO` transiciona a cualquiera de los dos cierres.
+- **`app/api/routers/pruebas.py`** (`guardar_resultado`): la cola destino
+  tras `PRUEBA_FINALIZADA` ahora depende de `resultado_final`
+  (APROBADO → `PENDIENTE_IMPRESION`, RECHAZADO →
+  `PENDIENTE_DE_IMPRESION_RECHAZO`) — antes ambos casos compartían
+  `PENDIENTE_IMPRESION` sin distinción.
+- **`app/api/routers/inspeccion.py`**: el rechazo visual (regla de negocio
+  #3, salta directo a impresión) ahora entra a
+  `PENDIENTE_DE_IMPRESION_RECHAZO`.
+- **`app/api/routers/impresion.py`**: `cola_impresion` incluye
+  `PENDIENTE_DE_IMPRESION_RECHAZO`; `cerrar_expediente` decide el estado
+  de cierre según `certificado_tipo` — `RECHAZO` → `CERRADO_RECHAZADO`,
+  cualquier otro (`PARTICULAR`/`DOBLE_CERO`/`INTENSIVO`) →
+  `CERRADO_APROBADO`. Reusa el mismo dato que ya distingue la cola de
+  impresión, no agrega una fuente nueva de verdad.
+- **`app/api/routers/folios.py`**: `ESTADOS_SOLICITABLES` incluye
+  `PENDIENTE_DE_IMPRESION_RECHAZO` — solicitar folio de un certificado de
+  rechazo ya no depende de que comparta estado con el aprobado.
+- **`app/api/routers/supervision.py`**: `ESTADOS_TERMINALES` (excluidos
+  del monitor en vivo) ahora son los dos cierres + `CANCELADO`.
+- **Migración `c6386724bf52`**: recrea el tipo ENUM `estado_verificacion`
+  completo (mismo patrón de reemplazo total que la migración de folios del
+  2026-08-25, no `ALTER TYPE ... ADD VALUE` con valores huérfanos) —
+  `verificaciones.estado` y `event_log.estado_anterior`/`estado_nuevo`
+  (ambas columnas usan el mismo tipo) se migran con un `USING` que reparte
+  las filas `CERRADO` existentes por `certificado_tipo`
+  (`RECHAZO` → `CERRADO_RECHAZADO`, cualquier otro → `CERRADO_APROBADO`);
+  en `event_log` (bitácora, no estado autoritativo) el mapeo es siempre a
+  `CERRADO_APROBADO` por simplicidad. `downgrade()` revierte ambos pasos.
+  Ningún expediente estaba en `CERRADO` al aplicar la migración en esta
+  base de dev, así que el mapeo no se ejerció con datos reales — solo
+  probado por lectura del SQL generado.
+- **`app/seed_demo.py`**: `RSC-238-F` (rechazado en inspección visual)
+  nace en `PENDIENTE_DE_IMPRESION_RECHAZO`, no `PENDIENTE_IMPRESION`. La
+  fila ya sembrada en la base de dev de sesiones anteriores no se
+  actualiza sola (el seed es idempotente, `_existe()` se salta placas ya
+  creadas) — se corrigió a mano por SQL directo para que el dato de demo
+  siga coincidiendo con el seed actualizado.
+- **Frontend**: `ImpresionView.vue` agrega
+  `PENDIENTE_DE_IMPRESION_RECHAZO` a `ESTADOS_SOLICITABLES` (habilita
+  "Calcular tipo de certificado"/"Solicitar folio" también desde la cola
+  de rechazo). `ExpedienteHeader.vue`/`SupervisorView.vue`: se quitó la
+  comparación exacta `estado === "CERRADO"` en `colorEstado` — ya no
+  existe ese valor, y `CERRADO_APROBADO`/`CERRADO_RECHAZADO` ya caían
+  correctamente en las ramas `includes("APROBAD")`/`includes("RECHAZAD")`
+  existentes, así que el chip se sigue coloreando bien sin ese caso.
+- **Pruebas nuevas**: `tests/test_pruebas.py::test_guardar_resultado_rechazado_va_a_cola_de_rechazo`
+  (rechazo por prueba, no solo por inspección, también va a la cola
+  propia) y `tests/test_impresion.py::test_cerrar_expediente_con_certificado_rechazo_llega_a_cerrado_rechazado`.
+  4 pruebas existentes actualizadas (`test_inspeccion.py`,
+  `test_impresion.py`, `test_folios.py`, `test_supervision.py`) que
+  esperaban el `CERRADO`/`PENDIENTE_IMPRESION` únicos de antes. **134
+  pruebas, todas pasan.** Build de frontend (`npm run build`) limpio.
+- Verificado contra la base de dev real (no solo pytest): migración
+  aplicada sin la base de datos corriendo pytest en paralelo, conteo de
+  `estado` por fila antes/después, y la corrección manual de `RSC-238-F`
+  confirmada por `SELECT` directo.
+- Commit pendiente de crear y de confirmación explícita de push, como
+  siempre en este proyecto.
+- Pendiente real: puntos 2, 3 y 4-6 de la lista de arriba siguen sin
+  tocar (modelo de reimpresión completo, `Certificate Result Projection
+  Contract v1`, semestre/prórroga, propietario/domicilio/PBV/Tracción,
+  checklist real de inspección visual).

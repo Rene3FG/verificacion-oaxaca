@@ -54,6 +54,7 @@ async def cola_impresion(
         Verificacion.estado.in_(
             [
                 EstadoVerificacion.PENDIENTE_IMPRESION,
+                EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO,
                 EstadoVerificacion.FOLIO_SOLICITADO,
                 EstadoVerificacion.FOLIO_ASIGNADO,
                 EstadoVerificacion.IMPRESION_FALLIDA,
@@ -137,10 +138,11 @@ async def imprimir_certificado(
     certificado definitivo. Regla #9: la impresión consulta el expediente
     directamente en BD, el operador no captura datos críticos a mano.
 
-    FOLIO_ASIGNADO, IMPRESO y CERRADO son estados distintos (HU-072 a
-    HU-079): esta operación solo llega hasta IMPRESO (o IMPRESION_FALLIDA
-    si la impresora falla). Cerrar el expediente es un paso aparte, ver
-    /cerrar. Reintentar desde IMPRESION_FALLIDA no vuelve a pedir folio."""
+    FOLIO_ASIGNADO, IMPRESO y CERRADO_APROBADO/CERRADO_RECHAZADO son estados
+    distintos (HU-072 a HU-079): esta operación solo llega hasta IMPRESO (o
+    IMPRESION_FALLIDA si la impresora falla). Cerrar el expediente es un
+    paso aparte, ver /cerrar. Reintentar desde IMPRESION_FALLIDA no vuelve
+    a pedir folio."""
 
     verificacion, vehiculo = await _obtener_expediente_y_vehiculo(db, session, expediente_id)
     if verificacion.folio_externo is None:
@@ -279,10 +281,20 @@ async def cerrar_expediente(
             detail=f"No se puede cerrar el expediente: {'; '.join(incumplidas)}.",
         )
 
+    # certificado_tipo ya es obligatorio para llegar hasta aquí (ver
+    # _condiciones_de_cierre_incumplidas) y RECHAZO es el único tipo posible
+    # para un expediente rechazado (app.services.certificado) — mismo dato
+    # que ya distingue la cola de impresión (PENDIENTE_IMPRESION vs
+    # PENDIENTE_DE_IMPRESION_RECHAZO), reusado aquí para el cierre.
+    nuevo_estado = (
+        EstadoVerificacion.CERRADO_RECHAZADO
+        if verificacion.certificado_tipo == TipoCertificado.RECHAZO.value
+        else EstadoVerificacion.CERRADO_APROBADO
+    )
     await state_machine.transition(
         db,
         verificacion,
-        EstadoVerificacion.CERRADO,
+        nuevo_estado,
         usuario_id=session.user_id,
         modulo="impresion",
         evento="expediente_cerrado",

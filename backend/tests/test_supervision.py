@@ -40,7 +40,10 @@ async def test_monitor_excluye_cerrados_y_cancelados(client, db_session):
         db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.CREADO
     )
     await crear_expediente(
-        db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.CERRADO
+        db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.CERRADO_APROBADO
+    )
+    await crear_expediente(
+        db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.CERRADO_RECHAZADO
     )
     await crear_expediente(
         db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.CANCELADO

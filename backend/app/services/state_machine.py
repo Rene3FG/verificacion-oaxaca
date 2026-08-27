@@ -22,7 +22,7 @@ from app.models.event_log import EventLog
 from app.models.verificacion import Verificacion
 from app.services.sync import registrar_evento_con_sync
 
-TERMINAL_STATES = {E.CERRADO, E.CANCELADO}
+TERMINAL_STATES = {E.CERRADO_APROBADO, E.CERRADO_RECHAZADO, E.CANCELADO}
 
 ERROR_STATES = {E.ERROR_INTEGRACION, E.IMPRESION_FALLIDA, E.FOLIO_ERROR}
 
@@ -61,7 +61,9 @@ ALLOWED_TRANSITIONS: dict[E, set[E]] = {
     },
     # Regla de negocio #3: rechazo visual salta OBD y prueba, va directo a
     # impresión (certificado de rechazo, que también consume folio externo).
-    E.INSPECCION_VISUAL_RECHAZADA: {E.PENDIENTE_IMPRESION},
+    # Cola propia (PENDIENTE_DE_IMPRESION_RECHAZO) desde el hallazgo #4 del
+    # Figma 2026-08-24 — antes compartía PENDIENTE_IMPRESION con el aprobado.
+    E.INSPECCION_VISUAL_RECHAZADA: {E.PENDIENTE_DE_IMPRESION_RECHAZO},
     E.INSPECCION_VISUAL_APROBADA: {E.OBD_NO_APLICA, E.OBD_PENDIENTE},
     E.OBD_NO_APLICA: {E.LISTO_PARA_PRUEBA},
     E.OBD_PENDIENTE: {E.OBD_SOLICITADO},
@@ -70,11 +72,16 @@ ALLOWED_TRANSITIONS: dict[E, set[E]] = {
     E.LISTO_PARA_PRUEBA: {E.PRUEBA_CONFIGURADA},
     E.PRUEBA_CONFIGURADA: {E.PRUEBA_EN_PROCESO},
     E.PRUEBA_EN_PROCESO: {E.PRUEBA_FINALIZADA},
-    E.PRUEBA_FINALIZADA: {E.PENDIENTE_IMPRESION},
+    # El resultado de la prueba decide la cola: APROBADO -> PENDIENTE_IMPRESION,
+    # RECHAZADO -> PENDIENTE_DE_IMPRESION_RECHAZO (ver pruebas.guardar_resultado).
+    E.PRUEBA_FINALIZADA: {E.PENDIENTE_IMPRESION, E.PENDIENTE_DE_IMPRESION_RECHAZO},
     E.PENDIENTE_IMPRESION: {E.FOLIO_SOLICITADO},
+    E.PENDIENTE_DE_IMPRESION_RECHAZO: {E.FOLIO_SOLICITADO},
     E.FOLIO_SOLICITADO: {E.FOLIO_ASIGNADO, E.FOLIO_ERROR},
     E.FOLIO_ASIGNADO: {E.IMPRESO, E.IMPRESION_FALLIDA},
-    E.IMPRESO: {E.CERRADO},
+    # Split del CERRADO único: el cierre distingue aprobado/rechazado (ver
+    # impresion.cerrar_expediente, que decide cuál según certificado_tipo).
+    E.IMPRESO: {E.CERRADO_APROBADO, E.CERRADO_RECHAZADO},
     # Reintentos desde estados de error: vuelven al paso que falló.
     E.ERROR_INTEGRACION: {
         E.DATOS_SIOX_CONSULTADOS,
@@ -117,7 +124,7 @@ async def transition(
     verificacion.estado = nuevo_estado
     db.add(verificacion)
 
-    if nuevo_estado == E.CERRADO:
+    if nuevo_estado in (E.CERRADO_APROBADO, E.CERRADO_RECHAZADO):
         verificacion.cerrado_at = datetime.datetime.now(datetime.timezone.utc)
 
     # Etapa 12: cada transición encola su evento (append-only, ya con id

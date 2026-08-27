@@ -26,9 +26,10 @@ async def test_inspeccion_aprobada_transiciona_a_visual_aprobada(client, db_sess
     assert expediente.estado == EstadoVerificacion.INSPECCION_VISUAL_APROBADA
 
 
-async def test_inspeccion_rechazada_salta_a_pendiente_impresion(client, db_session):
-    """Regla de negocio #3: rechazo visual salta OBD y prueba dinámica,
-    va directo a impresión para emitir certificado de rechazo."""
+async def test_inspeccion_rechazada_salta_a_pendiente_impresion_rechazo(client, db_session):
+    """Regla de negocio #3: rechazo visual salta OBD y prueba dinámica, va
+    directo a la cola propia de impresión de rechazo (revisión Figma
+    2026-08-24, sección 14 punto 3 — antes compartía cola con el aprobado)."""
 
     sesion = await _sesion_prueba(db_session)
     expediente = await crear_expediente(
@@ -47,7 +48,7 @@ async def test_inspeccion_rechazada_salta_a_pendiente_impresion(client, db_sessi
     )
     assert resp.status_code == 200
     await db_session.refresh(expediente)
-    assert expediente.estado == EstadoVerificacion.PENDIENTE_IMPRESION
+    assert expediente.estado == EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO
 
 
 async def test_inspeccion_desde_estacion_captura_responde_403(client, db_session):

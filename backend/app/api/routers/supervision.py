@@ -14,9 +14,14 @@ from app.schemas.verificacion import ExpedienteCompleto
 
 router = APIRouter(prefix="/api/supervision", tags=["supervision"])
 
-# Un expediente CERRADO/CANCELADO ya no es "piso" — no aparece en el
-# monitor en vivo, aunque su bitácora siga consultable por separado.
-ESTADOS_TERMINALES = {EstadoVerificacion.CERRADO, EstadoVerificacion.CANCELADO}
+# Un expediente CERRADO_APROBADO/CERRADO_RECHAZADO/CANCELADO ya no es
+# "piso" — no aparece en el monitor en vivo, aunque su bitácora siga
+# consultable por separado.
+ESTADOS_TERMINALES = {
+    EstadoVerificacion.CERRADO_APROBADO,
+    EstadoVerificacion.CERRADO_RECHAZADO,
+    EstadoVerificacion.CANCELADO,
+}
 
 
 @router.get("/monitor", response_model=list[ExpedienteCompleto])

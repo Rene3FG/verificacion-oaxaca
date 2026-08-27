@@ -244,7 +244,7 @@ async def seed_demo() -> None:
                 vehiculo=vehiculo,
                 linea_id=1,
                 operador_id=TEST_USER_ID,
-                estado=EstadoVerificacion.PENDIENTE_IMPRESION,
+                estado=EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO,
                 combustible_validado="gasolina",
             )
             await _siox_consulta_exitosa(db, verificacion, vehiculo)

@@ -57,11 +57,12 @@ async def registrar_inspeccion(
     )
 
     if nuevo_estado == EstadoVerificacion.INSPECCION_VISUAL_RECHAZADA:
-        # Regla de negocio #3: rechazo salta directo a Impresión Central.
+        # Regla de negocio #3: rechazo salta directo a Impresión Central,
+        # a su propia cola (PENDIENTE_DE_IMPRESION_RECHAZO).
         await state_machine.transition(
             db,
             verificacion,
-            EstadoVerificacion.PENDIENTE_IMPRESION,
+            EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO,
             usuario_id=session.user_id,
             modulo="visual",
             evento="rechazo_enviado_a_impresion",

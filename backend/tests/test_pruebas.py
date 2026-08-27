@@ -57,6 +57,35 @@ async def test_guardar_resultado_con_combustible_validado_ok(client, db_session)
     assert resp.json()["estado_expediente"] == EstadoVerificacion.PENDIENTE_IMPRESION.value
 
 
+async def test_guardar_resultado_rechazado_va_a_cola_de_rechazo(client, db_session):
+    """Revisión Figma 2026-08-24, sección 14 punto 3: un rechazo por prueba
+    (no solo por inspección visual) también va a su propia cola
+    PENDIENTE_DE_IMPRESION_RECHAZO, distinta de la de un aprobado."""
+
+    sesion = await _sesion_prueba(db_session)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="GASOLINA",
+    )
+    expediente.tipo_prueba_final = TipoPrueba.DINAMICA
+    db_session.add(expediente)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/resultado/{expediente.id}",
+        json={"resultado": "RECHAZADO", "valores_medidos_json": {}},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    assert (
+        resp.json()["estado_expediente"]
+        == EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO.value
+    )
+
+
 async def test_configurar_gasolina_propone_dinamica_por_defecto(client, db_session):
     sesion = await _sesion_prueba(db_session)
     expediente = await crear_expediente(
