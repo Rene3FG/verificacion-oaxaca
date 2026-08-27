@@ -109,6 +109,11 @@ async function solicitarFolio() {
     expediente.value.estado = data.estado_expediente;
     if (data.folio) {
       expediente.value.folio_externo = data.folio;
+      // El endpoint no devuelve folio_asignado_at (solo folio/status/estado);
+      // el backend lo fija a "ahora" al momento de asignar, así que lo
+      // aproximamos aquí mismo para no tener que recargar el expediente
+      // solo para ver el timestamp.
+      expediente.value.folio_asignado_at = new Date().toISOString();
       aviso.value = `Folio asignado: ${data.folio}`;
     } else {
       error.value = "El sistema externo de folios no respondió. El expediente quedó en FOLIO_ERROR.";
@@ -160,6 +165,10 @@ async function cerrarExpediente() {
   try {
     const { data } = await api.post(`/impresion/cerrar/${expediente.value.id}`);
     expediente.value.estado = data.estado_expediente;
+    // Igual que folio_asignado_at: el endpoint no devuelve cerrado_at, se
+    // aproxima aquí para mostrarlo en el brevísimo momento antes de volver
+    // a la cola (ver setTimeout abajo).
+    expediente.value.cerrado_at = new Date().toISOString();
     aviso.value = "Expediente cerrado.";
     setTimeout(cerrarDetalle, 1200);
   } catch (err) {
