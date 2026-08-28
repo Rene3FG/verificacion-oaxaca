@@ -17,6 +17,7 @@ __all__ = [
     "assert_linea_permitida",
     "requiere_estacion",
     "requiere_supervisor",
+    "es_supervisor",
 ]
 
 
@@ -86,6 +87,23 @@ def requiere_estacion(*tipos: StationType):
     return checker
 
 
+async def es_supervisor(session: SessionContext, db: AsyncSession) -> bool:
+    """Variante que no lanza 403 — para endpoints donde el requisito de
+    supervisor depende de una condición que solo se conoce a mitad del
+    handler (p.ej. reimpresión.py: el primer clic en Imprimir lo puede
+    hacer cualquier operador de Impresión, pero un reintento técnico
+    posterior exige Supervisor). `requiere_supervisor` reusa esta misma
+    consulta cuando el requisito es incondicional."""
+
+    permiso = await db.execute(
+        select(UserStationPermission).where(
+            UserStationPermission.user_id == session.user_id,
+            UserStationPermission.can_supervise.is_(True),
+        )
+    )
+    return permiso.scalars().first() is not None
+
+
 async def requiere_supervisor(
     session: SessionContext = Depends(get_current_session),
     db: AsyncSession = Depends(get_db),
@@ -96,13 +114,7 @@ async def requiere_supervisor(
     con rol de supervisor. Se valida contra UserStationPermission.can_supervise
     del usuario de la sesión, sin importar en qué estación física inició."""
 
-    permiso = await db.execute(
-        select(UserStationPermission).where(
-            UserStationPermission.user_id == session.user_id,
-            UserStationPermission.can_supervise.is_(True),
-        )
-    )
-    if permiso.scalars().first() is None:
+    if not await es_supervisor(session, db):
         raise HTTPException(
             status_code=403, detail="Esta operación requiere permiso de supervisor."
         )

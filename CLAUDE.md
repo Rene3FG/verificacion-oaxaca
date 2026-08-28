@@ -755,3 +755,126 @@ usa su propia cola `PENDIENTE_DE_IMPRESION_RECHAZO` en vez de compartir
   tocar (modelo de reimpresión completo, `Certificate Result Projection
   Contract v1`, semestre/prórroga, propietario/domicilio/PBV/Tracción,
   checklist real de inspección visual).
+
+## Modelo de reimpresión completo (2026-08-27) — punto 2 del orden sugerido
+
+Implementa el punto 2 pendiente de la sección "Orden de trabajo sugerido"
+de la revisión del Figma (sección 3 del PDF, "Folios e impresión — modelo
+completo de reimpresión y cierre"). Backend completo; **frontend
+pendiente** — ver "Pendiente real" al final de esta sección.
+
+Aprovecha campos que el modelo `Folio` ya tenía sin cablear
+(`danado_at`, `motivo_danado`, `invalidado_at`, `motivo_invalidacion`,
+`reemplazado_por_folio_id`) — no hizo falta migración nueva. También cerró
+un hueco preexistente: nada ponía nunca `Folio.estatus = IMPRESO` tras un
+`/imprimir` exitoso (el inventario se quedaba en ASIGNADO para siempre);
+`impresion._imprimir_y_registrar` ahora lo hace, tolerando el caso de
+fixtures antiguas que asignan `folio_externo` como string suelto sin fila
+real de `Folio` (no rompe con `folio is None`).
+
+**"Hora Salida" del handoff no es una columna nueva**: es
+`PrintJob.created_at`. El `PrintJob` se crea una sola vez, en el primer
+clic en Imprimir, *antes* de generar el PDF y llamar a la impresora
+(mismo orden que pedía el handoff); todo intento posterior —reintento
+técnico, reimpresión por daño, corrección de tipo— reusa esa misma fila en
+vez de crear una nueva, así que `created_at` nunca se vuelve a tocar sin
+necesidad de un campo dedicado.
+
+- **Folio dañado ANTES de imprimir** (`POST
+  /api/impresion/folio/marcar-danado/{id}`, `requiere_estacion(IMPRESION)`,
+  sin Supervisor ni motivo — no cuenta como reimpresión): solo desde
+  `FOLIO_ASIGNADO` con el folio actual en estatus `ASIGNADO`. Marca el
+  folio actual `DANADO` y toma atómicamente el siguiente folio disponible
+  del mismo tipo (`asignar_siguiente_folio`, ya existente). Si el
+  inventario de ese tipo también está agotado, el expediente cae a
+  `FOLIO_ERROR` (transición nueva: `FOLIO_ASIGNADO → FOLIO_ERROR` en
+  `state_machine.ALLOWED_TRANSITIONS`) — mismo estado que una solicitud de
+  folio sin inventario, reintentable desde `/folios/solicitar` en cuanto
+  haya un lote nuevo.
+- **Corrección de tipo ANTES de imprimir**: el endpoint existente `POST
+  /api/impresion/tipo-certificado/{id}` ahora cubre dos casos según el
+  estado. En `PENDIENTE_IMPRESION`/`PENDIENTE_DE_IMPRESION_RECHAZO`/
+  `FOLIO_ERROR` sigue siendo la selección inicial (sin cambios). En
+  `FOLIO_ASIGNADO` con un tipo distinto al ya fijado, es la corrección
+  "antes de imprimir": libera el folio previo a `DISPONIBLE` (no
+  `DANADO`, no cuenta como reimpresión) y asigna atómicamente el
+  siguiente folio del tipo nuevo. Si el tipo nuevo no tiene folio
+  disponible, la operación completa se aborta sin tocar nada (ni el folio
+  viejo ni `certificado_tipo`) — no hay `db.commit()` intermedio, así que
+  el rollback implícito de `get_db` al propagar el 409 basta (mismo
+  patrón que ya usaba `folios.solicitar` para sus 409). Llamar este
+  endpoint con el expediente ya en `IMPRESO`/`CERRADO_*` ahora es 409
+  (antes no había ningún guard de estado en el backend, solo el frontend
+  deshabilitaba el botón) — la corrección posterior a imprimir es una
+  operación distinta, ver abajo.
+- **Reintento técnico posterior al primer Imprimir → exclusivo de
+  Supervisor**: `POST /api/impresion/imprimir/{id}` seguía abierto a
+  cualquier operador de Impresión incluso para reintentar desde
+  `IMPRESION_FALLIDA`. Ahora, si el expediente está en `IMPRESION_FALLIDA`
+  (ya hubo un clic y la impresora falló), el endpoint exige
+  `can_supervise=True` (`app.api.deps.es_supervisor`, variante no
+  bloqueante de `requiere_supervisor` que solo lanza 403 si el llamador la
+  invoca) — el primer clic sigue sin necesitar Supervisor.
+- **Reimpresión por certificado físico dañado** (`POST
+  /api/impresion/folio/reimprimir-por-dano/{id}`, `requiere_supervisor`,
+  `motivo: str` obligatorio en el body): solo desde `IMPRESO` o ya
+  `CERRADO_APROBADO`/`CERRADO_RECHAZADO` (`ESTADOS_CON_CERTIFICADO_IMPRESO`
+  — deliberadamente excluye `IMPRESION_FALLIDA`, donde nunca se imprimió
+  nada físico y el camino correcto es el reintento técnico de arriba).
+  Marca el folio actual `DANADO` con el motivo, toma el siguiente folio
+  disponible del mismo tipo, y reimprime de inmediato (PDF + impresora +
+  `PrintAttempt`, vía el helper compartido `_imprimir_y_registrar`) — el
+  folio nuevo pasa a `IMPRESO` si la reimpresión física tiene éxito. El
+  estado del expediente **no cambia** (ni siquiera si ya estaba
+  `CERRADO_*`): es una operación de datos, no una transición de la máquina
+  de estados. Si la reimpresión física falla, el folio nuevo se queda en
+  `ASIGNADO` y una llamada posterior al mismo endpoint (mismo Supervisor,
+  motivo ya no obligatorio) reintenta el envío físico sin volver a canjear
+  folio — el endpoint distingue el caso por el estatus del folio actual
+  (`IMPRESO` = primera reimpresión, `ASIGNADO` = reintento del envío ya
+  autorizado).
+- **Corrección de tipo DESPUÉS de imprimir** (`POST
+  /api/impresion/tipo-certificado-post-impresion/{id}`,
+  `requiere_supervisor`, sin motivo obligatorio — "la propia acción de
+  corrección identifica la causa", cita del handoff): mismo gate de
+  estado que la reimpresión por daño. El folio usado pasa a `INVALIDADO`
+  (no `DANADO` — el papel no estaba defectuoso), se asigna un folio nuevo
+  del tipo correcto y se reimprime con el mismo helper compartido.
+  `RECHAZO` sigue sin admitir corrección manual en ningún sentido (ni
+  como tipo nuevo, ni como tipo anterior a corregir) — se infiere solo,
+  igual que en la selección inicial.
+- **`_folio_actual(db, verificacion)`**: helper que resuelve la fila de
+  `Folio` que corresponde al `folio_externo` vigente del expediente —
+  nunca ambiguo, porque cada reemplazo actualiza `folio_externo` al string
+  del folio nuevo, así que el string viejo deja de matchear la fila que
+  reemplazó.
+- Cadena de reemplazo trazable end-to-end vía
+  `Folio.reemplazado_por_folio_id` en los tres casos (folio dañado antes
+  de imprimir, reimpresión por daño, corrección de tipo post-impresión).
+- **16 pruebas nuevas** en `tests/test_reimpresion.py` (folio dañado con y
+  sin reemplazo disponible, corrección de tipo antes de imprimir con
+  rollback implícito cuando no hay folio nuevo, guard de estado en el
+  endpoint de "antes" una vez impreso, reimpresión por daño con y sin
+  Supervisor/motivo, reimpresión funcionando con expediente ya
+  `CERRADO_APROBADO`, corrección de tipo post-impresión incluyendo el
+  bloqueo de RECHAZO y de "mismo tipo", y que `Folio.estatus` llega a
+  `IMPRESO` tras un `/imprimir` exitoso). Más 2 pruebas actualizadas en
+  `tests/test_impresion.py` para la nueva regla de Supervisor en el
+  reintento técnico (una ajustada a usar sesión de supervisor, una nueva
+  para el 403 sin supervisor). **151 pruebas, todas pasan.** No se probó
+  contra Chrome en esta sesión — commit pendiente de crear y de
+  confirmación explícita de push, como siempre en este proyecto.
+
+**Pendiente real:**
+1. **Frontend**: nada de esto tiene UI todavía. Hace falta en
+   `ImpresionView.vue` (botón "Marcar folio dañado" en `FOLIO_ASIGNADO`,
+   habilitar corrección de tipo también en ese estado) y en
+   `SupervisorView.vue` o una vista de detalle de expediente accesible a
+   Supervisor (reimpresión por daño con motivo, corrección de tipo
+   post-impresión) — ninguna pantalla de Supervisor hoy permite abrir un
+   expediente específico fuera del monitor/bitácora existentes, así que
+   probablemente hace falta un punto de entrada nuevo (buscar por
+   placa/folio) antes de poder construir los diálogos.
+2. Puntos 3-6 de la lista original (`Certificate Result Projection
+   Contract v1`, semestre/prórroga, propietario/domicilio/PBV/Tracción,
+   checklist real de inspección visual) siguen sin tocar.

@@ -78,7 +78,12 @@ ALLOWED_TRANSITIONS: dict[E, set[E]] = {
     E.PENDIENTE_IMPRESION: {E.FOLIO_SOLICITADO},
     E.PENDIENTE_DE_IMPRESION_RECHAZO: {E.FOLIO_SOLICITADO},
     E.FOLIO_SOLICITADO: {E.FOLIO_ASIGNADO, E.FOLIO_ERROR},
-    E.FOLIO_ASIGNADO: {E.IMPRESO, E.IMPRESION_FALLIDA},
+    # FOLIO_ERROR: sección 3 del handoff — marcar el folio asignado como
+    # DAÑADO antes de imprimir intenta tomar el siguiente folio disponible
+    # del mismo tipo; si el inventario de ese tipo también está agotado, el
+    # expediente cae al mismo estado de error que una solicitud sin folio
+    # (ver impresion.marcar_folio_danado).
+    E.FOLIO_ASIGNADO: {E.IMPRESO, E.IMPRESION_FALLIDA, E.FOLIO_ERROR},
     # Split del CERRADO único: el cierre distingue aprobado/rechazado (ver
     # impresion.cerrar_expediente, que decide cuál según certificado_tipo).
     E.IMPRESO: {E.CERRADO_APROBADO, E.CERRADO_RECHAZADO},

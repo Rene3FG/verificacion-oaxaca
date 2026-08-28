@@ -2,12 +2,22 @@ import datetime
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
-from app.models.enums import EstadoPrintJob, EstadoVerificacion, StationType, TipoCertificado
+from app.api.deps import (
+    SessionContext,
+    assert_linea_permitida,
+    es_supervisor,
+    get_db,
+    requiere_estacion,
+    requiere_supervisor,
+)
+from app.models.enums import EstadoFolio, EstadoPrintJob, EstadoVerificacion, StationType, TipoCertificado
+from app.models.event_log import EventLog
+from app.models.folio import Folio
 from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
 from app.models.vehiculo import Vehiculo
@@ -20,7 +30,9 @@ from app.services.certificado import (
     determinar_tipo_certificado,
     generar_pdf_certificado,
 )
+from app.services.folio_inventario import SinFolioDisponible, asignar_siguiente_folio
 from app.services.impresora import imprimir as imprimir_en_impresora
+from app.services.sync import registrar_evento_con_sync
 
 router = APIRouter(prefix="/api/impresion", tags=["impresion"])
 
@@ -28,6 +40,18 @@ router = APIRouter(prefix="/api/impresion", tags=["impresion"])
 # sin volver a solicitar folio (folio_externo ya vive en la fila de
 # Verificacion, independiente del estado).
 ESTADOS_IMPRIMIBLES = {EstadoVerificacion.FOLIO_ASIGNADO, EstadoVerificacion.IMPRESION_FALLIDA}
+
+# Sección 3 del handoff (revisión Figma 2026-08-24): estados en los que ya
+# existe un certificado físico impreso — la única condición bajo la cual
+# aplican "reimpresión por daño" y "corrección de tipo después de
+# imprimir". IMPRESION_FALLIDA queda fuera a propósito: ahí la impresora
+# nunca produjo nada físico, así que es un reintento técnico, no una
+# reimpresión (ver `imprimir_certificado`).
+ESTADOS_CON_CERTIFICADO_IMPRESO = {
+    EstadoVerificacion.IMPRESO,
+    EstadoVerificacion.CERRADO_APROBADO,
+    EstadoVerificacion.CERRADO_RECHAZADO,
+}
 
 
 @router.get("/cola", response_model=list[ExpedienteCompleto])
@@ -79,6 +103,78 @@ async def _obtener_expediente_y_vehiculo(
     return verificacion, vehiculo
 
 
+async def _folio_actual(db: AsyncSession, verificacion: Verificacion) -> Folio | None:
+    """El folio del inventario local que corresponde a
+    `verificacion.folio_externo` en este momento — nunca ambiguo: cada vez
+    que un folio se reemplaza (dañado/invalidado), `folio_externo` pasa a
+    apuntar al string del folio nuevo, así que el string ya no matchea la
+    fila vieja."""
+
+    if verificacion.folio_externo is None:
+        return None
+    return (
+        await db.execute(
+            select(Folio).where(
+                Folio.verificacion_id == verificacion.id,
+                Folio.folio == verificacion.folio_externo,
+            )
+        )
+    ).scalars().first()
+
+
+async def _imprimir_y_registrar(
+    db: AsyncSession,
+    verificacion: Verificacion,
+    vehiculo: Vehiculo,
+    folio: Folio | None,
+    print_job: PrintJob,
+) -> bool:
+    """Genera el PDF y lo envía a la impresora física, registra el intento
+    (`PrintAttempt`, fila inmutable — ver Etapa 12) y, si tuvo éxito, marca
+    el folio usado como IMPRESO. Compartido por el primer clic en Imprimir
+    y por las dos rutas de reimpresión posteriores (daño físico, corrección
+    de tipo) — la mecánica de "generar → enviar → registrar intento" es
+    idéntica en los tres casos, solo cambia qué folio/tipo se imprime."""
+
+    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, verificacion.certificado_tipo)
+    exito = await imprimir_en_impresora(pdf_bytes)
+
+    db.add(
+        PrintAttempt(
+            print_job_id=print_job.id,
+            verificacion_id=verificacion.id,
+            exitoso=exito,
+            error_message=None if exito else "La impresora no respondió.",
+        )
+    )
+    await db.flush()
+    print_job.intentos = (
+        await db.execute(
+            select(func.count())
+            .select_from(PrintAttempt)
+            .where(PrintAttempt.print_job_id == print_job.id)
+        )
+    ).scalar_one()
+
+    if exito:
+        # `folio` puede ser None: algunas fixtures/pruebas más antiguas al
+        # camino de folios reales asignan `folio_externo` como string suelto
+        # sin crear la fila de inventario correspondiente. No es un caso a
+        # bloquear — solo no hay estatus de folio que actualizar.
+        if folio is not None:
+            folio.estatus = EstadoFolio.IMPRESO
+            db.add(folio)
+        print_job.estado = EstadoPrintJob.IMPRESO
+        print_job.printed_at = datetime.datetime.now(datetime.timezone.utc)
+        print_job.error_message = None
+    else:
+        print_job.estado = EstadoPrintJob.ERROR
+        print_job.error_message = "La impresora no respondió."
+
+    db.add(print_job)
+    return exito
+
+
 @router.post("/tipo-certificado/{expediente_id}")
 async def calcular_tipo_certificado(
     expediente_id: uuid.UUID,
@@ -90,9 +186,27 @@ async def calcular_tipo_certificado(
     lo persiste en el expediente. Un resultado RECHAZADO se infiere solo;
     uno APROBADO requiere que el Operador mande `tipo_certificado`
     (Particular/Doble Cero/Intensivo) — no hay regla de elegibilidad
-    automática todavía (Developer Handoff, confirmado 2026-08-24)."""
+    automática todavía (Developer Handoff, confirmado 2026-08-24).
+
+    Sección 3 del handoff: además de la selección inicial
+    (PENDIENTE_IMPRESION/FOLIO_ERROR), este mismo endpoint cubre la
+    "corrección de tipo ANTES de imprimir" con el expediente ya en
+    FOLIO_ASIGNADO — el folio previamente asignado se libera (vuelve a
+    DISPONIBLE, no se marca dañado, no cuenta como reimpresión) y se
+    asigna atómicamente el siguiente folio disponible del nuevo tipo. Una
+    vez impreso, la corrección de tipo es una operación distinta y
+    exclusiva de Supervisor — ver `corregir_tipo_certificado_post_impresion`."""
 
     verificacion, _ = await _obtener_expediente_y_vehiculo(db, session, expediente_id)
+    if verificacion.estado in ESTADOS_CON_CERTIFICADO_IMPRESO:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "El expediente ya tiene un certificado impreso; corrija el tipo "
+                "desde /tipo-certificado-post-impresion (exclusivo de Supervisor)."
+            ),
+        )
+
     try:
         tipo = await determinar_tipo_certificado(db, verificacion, tipo_certificado)
     except TipoCertificadoRequiereSeleccionManual as exc:
@@ -100,10 +214,50 @@ async def calcular_tipo_certificado(
     except TipoCertificadoIndeterminado as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    tipo_anterior = verificacion.certificado_tipo
+    if verificacion.estado == EstadoVerificacion.FOLIO_ASIGNADO and tipo.value != tipo_anterior:
+        folio_actual = await _folio_actual(db, verificacion)
+        if folio_actual is None or folio_actual.estatus != EstadoFolio.ASIGNADO:
+            raise HTTPException(
+                status_code=409,
+                detail="El folio actual del expediente no está en un estado corregible.",
+            )
+        try:
+            folio_nuevo = await asignar_siguiente_folio(db, tipo, expediente_id)
+        except SinFolioDisponible as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        folio_actual.estatus = EstadoFolio.DISPONIBLE
+        folio_actual.verificacion_id = None
+        folio_actual.asignado_at = None
+        db.add(folio_actual)
+
+        verificacion.folio_externo = folio_nuevo.folio
+        verificacion.folio_asignado_at = folio_nuevo.asignado_at
+
+        await registrar_evento_con_sync(
+            db,
+            EventLog(
+                verificacion_id=verificacion.id,
+                evento="tipo_certificado_corregido_antes_de_imprimir",
+                estado_anterior=verificacion.estado,
+                estado_nuevo=verificacion.estado,
+                usuario_id=session.user_id,
+                modulo="impresion",
+                detalle_json={
+                    "tipo_anterior": tipo_anterior,
+                    "tipo_nuevo": tipo.value,
+                    "folio_liberado": folio_actual.folio,
+                    "folio_nuevo": folio_nuevo.folio,
+                },
+            ),
+            verificacion=verificacion,
+        )
+
     verificacion.certificado_tipo = tipo.value
     db.add(verificacion)
     await db.commit()
-    return {"certificado_tipo": tipo.value}
+    return {"certificado_tipo": tipo.value, "folio_externo": verificacion.folio_externo}
 
 
 @router.get("/vista-previa/{expediente_id}")
@@ -141,8 +295,15 @@ async def imprimir_certificado(
     FOLIO_ASIGNADO, IMPRESO y CERRADO_APROBADO/CERRADO_RECHAZADO son estados
     distintos (HU-072 a HU-079): esta operación solo llega hasta IMPRESO (o
     IMPRESION_FALLIDA si la impresora falla). Cerrar el expediente es un
-    paso aparte, ver /cerrar. Reintentar desde IMPRESION_FALLIDA no vuelve
-    a pedir folio."""
+    paso aparte, ver /cerrar.
+
+    Sección 3 del handoff: el primer clic lo puede hacer cualquier operador
+    de Impresión, pero un "reintento técnico" desde IMPRESION_FALLIDA
+    (la impresora ya falló una vez) es exclusivo de Supervisor. Reintentar
+    no vuelve a pedir folio — mismo folio y mismo `PrintJob`, cuya
+    `created_at` es la "Hora Salida" del handoff: se fija una sola vez, al
+    crearse este `PrintJob` en el primer clic, y ningún camino posterior
+    (reintento, reimpresión, cierre) la modifica."""
 
     verificacion, vehiculo = await _obtener_expediente_y_vehiculo(db, session, expediente_id)
     if verificacion.folio_externo is None:
@@ -157,6 +318,11 @@ async def imprimir_certificado(
         )
 
     if verificacion.estado == EstadoVerificacion.IMPRESION_FALLIDA:
+        if not await es_supervisor(session, db):
+            raise HTTPException(
+                status_code=403,
+                detail="Reintentar un certificado tras una impresión fallida requiere Supervisor.",
+            )
         await state_machine.transition(
             db,
             verificacion,
@@ -186,34 +352,10 @@ async def imprimir_certificado(
         db.add(print_job)
         await db.flush()
 
-    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, verificacion.certificado_tipo)
-    exito = await imprimir_en_impresora(pdf_bytes)
-
-    # Etapa 12: un intento es su propia fila inmutable (PrintAttempt), no un
-    # contador mutado — ver docstring de app.models.print_attempt.
-    # print_job.intentos se recalcula por conteo, nunca se incrementa: es
-    # una caché idempotente bajo reenvío de sync.
-    db.add(
-        PrintAttempt(
-            print_job_id=print_job.id,
-            verificacion_id=verificacion.id,
-            exitoso=exito,
-            error_message=None if exito else "La impresora no respondió.",
-        )
-    )
-    await db.flush()
-    print_job.intentos = (
-        await db.execute(
-            select(func.count())
-            .select_from(PrintAttempt)
-            .where(PrintAttempt.print_job_id == print_job.id)
-        )
-    ).scalar_one()
+    folio = await _folio_actual(db, verificacion)
+    exito = await _imprimir_y_registrar(db, verificacion, vehiculo, folio, print_job)
 
     if exito:
-        print_job.estado = EstadoPrintJob.IMPRESO
-        print_job.printed_at = datetime.datetime.now(datetime.timezone.utc)
-        print_job.error_message = None
         await state_machine.transition(
             db,
             verificacion,
@@ -223,8 +365,6 @@ async def imprimir_certificado(
             evento="certificado_impreso",
         )
     else:
-        print_job.estado = EstadoPrintJob.ERROR
-        print_job.error_message = "La impresora no respondió."
         await state_machine.transition(
             db,
             verificacion,
@@ -235,9 +375,269 @@ async def imprimir_certificado(
             detalle={"intentos": print_job.intentos},
         )
 
-    db.add(print_job)
     await db.commit()
     return {"estado_expediente": verificacion.estado, "intentos": print_job.intentos}
+
+
+@router.post("/folio/marcar-danado/{expediente_id}")
+async def marcar_folio_danado(
+    expediente_id: uuid.UUID,
+    session: SessionContext = Depends(requiere_estacion(StationType.IMPRESION)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Sección 3 del handoff: antes del primer clic en Imprimir, el
+    Operador de Impresión puede marcar el folio físico asignado como
+    DAÑADO/NO DISPONIBLE si está defectuoso — sin Supervisor, sin motivo,
+    y sin que cuente como reimpresión (nada se ha impreso todavía). El
+    sistema toma atómicamente el siguiente folio disponible del mismo
+    tipo; si el inventario de ese tipo también está agotado, el expediente
+    cae a FOLIO_ERROR, igual que una solicitud de folio sin inventario."""
+
+    verificacion, _ = await _obtener_expediente_y_vehiculo(db, session, expediente_id)
+    if verificacion.estado != EstadoVerificacion.FOLIO_ASIGNADO:
+        raise HTTPException(
+            status_code=409,
+            detail=f"No se puede marcar el folio dañado en estado {verificacion.estado}",
+        )
+
+    folio_actual = await _folio_actual(db, verificacion)
+    if folio_actual is None or folio_actual.estatus != EstadoFolio.ASIGNADO:
+        raise HTTPException(
+            status_code=409,
+            detail="El expediente no tiene un folio asignado en un estado corregible.",
+        )
+
+    tipo_certificado = folio_actual.tipo_certificado
+    folio_actual.estatus = EstadoFolio.DANADO
+    folio_actual.danado_at = datetime.datetime.now(datetime.timezone.utc)
+    db.add(folio_actual)
+
+    try:
+        folio_nuevo = await asignar_siguiente_folio(db, tipo_certificado, expediente_id)
+    except SinFolioDisponible as exc:
+        await state_machine.transition(
+            db,
+            verificacion,
+            EstadoVerificacion.FOLIO_ERROR,
+            usuario_id=session.user_id,
+            modulo="impresion",
+            evento="folio_danado_sin_reemplazo",
+            detalle={"folio_danado": folio_actual.folio, "tipo_certificado": tipo_certificado.value},
+        )
+        await db.commit()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    folio_actual.reemplazado_por_folio_id = folio_nuevo.id
+    verificacion.folio_externo = folio_nuevo.folio
+    verificacion.folio_asignado_at = folio_nuevo.asignado_at
+    db.add(verificacion)
+
+    await registrar_evento_con_sync(
+        db,
+        EventLog(
+            verificacion_id=verificacion.id,
+            evento="folio_marcado_danado",
+            estado_anterior=verificacion.estado,
+            estado_nuevo=verificacion.estado,
+            usuario_id=session.user_id,
+            modulo="impresion",
+            detalle_json={"folio_danado": folio_actual.folio, "folio_nuevo": folio_nuevo.folio},
+        ),
+        verificacion=verificacion,
+    )
+
+    await db.commit()
+    return {"folio_danado": folio_actual.folio, "folio_externo": verificacion.folio_externo}
+
+
+class ReimpresionPorDanoRequest(BaseModel):
+    motivo: str = Field(min_length=1)
+
+
+@router.post("/folio/reimprimir-por-dano/{expediente_id}")
+async def reimprimir_por_dano(
+    expediente_id: uuid.UUID,
+    payload: ReimpresionPorDanoRequest,
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Sección 3 del handoff: el certificado físico ya se imprimió al
+    menos una vez (IMPRESO o ya CERRADO_*) y resultó dañado. Exclusivo de
+    Supervisor, motivo obligatorio; usa el siguiente folio disponible del
+    mismo tipo y conserva Hora Salida (`PrintJob.created_at`, fijada en el
+    primer clic en Imprimir y nunca reescrita aquí). El estado del
+    expediente no cambia: si ya estaba CERRADO_*, sigue cerrado; si estaba
+    IMPRESO sin cerrar, sigue pendiente de que el operador confirme
+    /cerrar con el nuevo certificado en mano."""
+
+    verificacion, vehiculo = await _obtener_expediente_y_vehiculo(db, session, expediente_id)
+    if verificacion.estado not in ESTADOS_CON_CERTIFICADO_IMPRESO:
+        raise HTTPException(
+            status_code=409,
+            detail=f"No hay certificado impreso que reimprimir en estado {verificacion.estado}",
+        )
+
+    print_job = (
+        await db.execute(select(PrintJob).where(PrintJob.verificacion_id == expediente_id))
+    ).scalars().first()
+    if print_job is None:
+        raise HTTPException(status_code=409, detail="El expediente no tiene un trabajo de impresión previo.")
+
+    folio_actual = await _folio_actual(db, verificacion)
+    if folio_actual is None:
+        raise HTTPException(status_code=409, detail="El expediente no tiene folio asignado.")
+
+    if folio_actual.estatus == EstadoFolio.IMPRESO:
+        try:
+            folio_nuevo = await asignar_siguiente_folio(db, folio_actual.tipo_certificado, expediente_id)
+        except SinFolioDisponible as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        folio_actual.estatus = EstadoFolio.DANADO
+        folio_actual.danado_at = datetime.datetime.now(datetime.timezone.utc)
+        folio_actual.motivo_danado = payload.motivo
+        folio_actual.reemplazado_por_folio_id = folio_nuevo.id
+        db.add(folio_actual)
+
+        verificacion.folio_externo = folio_nuevo.folio
+        verificacion.folio_asignado_at = folio_nuevo.asignado_at
+        db.add(verificacion)
+
+        await registrar_evento_con_sync(
+            db,
+            EventLog(
+                verificacion_id=verificacion.id,
+                evento="folio_marcado_danado_reimpresion",
+                estado_anterior=verificacion.estado,
+                estado_nuevo=verificacion.estado,
+                usuario_id=session.user_id,
+                modulo="impresion",
+                detalle_json={
+                    "motivo": payload.motivo,
+                    "folio_danado": folio_actual.folio,
+                    "folio_nuevo": folio_nuevo.folio,
+                },
+            ),
+            verificacion=verificacion,
+        )
+        folio_para_imprimir = folio_nuevo
+    elif folio_actual.estatus == EstadoFolio.ASIGNADO:
+        # Reimpresión ya autorizada en una llamada previa (el canje de
+        # folio ya ocurrió); esta es solo el reintento técnico del envío
+        # físico a la impresora, no una nueva decisión de reimpresión.
+        folio_para_imprimir = folio_actual
+    else:
+        raise HTTPException(
+            status_code=409,
+            detail=f"El folio actual está en estado {folio_actual.estatus.value}, no es reimprimible.",
+        )
+
+    exito = await _imprimir_y_registrar(db, verificacion, vehiculo, folio_para_imprimir, print_job)
+    await db.commit()
+    return {
+        "folio": folio_para_imprimir.folio,
+        "impreso": exito,
+        "estado_expediente": verificacion.estado,
+    }
+
+
+@router.post("/tipo-certificado-post-impresion/{expediente_id}")
+async def corregir_tipo_certificado_post_impresion(
+    expediente_id: uuid.UUID,
+    nuevo_tipo: TipoCertificado,
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Sección 3 del handoff: el tipo equivocado se detectó DESPUÉS de
+    imprimir. Exclusivo de Supervisor, SIN motivo obligatorio (la propia
+    acción de corrección identifica la causa). El folio usado pasa a
+    INVALIDADO (no DAÑADO — el papel no está defectuoso, el tipo lo
+    estaba); se asigna un folio nuevo del tipo correcto, se reimprime y se
+    conserva Hora Salida. RECHAZO sigue sin admitir corrección manual: se
+    infiere solo, nunca por selección del operador."""
+
+    verificacion, vehiculo = await _obtener_expediente_y_vehiculo(db, session, expediente_id)
+    if verificacion.estado not in ESTADOS_CON_CERTIFICADO_IMPRESO:
+        raise HTTPException(
+            status_code=409,
+            detail=f"No hay certificado impreso que corregir en estado {verificacion.estado}",
+        )
+    if nuevo_tipo == TipoCertificado.RECHAZO or verificacion.certificado_tipo == TipoCertificado.RECHAZO.value:
+        raise HTTPException(
+            status_code=409,
+            detail="RECHAZO no admite corrección manual de tipo: se infiere solo.",
+        )
+
+    print_job = (
+        await db.execute(select(PrintJob).where(PrintJob.verificacion_id == expediente_id))
+    ).scalars().first()
+    if print_job is None:
+        raise HTTPException(status_code=409, detail="El expediente no tiene un trabajo de impresión previo.")
+
+    folio_actual = await _folio_actual(db, verificacion)
+    if folio_actual is None:
+        raise HTTPException(status_code=409, detail="El expediente no tiene folio asignado.")
+
+    tipo_anterior = verificacion.certificado_tipo
+
+    if folio_actual.estatus == EstadoFolio.IMPRESO:
+        if nuevo_tipo.value == tipo_anterior:
+            raise HTTPException(status_code=409, detail="El expediente ya tiene ese tipo de certificado.")
+
+        try:
+            folio_nuevo = await asignar_siguiente_folio(db, nuevo_tipo, expediente_id)
+        except SinFolioDisponible as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        folio_actual.estatus = EstadoFolio.INVALIDADO
+        folio_actual.invalidado_at = datetime.datetime.now(datetime.timezone.utc)
+        folio_actual.motivo_invalidacion = "Corrección de tipo de certificado después de imprimir"
+        folio_actual.reemplazado_por_folio_id = folio_nuevo.id
+        db.add(folio_actual)
+
+        verificacion.certificado_tipo = nuevo_tipo.value
+        verificacion.folio_externo = folio_nuevo.folio
+        verificacion.folio_asignado_at = folio_nuevo.asignado_at
+        db.add(verificacion)
+
+        await registrar_evento_con_sync(
+            db,
+            EventLog(
+                verificacion_id=verificacion.id,
+                evento="tipo_certificado_corregido_despues_de_imprimir",
+                estado_anterior=verificacion.estado,
+                estado_nuevo=verificacion.estado,
+                usuario_id=session.user_id,
+                modulo="impresion",
+                detalle_json={
+                    "tipo_anterior": tipo_anterior,
+                    "tipo_nuevo": nuevo_tipo.value,
+                    "folio_invalidado": folio_actual.folio,
+                    "folio_nuevo": folio_nuevo.folio,
+                },
+            ),
+            verificacion=verificacion,
+        )
+        folio_para_imprimir = folio_nuevo
+    elif folio_actual.estatus == EstadoFolio.ASIGNADO:
+        # Corrección ya autorizada en una llamada previa (certificado_tipo
+        # y folio ya se cambiaron); esta es solo el reintento técnico del
+        # envío físico a la impresora.
+        folio_para_imprimir = folio_actual
+    else:
+        raise HTTPException(
+            status_code=409,
+            detail=f"El folio actual está en estado {folio_actual.estatus.value}, no es corregible.",
+        )
+
+    exito = await _imprimir_y_registrar(db, verificacion, vehiculo, folio_para_imprimir, print_job)
+    await db.commit()
+    return {
+        "certificado_tipo": verificacion.certificado_tipo,
+        "folio": folio_para_imprimir.folio,
+        "impreso": exito,
+        "estado_expediente": verificacion.estado,
+    }
 
 
 # HU-072 a HU-079: condiciones propuestas para cerrar el expediente, a falta

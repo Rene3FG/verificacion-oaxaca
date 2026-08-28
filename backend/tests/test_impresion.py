@@ -10,7 +10,12 @@ from app.models.enums import (
 from app.models.inspeccion_visual import InspeccionVisual
 from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
-from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa
+from tests.conftest import (
+    crear_estacion,
+    crear_expediente,
+    crear_sesion_activa,
+    crear_sesion_supervisor,
+)
 
 
 async def _sesion_impresion(db_session, *, allowed_line_ids=None):
@@ -259,10 +264,12 @@ async def test_reintento_impresion_tras_fallo_no_pide_folio_nuevo(
     client, db_session, monkeypatch
 ):
     """HU-072 a HU-079: la impresora falla la primera vez (IMPRESION_FALLIDA),
-    y el reintento debe reusar folio_externo e imprimir con éxito, dejando
-    un único PrintJob con 2 intentos."""
+    y el reintento (sección 3 del handoff: exclusivo de Supervisor, es un
+    "reintento técnico") debe reusar folio_externo e imprimir con éxito,
+    dejando un único PrintJob con 2 intentos."""
 
     sesion = await _sesion_impresion(db_session)
+    sesion_supervisor = await crear_sesion_supervisor(db_session, station_type=StationType.IMPRESION)
     expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.FOLIO_ASIGNADO
     )
@@ -290,7 +297,7 @@ async def test_reintento_impresion_tras_fallo_no_pide_folio_nuevo(
 
     resp2 = await client.post(
         f"/api/impresion/imprimir/{expediente.id}",
-        headers={"X-Session-Id": str(sesion.id)},
+        headers={"X-Session-Id": str(sesion_supervisor.id)},
     )
     assert resp2.status_code == 200
     assert resp2.json()["estado_expediente"] == EstadoVerificacion.IMPRESO.value
@@ -322,6 +329,53 @@ async def test_reintento_impresion_tras_fallo_no_pide_folio_nuevo(
     assert intentos_registrados[0].error_message == "La impresora no respondió."
     assert intentos_registrados[1].exitoso is True
     assert intentos_registrados[1].error_message is None
+
+
+async def test_reintento_impresion_tras_fallo_sin_supervisor_responde_403(
+    client, db_session, monkeypatch
+):
+    """Sección 3 del handoff: 'Reintento técnico posterior al primer
+    Imprimir ... SOLO Supervisor puede ejecutarlo' — un operador de
+    Impresión normal no puede reintentar tras una falla."""
+
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.FOLIO_ASIGNADO
+    )
+    expediente.resultado_final = ResultadoFinal.APROBADO
+    expediente.folio_externo = "F-0001"
+    expediente.certificado_tipo = "PARTICULAR"
+    db_session.add(expediente)
+    await db_session.commit()
+
+    async def _impresora_falla(pdf_bytes: bytes) -> bool:
+        return False
+
+    monkeypatch.setattr("app.api.routers.impresion.imprimir_en_impresora", _impresora_falla)
+
+    resp1 = await client.post(
+        f"/api/impresion/imprimir/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp1.json()["estado_expediente"] == EstadoVerificacion.IMPRESION_FALLIDA.value
+
+    resp2 = await client.post(
+        f"/api/impresion/imprimir/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp2.status_code == 403
+
+    await db_session.refresh(expediente)
+    assert expediente.folio_externo == "F-0001"
+
+    print_jobs = (
+        await db_session.execute(
+            select(PrintJob).where(PrintJob.verificacion_id == expediente.id)
+        )
+    ).scalars().all()
+    assert len(print_jobs) == 1
+    assert print_jobs[0].intentos == 1
+    assert print_jobs[0].estado == EstadoPrintJob.ERROR
 
 
 async def test_cerrar_expediente_sin_condiciones_responde_409(client, db_session):
