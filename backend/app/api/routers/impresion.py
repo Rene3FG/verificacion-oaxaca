@@ -81,6 +81,7 @@ async def cola_impresion(
                 EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO,
                 EstadoVerificacion.FOLIO_SOLICITADO,
                 EstadoVerificacion.FOLIO_ASIGNADO,
+                EstadoVerificacion.FOLIO_ERROR,
                 EstadoVerificacion.IMPRESION_FALLIDA,
             ]
         ),

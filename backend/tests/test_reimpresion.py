@@ -477,6 +477,31 @@ async def test_corregir_tipo_post_impresion_rechazo_no_admite_correccion(client,
     assert resp.status_code == 409
 
 
+# --- Regresión: FOLIO_ERROR desaparecía de la cola de Impresión -----------
+
+
+async def test_cola_impresion_incluye_folio_error(client, db_session):
+    """Reportado por Sebastian durante la QA visual de ImpresionView.vue:
+    `cola_impresion` no listaba FOLIO_ERROR, así que un expediente que cae
+    ahí (sistema de folios agotado/con error) desaparecía de la cola para
+    siempre — sin forma de reabrirlo desde la UI para reintentar, aunque
+    `/folios/solicitar` (ESTADOS_SOLICITABLES) ya sabe reintentar desde ese
+    estado y el frontend ya tiene el botón "Reintentar" listo."""
+
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.FOLIO_ERROR
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/impresion/cola", headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert resp.status_code == 200
+    ids = {e["id"] for e in resp.json()}
+    assert str(expediente.id) in ids
+
+
 async def test_corregir_tipo_post_impresion_mismo_tipo_responde_409(client, db_session):
     sesion = await _sesion_impresion(db_session)
     sesion_supervisor = await crear_sesion_supervisor(db_session, station_type=StationType.IMPRESION)
