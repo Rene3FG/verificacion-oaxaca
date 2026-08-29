@@ -3,11 +3,24 @@ import { computed, onMounted, ref } from "vue";
 import { api } from "../api/client";
 import ExpedienteHeader from "../components/ExpedienteHeader.vue";
 import { useSessionStore } from "../stores/session";
+import { formatearFecha } from "../utils/format";
 
 const session = useSessionStore();
 
-const ESTADOS_SOLICITABLES = ["PENDIENTE_IMPRESION", "FOLIO_ERROR"];
+// PENDIENTE_DE_IMPRESION_RECHAZO: cola propia de rechazo que agregó René
+// (backend etapa1-y-siox) — mismo tratamiento que PENDIENTE_IMPRESION para
+// esta vista, la diferencia solo importa del lado del backend.
+const ESTADOS_SOLICITABLES = [
+  "PENDIENTE_IMPRESION",
+  "PENDIENTE_DE_IMPRESION_RECHAZO",
+  "FOLIO_ERROR",
+];
 const ESTADOS_IMPRIMIBLES = ["FOLIO_ASIGNADO", "IMPRESION_FALLIDA"];
+
+// Tipos reales de certificado para un resultado APROBADO (RECHAZADO se
+// infiere solo — RECHAZO es el único tipo posible ahí, ver
+// backend/app/api/routers/impresion.py: calcular_tipo_certificado).
+const TIPOS_CERTIFICADO_APROBADO = ["PARTICULAR", "DOBLE_CERO", "INTENSIVO"];
 
 const expedientes = ref([]);
 const cargandoLista = ref(false);
@@ -22,6 +35,12 @@ const solicitandoFolio = ref(false);
 const cargandoVistaPrevia = ref(false);
 const imprimiendo = ref(false);
 const cerrando = ref(false);
+
+const tipoCertificadoSeleccionado = ref(null);
+
+const requiereSeleccionManual = computed(
+  () => expediente.value?.resultado_final === "APROBADO"
+);
 
 const puedeCalcularTipo = computed(
   () =>
@@ -45,14 +64,6 @@ const puedeCerrar = computed(
     expediente.value.estado === "IMPRESO" &&
     !expediente.value.cerrado_at
 );
-
-function formatearFecha(iso) {
-  if (!iso) return null;
-  return new Date(iso).toLocaleString("es-MX", {
-    dateStyle: "short",
-    timeStyle: "short",
-  });
-}
 
 async function cargarCola() {
   cargandoLista.value = true;
@@ -80,10 +91,25 @@ function cerrarDetalle() {
 }
 
 async function calcularTipoCertificado() {
+  if (requiereSeleccionManual.value && !tipoCertificadoSeleccionado.value) {
+    error.value = "Selecciona el tipo de certificado (Particular/Doble Cero/Intensivo).";
+    return;
+  }
   calculandoTipo.value = true;
   error.value = null;
   try {
-    const { data } = await api.post(`/impresion/tipo-certificado/${expediente.value.id}`);
+    // Un expediente APROBADO no tiene un único tipo posible (Particular/
+    // Doble Cero/Intensivo) — el backend exige `tipo_certificado` para ese
+    // caso (422 si se omite, ver calcular_tipo_certificado). RECHAZADO
+    // sigue infiriéndose solo, sin parámetro.
+    const params = requiereSeleccionManual.value
+      ? { tipo_certificado: tipoCertificadoSeleccionado.value }
+      : {};
+    const { data } = await api.post(
+      `/impresion/tipo-certificado/${expediente.value.id}`,
+      null,
+      { params }
+    );
     expediente.value.certificado_tipo = data.certificado_tipo;
     aviso.value = `Tipo de certificado: ${data.certificado_tipo}`;
   } catch (err) {
@@ -101,23 +127,23 @@ async function solicitarFolio() {
   solicitandoFolio.value = true;
   error.value = null;
   try {
+    // El backend ya no es un sistema externo simulado (René, inventario
+    // local de folios): en éxito siempre devuelve un folio real; si el
+    // inventario de ese tipo está agotado, tira 409 con motivo — lo
+    // maneja el catch de abajo, no hay rama de "folio nulo" que revisar.
     const { data } = await api.post(
       `/folios/solicitar/${expediente.value.id}`,
       null,
       { params: { tipo_certificado: expediente.value.certificado_tipo } }
     );
     expediente.value.estado = data.estado_expediente;
-    if (data.folio) {
-      expediente.value.folio_externo = data.folio;
-      // El endpoint no devuelve folio_asignado_at (solo folio/status/estado);
-      // el backend lo fija a "ahora" al momento de asignar, así que lo
-      // aproximamos aquí mismo para no tener que recargar el expediente
-      // solo para ver el timestamp.
-      expediente.value.folio_asignado_at = new Date().toISOString();
-      aviso.value = `Folio asignado: ${data.folio}`;
-    } else {
-      error.value = "El sistema externo de folios no respondió. El expediente quedó en FOLIO_ERROR.";
-    }
+    expediente.value.folio_externo = data.folio;
+    // El endpoint no devuelve folio_asignado_at (solo folio/estado_expediente);
+    // el backend lo fija a "ahora" al momento de asignar, así que lo
+    // aproximamos aquí mismo para no tener que recargar el expediente
+    // solo para ver el timestamp.
+    expediente.value.folio_asignado_at = new Date().toISOString();
+    aviso.value = `Folio asignado: ${data.folio}`;
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudo solicitar el folio.";
   } finally {
@@ -222,94 +248,150 @@ onMounted(cargarCola);
         {{ aviso }}
       </v-alert>
 
-      <v-card class="mb-4" variant="outlined">
-        <v-card-title>Datos del expediente</v-card-title>
-        <v-card-text>
-          <v-row dense>
-            <v-col cols="12" sm="6" md="4">
-              <span class="text-caption text-medium-emphasis d-block">NIV</span>
-              <span>{{ expediente.vehiculo?.niv ?? "—" }}</span>
-            </v-col>
-            <v-col cols="12" sm="6" md="4">
-              <span class="text-caption text-medium-emphasis d-block">Marca / Línea</span>
-              <span>
-                {{ expediente.vehiculo?.marca ?? "—" }}
-                {{ expediente.vehiculo?.linea ?? "" }}
-              </span>
-            </v-col>
-            <v-col cols="12" sm="6" md="4">
-              <span class="text-caption text-medium-emphasis d-block">Tipo de vehículo</span>
-              <span>{{ expediente.vehiculo?.tipo_vehiculo ?? "—" }}</span>
-            </v-col>
-            <v-col cols="12" sm="6" md="4">
-              <span class="text-caption text-medium-emphasis d-block">Razón social</span>
-              <span>{{ expediente.vehiculo?.razon_social ?? "—" }}</span>
-            </v-col>
-            <v-col cols="12" sm="6" md="4">
-              <span class="text-caption text-medium-emphasis d-block">Centro / Línea de origen</span>
-              <span>{{ expediente.centro_id }} · Línea {{ expediente.linea_id }}</span>
-            </v-col>
-            <v-col cols="12" sm="6" md="4">
-              <span class="text-caption text-medium-emphasis d-block">Resultado final</span>
-              <span>{{ expediente.resultado_final ?? "—" }}</span>
-            </v-col>
-          </v-row>
-          <p class="text-caption text-medium-emphasis mt-3 mb-0">
-            El diseño (Figma) también pide domicilio, municipio, tarjeta de
-            circulación, peso bruto vehicular y tracción — esos campos no
-            existen todavía en el backend (pendiente #5 que René levantó tras
-            revisar el Figma), así que no se muestran aquí hasta que se
-            capturen en algún punto anterior del flujo.
-          </p>
-        </v-card-text>
-      </v-card>
+      <v-row>
+        <v-col cols="12" md="6">
+          <!-- "Expediente completo" según Figma: Resultado, Tipo de
+          certificado, Placa, NIV/Serie, Modelo, Combustible, Propietario,
+          Línea origen — mismo orden que el diseño. Domicilio, municipio,
+          tarjeta de circulación y código postal también los pide el Figma
+          pero no existen todavía en el backend (pendiente #5 que René
+          levantó tras revisarlo), así que no se inventan aquí. "Propietario"
+          en el diseño es el nombre del dueño; lo único que tenemos en el
+          backend es razón social (`vehiculo.razon_social`), que es lo que
+          se muestra. -->
+          <v-card class="mb-4" variant="outlined">
+            <v-card-title>Expediente completo</v-card-title>
+            <v-card-subtitle class="text-wrap">
+              Resultado y placas visibles para selección manual del tipo de certificado
+            </v-card-subtitle>
+            <v-card-text>
+              <v-row dense>
+                <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">Resultado</span>
+                  <span>{{ expediente.resultado_final ?? "—" }}</span>
+                </v-col>
+                <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">Tipo de certificado</span>
+                  <span>{{ expediente.certificado_tipo ?? "sin determinar" }}</span>
+                </v-col>
+                <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">Placa</span>
+                  <span>{{ expediente.placa }}</span>
+                </v-col>
+                <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">NIV / Serie</span>
+                  <span>{{ expediente.vehiculo?.niv ?? "—" }}</span>
+                </v-col>
+                <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">Modelo</span>
+                  <span>
+                    {{ expediente.vehiculo?.marca ?? "—" }}
+                    {{ expediente.vehiculo?.linea ?? "" }}
+                    <template v-if="expediente.vehiculo?.modelo">
+                      ({{ expediente.vehiculo.modelo }})
+                    </template>
+                  </span>
+                </v-col>
+                <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">Combustible</span>
+                  <span>{{ expediente.combustible_validado ?? "—" }}</span>
+                </v-col>
+                <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">Propietario</span>
+                  <span>{{ expediente.vehiculo?.razon_social ?? "—" }}</span>
+                </v-col>
+                <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">Línea origen</span>
+                  <span>{{ expediente.centro_id }} · Línea {{ expediente.linea_id }}</span>
+                </v-col>
+              </v-row>
+              <p class="text-caption text-medium-emphasis mt-3 mb-0">
+                El diseño (Figma) también pide domicilio, municipio, tarjeta de
+                circulación y código postal — esos campos no existen todavía en
+                el backend (pendiente #5 que René levantó tras revisar el
+                Figma), así que no se muestran aquí hasta que se capturen en
+                algún punto anterior del flujo.
+              </p>
+            </v-card-text>
+          </v-card>
 
-      <v-card class="mb-4" variant="outlined">
-        <v-card-title>Certificado</v-card-title>
-        <v-card-text>
-          <p class="mb-2">
-            Tipo: {{ expediente.certificado_tipo ?? "sin determinar" }}
-          </p>
-          <v-btn
-            variant="outlined"
-            :disabled="!puedeCalcularTipo"
-            :loading="calculandoTipo"
-            @click="calcularTipoCertificado"
-          >
-            Calcular tipo de certificado
-          </v-btn>
-          <v-btn
-            class="ml-2"
-            variant="outlined"
-            :disabled="!expediente.certificado_tipo"
-            :loading="cargandoVistaPrevia"
-            @click="verVistaPrevia"
-          >
-            Vista previa
-          </v-btn>
-        </v-card-text>
-      </v-card>
+          <v-card class="mb-4" variant="outlined">
+            <v-card-title>Certificado</v-card-title>
+            <v-card-text>
+              <!-- Solo APROBADO requiere selección manual (Particular/Doble
+              Cero/Intensivo) — RECHAZADO se infiere solo (RECHAZO es el
+              único tipo posible ahí), ver calcularTipoCertificado(). -->
+              <v-select
+                v-if="requiereSeleccionManual"
+                v-model="tipoCertificadoSeleccionado"
+                :items="TIPOS_CERTIFICADO_APROBADO"
+                label="Tipo de certificado"
+                :disabled="!!expediente.certificado_tipo"
+                class="mb-3"
+                density="compact"
+              />
+              <v-btn
+                variant="outlined"
+                :disabled="!puedeCalcularTipo"
+                :loading="calculandoTipo"
+                @click="calcularTipoCertificado"
+              >
+                Calcular tipo de certificado
+              </v-btn>
+            </v-card-text>
+          </v-card>
+        </v-col>
 
-      <v-card class="mb-4" variant="outlined">
-        <v-card-title>Folio</v-card-title>
-        <v-card-text>
-          <p class="mb-1">Folio: {{ expediente.folio_externo ?? "sin asignar" }}</p>
-          <p v-if="expediente.folio_asignado_at" class="text-caption text-medium-emphasis mb-2">
-            Asignado el {{ formatearFecha(expediente.folio_asignado_at) }}
-          </p>
-          <p v-else-if="solicitandoFolio" class="text-caption text-medium-emphasis mb-2">
-            Asignando siguiente folio disponible…
-          </p>
-          <v-btn
-            color="primary"
-            :disabled="!puedeSolicitarFolio"
-            :loading="solicitandoFolio"
-            @click="solicitarFolio"
-          >
-            Solicitar folio
-          </v-btn>
-        </v-card-text>
-      </v-card>
+        <v-col cols="12" md="6">
+          <!-- "Folio certificado" según Figma. El diseño también muestra
+          "Fuente", "Solicitud enviada", "Siguiente folio" y "Orden de
+          lista" — esos no vienen en la respuesta de
+          POST /folios/solicitar (solo folio/estado_expediente, ver
+          backend/app/api/routers/folios.py) ni en ExpedienteCompleto, así
+          que no se fabrican aquí; solo se muestra lo que sí es real. -->
+          <v-card class="mb-4" variant="outlined">
+            <v-card-title>Folio certificado</v-card-title>
+            <v-card-text>
+              <p class="mb-1">Folio: {{ expediente.folio_externo ?? "sin asignar" }}</p>
+              <p v-if="expediente.folio_asignado_at" class="text-caption text-medium-emphasis mb-2">
+                Asignado el {{ formatearFecha(expediente.folio_asignado_at) }}
+              </p>
+              <p v-else-if="solicitandoFolio" class="text-caption text-medium-emphasis mb-2">
+                Asignando siguiente folio disponible…
+              </p>
+              <p v-else-if="expediente.estado === 'FOLIO_ERROR'" class="text-caption text-medium-emphasis mb-2">
+                Sin folio disponible — el inventario local de este tipo de certificado se agotó.
+              </p>
+              <v-btn
+                color="primary"
+                :disabled="!puedeSolicitarFolio"
+                :loading="solicitandoFolio"
+                @click="solicitarFolio"
+              >
+                {{ expediente.estado === "FOLIO_ERROR" ? "Reintentar" : "Solicitar folio" }}
+              </v-btn>
+            </v-card-text>
+          </v-card>
+
+          <v-card class="mb-4" variant="outlined">
+            <v-card-title>Vista previa</v-card-title>
+            <v-card-subtitle class="text-wrap">Certificado y resultados</v-card-subtitle>
+            <v-card-text>
+              <p v-if="!expediente.certificado_tipo" class="text-caption text-medium-emphasis mb-2">
+                Calcula el tipo de certificado para poder generar la vista previa.
+              </p>
+              <v-btn
+                variant="outlined"
+                :disabled="!expediente.certificado_tipo"
+                :loading="cargandoVistaPrevia"
+                @click="verVistaPrevia"
+              >
+                Generar vista previa
+              </v-btn>
+            </v-card-text>
+          </v-card>
+        </v-col>
+      </v-row>
 
       <v-card class="mb-4" variant="outlined">
         <v-card-title>Impresión</v-card-title>

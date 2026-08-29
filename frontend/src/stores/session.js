@@ -59,6 +59,10 @@ export const useSessionStore = defineStore("session", {
           workstation_id: this.estacion.id,
         });
         this.sesion = data;
+        // El backend no expone username en StationSessionRead (solo
+        // user_id, ver schemas/estacion.py) — se guarda el que el propio
+        // operador tecleó para iniciar sesión, no un dato inventado.
+        this.usuario = username;
       } catch (err) {
         this.error =
           err.response?.data?.detail || "No tienes permiso para operar esta estación.";
