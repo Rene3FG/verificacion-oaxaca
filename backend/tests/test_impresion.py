@@ -258,6 +258,9 @@ async def test_imprimir_exitoso_crea_print_job_y_transiciona_a_impreso(client, d
 
     await db_session.refresh(expediente)
     assert expediente.certificado_tipo == "PARTICULAR"
+    # Regla 2 del frame "Cierre y reimpresión": el primer intento exitoso
+    # fija hora_salida.
+    assert expediente.hora_salida is not None
 
 
 async def test_reintento_impresion_tras_fallo_no_pide_folio_nuevo(
@@ -295,6 +298,13 @@ async def test_reintento_impresion_tras_fallo_no_pide_folio_nuevo(
     assert resp1.status_code == 200
     assert resp1.json()["estado_expediente"] == EstadoVerificacion.IMPRESION_FALLIDA.value
 
+    await db_session.refresh(expediente)
+    # Regla 2 del frame "Cierre y reimpresión", supuesto elegido (pendiente
+    # de confirmar con el cliente, ver CLAUDE.md): un intento fallido NO
+    # cuenta como "primer clic" — hora_salida sigue nula hasta que un
+    # intento tenga éxito de verdad.
+    assert expediente.hora_salida is None
+
     resp2 = await client.post(
         f"/api/impresion/imprimir/{expediente.id}",
         headers={"X-Session-Id": str(sesion_supervisor.id)},
@@ -305,6 +315,8 @@ async def test_reintento_impresion_tras_fallo_no_pide_folio_nuevo(
 
     await db_session.refresh(expediente)
     assert expediente.folio_externo == "F-0001"
+    # El segundo intento (el primero EXITOSO) es el que fija hora_salida.
+    assert expediente.hora_salida is not None
 
     print_jobs = (
         await db_session.execute(
@@ -411,12 +423,20 @@ async def test_cerrar_expediente_exitoso_tras_imprimir(client, db_session):
     )
     assert resp_imprimir.json()["estado_expediente"] == EstadoVerificacion.IMPRESO.value
 
+    await db_session.refresh(expediente)
+    hora_salida = expediente.hora_salida
+    assert hora_salida is not None
+
     resp_cerrar = await client.post(
         f"/api/impresion/cerrar/{expediente.id}",
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp_cerrar.status_code == 200
     assert resp_cerrar.json()["estado_expediente"] == EstadoVerificacion.CERRADO_APROBADO.value
+
+    await db_session.refresh(expediente)
+    # Regla 2 del frame "Cierre y reimpresión": el cierre no toca hora_salida.
+    assert expediente.hora_salida == hora_salida
 
     resp_doble_cierre = await client.post(
         f"/api/impresion/cerrar/{expediente.id}",

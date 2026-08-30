@@ -356,6 +356,17 @@ async def imprimir_certificado(
     folio = await _folio_actual(db, verificacion)
     exito = await _imprimir_y_registrar(db, verificacion, vehiculo, folio, print_job)
 
+    if exito and verificacion.hora_salida is None:
+        # Regla 2 del frame "Cierre y reimpresión": Hora Salida se fija una
+        # sola vez, con el primer intento EXITOSO de imprimir — no con el
+        # primer clic si ese clic falló (supuesto pendiente de confirmar con
+        # el cliente, ver CLAUDE.md). Ningún camino posterior (reintento,
+        # cierre, reimpresión por daño, corrección de tipo) la toca: todos
+        # llegan aquí con `hora_salida` ya fijada, así que el guard de
+        # "es nula" basta sin necesitar lógica adicional en esos endpoints.
+        verificacion.hora_salida = datetime.datetime.now(datetime.timezone.utc)
+        db.add(verificacion)
+
     if exito:
         await state_machine.transition(
             db,

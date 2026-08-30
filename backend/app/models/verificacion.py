@@ -49,5 +49,6 @@ class Verificacion(Base, UUIDPKMixin, TimestampMixin):
     folio_externo: Mapped[str | None] = mapped_column(String(60))
     folio_asignado_at: Mapped[datetime.datetime | None] = mapped_column()
     cerrado_at: Mapped[datetime.datetime | None] = mapped_column()
+    hora_salida: Mapped[datetime.datetime | None] = mapped_column()
 
     vehiculo: Mapped["Vehiculo"] = relationship()

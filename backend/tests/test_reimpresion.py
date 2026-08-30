@@ -308,7 +308,10 @@ async def test_reimprimir_por_dano_exitoso_invalida_folio_viejo_y_conserva_hora_
     print_job_antes = (
         await db_session.execute(select(PrintJob).where(PrintJob.verificacion_id == expediente.id))
     ).scalar_one()
-    hora_salida = print_job_antes.created_at
+    print_job_creado_en = print_job_antes.created_at
+    await db_session.refresh(expediente)
+    hora_salida = expediente.hora_salida
+    assert hora_salida is not None
 
     resp = await client.post(
         f"/api/impresion/folio/reimprimir-por-dano/{expediente.id}",
@@ -325,6 +328,9 @@ async def test_reimprimir_por_dano_exitoso_invalida_folio_viejo_y_conserva_hora_
     await db_session.refresh(expediente)
     assert expediente.folio_externo == "OAX-000002"
     assert expediente.estado == EstadoVerificacion.IMPRESO
+    # Regla 2 del frame "Cierre y reimpresión": la reimpresión por daño no
+    # toca hora_salida, aunque genere un PrintAttempt nuevo.
+    assert expediente.hora_salida == hora_salida
 
     folio_danado = (
         await db_session.execute(select(Folio).where(Folio.folio == "OAX-000001"))
@@ -342,7 +348,7 @@ async def test_reimprimir_por_dano_exitoso_invalida_folio_viejo_y_conserva_hora_
         await db_session.execute(select(PrintJob).where(PrintJob.verificacion_id == expediente.id))
     ).scalar_one()
     assert print_job_despues.id == print_job_antes.id
-    assert print_job_despues.created_at == hora_salida
+    assert print_job_despues.created_at == print_job_creado_en
     assert print_job_despues.intentos == 2
 
     intentos = (
@@ -411,7 +417,10 @@ async def test_corregir_tipo_post_impresion_invalida_folio_viejo_y_reimprime(cli
     print_job_antes = (
         await db_session.execute(select(PrintJob).where(PrintJob.verificacion_id == expediente.id))
     ).scalar_one()
-    hora_salida = print_job_antes.created_at
+    print_job_creado_en = print_job_antes.created_at
+    await db_session.refresh(expediente)
+    hora_salida = expediente.hora_salida
+    assert hora_salida is not None
 
     resp = await client.post(
         f"/api/impresion/tipo-certificado-post-impresion/{expediente.id}",
@@ -441,7 +450,10 @@ async def test_corregir_tipo_post_impresion_invalida_folio_viejo_y_reimprime(cli
     print_job_despues = (
         await db_session.execute(select(PrintJob).where(PrintJob.verificacion_id == expediente.id))
     ).scalar_one()
-    assert print_job_despues.created_at == hora_salida
+    assert print_job_despues.created_at == print_job_creado_en
+    # Regla 2 del frame "Cierre y reimpresión": la corrección de tipo
+    # post-impresión no toca hora_salida.
+    assert expediente.hora_salida == hora_salida
 
 
 async def test_corregir_tipo_post_impresion_rechazo_no_admite_correccion(client, db_session):

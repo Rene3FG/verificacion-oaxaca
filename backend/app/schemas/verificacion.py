@@ -31,6 +31,7 @@ class ExpedienteRead(BaseModel):
     folio_externo: str | None
     folio_asignado_at: datetime.datetime | None
     cerrado_at: datetime.datetime | None
+    hora_salida: datetime.datetime | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
