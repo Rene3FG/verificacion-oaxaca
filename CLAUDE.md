@@ -875,6 +875,96 @@ necesidad de un campo dedicado.
    expediente específico fuera del monitor/bitácora existentes, así que
    probablemente hace falta un punto de entrada nuevo (buscar por
    placa/folio) antes de poder construir los diálogos.
-2. Puntos 3-6 de la lista original (`Certificate Result Projection
-   Contract v1`, semestre/prórroga, propietario/domicilio/PBV/Tracción,
-   checklist real de inspección visual) siguen sin tocar.
+2. ~~Puntos 3-6 de la lista original~~ — punto 5 (propietario/domicilio/
+   PBV/Tracción) resuelto el 2026-08-30, ver sección siguiente.
+   `Certificate Result Projection Contract v1`, semestre/prórroga y el
+   checklist real de inspección visual siguen sin tocar.
+
+## hora_salida y datos de propietario/domicilio/PBV/Tracción (2026-08-30)
+
+Restricción de esta sesión: **no se tocó `ImpresionView.vue` ni
+`ExpedienteHeader.vue`** — Sebastián estaba integrando ahí en copia local
+sin commitear. Todo lo de abajo es backend + `CapturaView.vue` únicamente.
+
+### hora_salida — regla 2 del frame "Cierre y reimpresión"
+
+Era el único punto de ese frame que faltaba (folio dañado, reimpresión por
+daño y corrección de tipo ya existían desde el 2026-08-27). La nota de esa
+sesión decía "Hora Salida no es una columna nueva, es
+`PrintJob.created_at`" — esta sesión la reemplaza por una columna real
+`Verificacion.hora_salida`, porque el cliente la quiere expuesta en el
+detalle del expediente de forma directa, independiente de si `PrintJob` se
+reusa o no entre reintentos.
+
+- Migración `0a6c575a2781`. Se fija en `POST /impresion/imprimir/{id}`
+  solo si `hora_salida is None`, **después** de que `_imprimir_y_registrar`
+  confirma éxito — nunca antes de saber el resultado.
+- **Supuesto pendiente de confirmar con el cliente** (marcado así en el
+  prompt de esta sesión, no resuelto por Claude): "primer clic en
+  Imprimir" se implementó como *el primer intento EXITOSO*, no el primer
+  clic sin importar si falló. Si un intento falla, `hora_salida` sigue
+  nula hasta que uno tenga éxito de verdad (que puede ser un reintento
+  posterior, incluso de Supervisor). Si el cliente confirma que debe ser
+  el primer clic sin importar el resultado, hay que mover el `if exito`
+  a fijarla antes de llamar a `_imprimir_y_registrar`, sin condición de
+  éxito.
+- `cerrar`, `reimprimir-por-dano` y `tipo-certificado-post-impresion` no la
+  tocan — verificado con pruebas explícitas en cada uno (extendidas sobre
+  las pruebas ya existentes de esos caminos, no duplicadas).
+- Expuesta en `ExpedienteRead.hora_salida` (por lo tanto en
+  `ExpedienteCompleto` también) para que el frontend la muestre — sin UI
+  todavía, ningún archivo de frontend permitido se tocó para esto.
+
+### Propietario/domicilio, tarjeta de circulación, PBV y Tracción — punto 5 del orden sugerido del Figma
+
+`Vehiculo` gana 9 columnas nuevas (migración `d029fa2bd196`), todas
+opcionales a nivel de esquema: `tarjeta_circulacion`,
+`propietario_estado`, `propietario_municipio`, `propietario_codigo_postal`,
+`propietario_colonia`, `propietario_calle`,
+`propietario_numero_exterior`, `pbv`, `traccion`.
+
+- Reusa `app.services.vehiculo.actualizar_datos_vehiculo` (HU-016) sin
+  tocarla: esa función ya construye "campos modificados" genéricamente
+  desde el payload, así que agregar los campos a
+  `VehiculoUpdate`/`VehiculoBase` bastó para que `PATCH
+  /api/expedientes/{id}/vehiculo` los guarde, marque
+  `fuente_datos=CORREGIDO_OPERADOR` si venían de SIOX, y los audite en
+  `event_log` igual que los campos de siempre.
+- **Obligatoriedad solo al imprimir, no al capturar**:
+  `app.services.certificado.campos_obligatorios_faltantes(vehiculo)`
+  devuelve los nombres legibles de lo que falta; `POST
+  /impresion/imprimir/{id}` responde 409 con la lista si algo obligatorio
+  no está capturado. La vista previa (`GET /impresion/vista-previa`) NO
+  se bloqueó a propósito — sigue siendo no-definitiva, mismo criterio que
+  ya tenía.
+- **`CapturaView.vue`** (único archivo de frontend tocado, según lo
+  permitido): PBV y Tracción se agregaron a la card "Datos del vehículo"
+  existente; el resto (domicilio + tarjeta de circulación) entra a una
+  card nueva "Propietario y domicilio" — antes solo tenía razón social
+  con una nota de "pendiente de agregar si se necesita", ya no aplica.
+  `PruebaView.vue` (panel de corrección de vehículo desde Prueba) **no se
+  tocó** — no estaba en el alcance pedido, sigue sin los campos nuevos.
+- `tests/conftest.py::crear_expediente` gana
+  `datos_certificado_completos: bool = True` — por defecto llena estos 9
+  campos con datos de prueba para que las pruebas de impresión que no son
+  sobre este requisito no se rompan contra el nuevo 409; `False` los deja
+  en `None` para las que sí lo ejercitan.
+
+**154 pruebas, todas pasan.** Build de frontend (`npm run build`) limpio.
+No se probó contra Chrome en esta sesión. Commits sobre `etapa1-y-siox`,
+**NO pusheados** — el usuario pidió explícitamente no pushear sin
+confirmación en esta sesión (excepción puntual a "SIEMPRE SUBE A GIT EL
+AVANCE" del 2026-08-26).
+
+**Pendiente real:**
+1. Confirmar con el cliente el supuesto de `hora_salida` (primer intento
+   exitoso vs. primer clic sin importar el resultado).
+2. Frontend de todo lo de reimpresión (2026-08-27, sigue sin tocar).
+3. `PruebaView.vue` no tiene los campos nuevos de propietario/domicilio/
+   PBV/Tracción — si Prueba también necesita corregirlos, hay que
+   replicar ahí el mismo patrón de `CapturaView.vue`.
+4. `Certificate Result Projection Contract v1`, semestre/prórroga y
+   checklist real de inspección visual (puntos 3, 4 y 6 de la lista
+   original) siguen sin tocar — `generar_pdf_certificado` sigue siendo el
+   HTML mínimo de trazabilidad, no incluye los campos nuevos todavía en
+   el layout impreso (solo se validan como obligatorios, no se imprimen).
