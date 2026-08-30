@@ -1,8 +1,15 @@
 <script setup>
+import { computed } from "vue";
 import { estadoColors } from "../plugins/vuetify";
 
 const props = defineProps({
   expediente: { type: Object, required: true },
+});
+
+const modeloAuto = computed(() => {
+  const v = props.expediente.vehiculo;
+  if (!v) return null;
+  return [v.marca, v.linea].filter(Boolean).join(" ") || null;
 });
 
 // Mapeo simplificado estado -> color semántico; ver guidelines de diseño
@@ -25,7 +32,10 @@ function colorEstado(estado) {
   <v-card class="mb-4" variant="outlined">
     <v-card-text class="d-flex align-center flex-wrap ga-3">
       <span class="text-h6">Expediente #{{ props.expediente.id?.slice(0, 8) }}</span>
-      <v-chip>Placa {{ props.expediente.placa }}</v-chip>
+      <v-chip>
+        {{ props.expediente.placa }}
+        <template v-if="modeloAuto">({{ modeloAuto }})</template>
+      </v-chip>
       <v-chip v-if="props.expediente.vehiculo?.modelo">
         Modelo {{ props.expediente.vehiculo.modelo }}
       </v-chip>
