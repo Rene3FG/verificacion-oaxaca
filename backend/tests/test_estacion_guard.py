@@ -1,5 +1,8 @@
 from app.models.enums import EstadoVerificacion, StationType
+from app.services.inspeccion_visual import CHECKLIST_INSPECCION_VISUAL
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa
+
+CHECKLIST_TODO_BUENO = {clave: "BUENO" for clave in CHECKLIST_INSPECCION_VISUAL}
 
 
 async def _sesion(db_session, *, station_type: StationType, line_id: int | None = 1, **kw):
@@ -106,7 +109,7 @@ async def test_inspeccion_desde_captura_responde_403(client, db_session):
 
     resp = await client.post(
         f"/api/inspeccion/{expediente.id}",
-        json={"resultado": "APROBADA", "checklist_json": {}},
+        json={"checklist": CHECKLIST_TODO_BUENO},
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp.status_code == 403
@@ -163,7 +166,7 @@ async def test_flujo_completo_captura_a_inspeccion_visual(client, db_session):
 
     resp_inspeccion = await client.post(
         f"/api/inspeccion/{expediente.id}",
-        json={"resultado": "APROBADA", "checklist_json": {"luces": "ok"}},
+        json={"checklist": CHECKLIST_TODO_BUENO},
         headers={"X-Session-Id": str(prueba.id)},
     )
     assert resp_inspeccion.status_code == 200

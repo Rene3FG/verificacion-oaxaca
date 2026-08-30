@@ -122,7 +122,7 @@ async def test_tipo_certificado_rechazo_visual_sin_resultado_final(client, db_se
         InspeccionVisual(
             verificacion_id=expediente.id,
             resultado=ResultadoInspeccionVisual.RECHAZADA,
-            checklist_json={"luces": "mal"},
+            checklist_json={"sistema_escape": "MALO"},
         )
     )
     await db_session.commit()

@@ -30,6 +30,7 @@ from app.models.siox_consulta import EstadoSioxConsulta, SioxConsulta
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
 from app.seed import TEST_USER2_ID, TEST_USER_ID
+from app.services.inspeccion_visual import CHECKLIST_INSPECCION_VISUAL
 
 CENTRO = "reforma"
 
@@ -90,15 +91,7 @@ async def _inspeccion_aprobada(db, verificacion: Verificacion) -> None:
         InspeccionVisual(
             verificacion_id=verificacion.id,
             resultado=ResultadoInspeccionVisual.APROBADA,
-            checklist_json={
-                "luces": "bien",
-                "limpiaparabrisas_claxon": "bien",
-                "espejos": "bien",
-                "llantas": "bien",
-                "fugas": "bien",
-                "escape": "bien",
-                "placas": "bien",
-            },
+            checklist_json={clave: "BUENO" for clave in CHECKLIST_INSPECCION_VISUAL},
             operador_id=verificacion.operador_id,
         )
     )
@@ -253,15 +246,15 @@ async def seed_demo() -> None:
                     verificacion_id=verificacion.id,
                     resultado=ResultadoInspeccionVisual.RECHAZADA,
                     checklist_json={
-                        "luces": "malo",
-                        "limpiaparabrisas_claxon": "bien",
-                        "espejos": "bien",
-                        "llantas": "bien",
-                        "fugas": "bien",
-                        "escape": "bien",
-                        "placas": "bien",
+                        clave: ("MALO" if clave == "sistema_escape" else "BUENO")
+                        for clave in CHECKLIST_INSPECCION_VISUAL
                     },
-                    causales_rechazo={"luces": "Micas rotas, luz delantera derecha fundida"},
+                    causales_rechazo={
+                        "items": {
+                            "sistema_escape": CHECKLIST_INSPECCION_VISUAL["sistema_escape"]
+                        },
+                        "observaciones": "Fuga audible en el escape a la altura del silenciador",
+                    },
                     operador_id=TEST_USER_ID,
                 )
             )

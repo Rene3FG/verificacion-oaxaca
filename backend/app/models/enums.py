@@ -47,6 +47,17 @@ class ResultadoInspeccionVisual(str, enum.Enum):
     RECHAZADA = "RECHAZADA"
 
 
+class ResultadoItemInspeccion(str, enum.Enum):
+    """Resultado por punto del checklist de inspección visual (sección 8 de
+    la revisión del Figma 2026-08-24): tres estados por ítem, no booleano.
+    Vive solo en `inspeccion_visual.checklist_json` (JSONB), no es un tipo
+    ENUM de Postgres."""
+
+    BUENO = "BUENO"
+    MALO = "MALO"
+    NO_APLICA = "NO_APLICA"
+
+
 class TipoPrueba(str, enum.Enum):
     DINAMICA = "DINAMICA"
     ESTATICA = "ESTATICA"
