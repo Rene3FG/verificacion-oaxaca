@@ -55,6 +55,39 @@ const puedeImprimir = computed(
     expediente.value.folio_externo &&
     ESTADOS_IMPRIMIBLES.includes(expediente.value.estado)
 );
+// Sección 7 del handoff: estos campos del vehículo son obligatorios para
+// imprimir (el backend responde 409 con el detalle si faltan) — aquí solo
+// se anticipa la advertencia; la validación real es del servidor.
+const CAMPOS_CERTIFICADO_OBLIGATORIOS = [
+  "tarjeta_circulacion",
+  "propietario_estado",
+  "propietario_municipio",
+  "propietario_codigo_postal",
+  "propietario_colonia",
+  "propietario_calle",
+  "propietario_numero_exterior",
+  "pbv",
+  "traccion",
+];
+const faltanDatosCertificado = computed(() => {
+  const v = expediente.value?.vehiculo;
+  if (!v) return false;
+  return CAMPOS_CERTIFICADO_OBLIGATORIOS.some((campo) => !v[campo]);
+});
+const domicilioPropietario = computed(() => {
+  const v = expediente.value?.vehiculo;
+  if (!v) return null;
+  const calle = [v.propietario_calle, v.propietario_numero_exterior].filter(Boolean).join(" ");
+  const partes = [
+    calle,
+    v.propietario_colonia,
+    v.propietario_codigo_postal ? `C.P. ${v.propietario_codigo_postal}` : null,
+    v.propietario_municipio,
+    v.propietario_estado,
+  ].filter(Boolean);
+  return partes.length ? partes.join(", ") : null;
+});
+
 const puedeCerrar = computed(
   () =>
     expediente.value &&
@@ -275,14 +308,38 @@ onMounted(cargarCola);
               <span class="text-caption text-medium-emphasis d-block">Resultado final</span>
               <span>{{ expediente.resultado_final ?? "—" }}</span>
             </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <span class="text-caption text-medium-emphasis d-block">Tarjeta de circulación</span>
+              <span>{{ expediente.vehiculo?.tarjeta_circulacion ?? "—" }}</span>
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <span class="text-caption text-medium-emphasis d-block">PBV / Tracción</span>
+              <span>
+                {{ expediente.vehiculo?.pbv ?? "—" }} ·
+                {{ expediente.vehiculo?.traccion ?? "—" }}
+              </span>
+            </v-col>
+            <v-col cols="12" md="8">
+              <span class="text-caption text-medium-emphasis d-block">Domicilio del propietario</span>
+              <span v-if="domicilioPropietario">{{ domicilioPropietario }}</span>
+              <span v-else>—</span>
+            </v-col>
+            <v-col v-if="expediente.hora_salida" cols="12" sm="6" md="4">
+              <span class="text-caption text-medium-emphasis d-block">Hora salida</span>
+              <span>{{ formatearFecha(expediente.hora_salida) }}</span>
+            </v-col>
           </v-row>
-          <p class="text-caption text-medium-emphasis mt-3 mb-0">
-            El diseño (Figma) también pide domicilio, municipio, tarjeta de
-            circulación, peso bruto vehicular y tracción — esos campos no
-            existen todavía en el backend (pendiente #5 que René levantó tras
-            revisar el Figma), así que no se muestran aquí hasta que se
-            capturen en algún punto anterior del flujo.
-          </p>
+          <v-alert
+            v-if="faltanDatosCertificado"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mt-3 mb-0"
+          >
+            Faltan datos obligatorios del certificado (domicilio, tarjeta de
+            circulación, PBV o tracción) — la impresión se bloqueará hasta que
+            Captura o Prueba los complete.
+          </v-alert>
         </v-card-text>
       </v-card>
 
