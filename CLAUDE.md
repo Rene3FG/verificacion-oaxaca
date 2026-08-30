@@ -960,11 +960,96 @@ AVANCE" del 2026-08-26).
 1. Confirmar con el cliente el supuesto de `hora_salida` (primer intento
    exitoso vs. primer clic sin importar el resultado).
 2. Frontend de todo lo de reimpresión (2026-08-27, sigue sin tocar).
-3. `PruebaView.vue` no tiene los campos nuevos de propietario/domicilio/
-   PBV/Tracción — si Prueba también necesita corregirlos, hay que
-   replicar ahí el mismo patrón de `CapturaView.vue`.
+3. ~~`PruebaView.vue` sin los campos nuevos~~ — resuelto 2026-08-30 (2ª
+   sesión), ver sección siguiente.
 4. `Certificate Result Projection Contract v1`, semestre/prórroga y
-   checklist real de inspección visual (puntos 3, 4 y 6 de la lista
-   original) siguen sin tocar — `generar_pdf_certificado` sigue siendo el
-   HTML mínimo de trazabilidad, no incluye los campos nuevos todavía en
-   el layout impreso (solo se validan como obligatorios, no se imprimen).
+   ~~checklist real de inspección visual~~ (checklist resuelto 2026-08-30,
+   2ª sesión) — `generar_pdf_certificado` sigue siendo el HTML mínimo de
+   trazabilidad, no incluye los campos nuevos todavía en el layout
+   impreso (solo se validan como obligatorios, no se imprimen).
+
+## Checklist real de inspección visual + integración de Fase 1 de Impresión (2026-08-30, 2ª sesión)
+
+Sesión de "checada general" contra la revisión del Figma. Con esto quedan
+cerrados **los 5 puntos del orden de trabajo sugerido** de la revisión del
+2026-08-24 (sección 14): folios locales, tipo manual, split de CERRADO,
+propietario/domicilio y checklist real.
+
+### Merge de `frontend-impresion-central` (Fase 1 de Sebastián)
+
+Sebastián pusheó 2 commits (`97c7a6f`, `4a90452`) tocando
+`ImpresionView.vue`/`ExpedienteHeader.vue` — la restricción del 2026-08-27
+de no tocar esos archivos ya no aplica: su trabajo está en origin y esta
+rama lo integró (merge `47b131b`). Hubo un conflicto real en
+`solicitarFolio`: su rama manejaba `data.folio` nulo porque partió del
+modelo viejo de folios externos (un 200 podía venir sin folio); con el
+inventario local ese caso es un 409 que cae al `catch`, así que se
+conservó su timestamp aproximado de `folio_asignado_at` y se eliminó la
+rama muerta con el mensaje de "sistema externo no respondió".
+
+Su nota de "domicilio/tarjeta/PBV/tracción no existen en el backend"
+quedó obsoleta el 2026-08-30 por la mañana — la card "Datos del
+expediente" ahora muestra esos campos reales, el domicilio armado,
+`hora_salida`, y una advertencia anticipada cuando faltan datos
+obligatorios del certificado (la validación real sigue siendo el 409 del
+backend).
+
+### Checklist real de inspección visual — punto 5 del orden, sección 8 del PDF
+
+- **`app/services/inspeccion_visual.py`** (nuevo):
+  `CHECKLIST_INSPECCION_VISUAL` — los 8 puntos reales (sistema de escape,
+  portafiltro/filtro de aire, tapón de aceite, tapón de combustible,
+  bayoneta de nivel, fugas de fluidos, neumáticos, componentes de control
+  de emisiones), y `evaluar_checklist` que valida cobertura exacta de los
+  8 y determina el resultado. Reemplaza el checklist booleano inventado
+  el 2026-08-14.
+- **Contrato nuevo de `POST /api/inspeccion/{id}`**: el cliente manda
+  `checklist: {clave: BUENO|MALO|NO_APLICA}` (+ `observaciones`
+  opcional); el `resultado` ya NO viene del cliente — cualquier MALO
+  rechaza (NO_APLICA no cuenta como falla) y esos puntos son las causales
+  (`causales_rechazo = {"items": {...}, "observaciones": ...}`). 422 con
+  detalle si faltan puntos o vienen desconocidos.
+- **`GET /api/inspeccion/checklist`**: catálogo para el frontend — no se
+  duplican claves/etiquetas en Vue.
+- **Fix de un 500 preexistente** (misma familia que pruebas/obd del
+  2026-08-24): registrar inspección fuera de
+  `INSPECCION_VISUAL_PENDIENTE` tiraba `TransitionNotAllowed` sin manejar;
+  ahora 409. Verificado en vivo: el segundo intento sobre el mismo
+  expediente devuelve 409.
+- **`PruebaView.vue`**: los 8 puntos se renderizan desde el catálogo con
+  `v-btn-toggle` de 3 estados; hay que pronunciarse sobre los 8 antes de
+  poder registrar; el resultado mostrado es anticipo (la decisión es del
+  servidor); observaciones opcionales. El panel de corrección de vehículo
+  gana los campos de propietario/domicilio/PBV/Tracción (Impresión
+  bloquea al imprimir si faltan y Prueba es la última estación que puede
+  corregirlos por PATCH).
+- **`seed_demo.py`** actualizado a la forma real (claves nuevas,
+  BUENO/MALO); la fila vieja de `RSC-238-F` en la base de dev NO se
+  migró (el seed es idempotente y el checklist viejo es solo dato
+  histórico de bitácora, no bloquea nada).
+- Probado en vivo contra el backend real (uvicorn + Postgres 5433):
+  catálogo, flujo completo captura-manual→normalizar→inspección con un
+  MALO → `PENDIENTE_DE_IMPRESION_RECHAZO` con causales correctas. Datos
+  de prueba limpiados (incluidas las DOS filas por evento de
+  `sync_outbox`) y suite verificada limpia después.
+
+**159 pruebas, todas pasan** (154→159). Build de frontend limpio.
+
+**Pendiente real tras esta sesión** (todo lo del orden sugerido está
+cerrado; esto es lo estructural que queda del PDF):
+1. `Certificate Result Projection Contract v1` (sección 4): snapshot de
+   proyección + `projection_version`/`layout_version`, lecturas fijas por
+   fase (`PAS_5024`/`PAS_2540` → RALENTÍ/CRUCERO), y el resultado de la
+   prueba calculado contra `limits_applied` en vez de elegido por el
+   operador — hoy `valores_medidos_json` sigue siendo editor libre de
+   pares clave/valor y `resultado` es un select manual.
+2. Semestre y prórroga (sección 5): cálculo por fecha + prórroga global
+   del 1er periodo activable por Supervisor, pantalla propia.
+3. `capacidad_dinamometro_kg` (sección 10): parámetro por equipo/línea
+   que participa en la determinación del tipo de prueba — no existe.
+4. Frontend de reimpresión (botones de folio dañado/reimpresión en
+   Impresión/Supervisor) y el supuesto de `hora_salida` a confirmar con
+   el cliente.
+5. Diseño visual (sección 13): tokens/guinda institucional — nada del
+   design system aplicado todavía; Sebastián está iterando la UI de
+   Impresión por su lado.
