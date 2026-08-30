@@ -201,6 +201,72 @@ async def test_actualizar_vehiculo_corregido_marca_fuente_corregido_operador(
     assert evento["detalle_json"]["fuente_datos_nueva"] == FuenteDatos.CORREGIDO_OPERADOR.value
 
 
+async def test_actualizar_vehiculo_guarda_propietario_domicilio_pbv_traccion(
+    client, db_session
+):
+    """Sección 7 del handoff (revisión Figma 2026-08-24): campos nuevos de
+    propietario/domicilio, tarjeta de circulación, PBV y Tracción. Comparten
+    la lógica genérica de HU-016 — se guardan, marcan origen y auditan en
+    bitácora igual que los campos de siempre."""
+
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, datos_certificado_completos=False
+    )
+    vehiculo = await db_session.get(Vehiculo, expediente.vehiculo_id)
+    vehiculo.fuente_datos = FuenteDatos.SIOX
+    db_session.add(vehiculo)
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"/api/expedientes/{expediente.id}/vehiculo",
+        json={
+            "tarjeta_circulacion": "TC-1234567",
+            "propietario_estado": "Oaxaca",
+            "propietario_municipio": "Oaxaca de Juárez",
+            "propietario_codigo_postal": "68000",
+            "propietario_colonia": "Centro",
+            "propietario_calle": "Independencia",
+            "propietario_numero_exterior": "45",
+            "pbv": "3200",
+            "traccion": "4x4",
+        },
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["tarjeta_circulacion"] == "TC-1234567"
+    assert body["propietario_estado"] == "Oaxaca"
+    assert body["propietario_municipio"] == "Oaxaca de Juárez"
+    assert body["propietario_codigo_postal"] == "68000"
+    assert body["propietario_colonia"] == "Centro"
+    assert body["propietario_calle"] == "Independencia"
+    assert body["propietario_numero_exterior"] == "45"
+    assert body["pbv"] == "3200"
+    assert body["traccion"] == "4x4"
+    # Venía de SIOX: cualquier corrección manual, incluidos estos campos
+    # nuevos, marca la fuente como CORREGIDO_OPERADOR (HU-016).
+    assert body["fuente_datos"] == FuenteDatos.CORREGIDO_OPERADOR.value
+
+    evento = (
+        await db_session.execute(
+            EventLog.__table__.select().where(
+                EventLog.verificacion_id == expediente.id,
+                EventLog.evento == "datos_vehiculo_corregidos",
+            )
+        )
+    ).mappings().one()
+    assert evento["detalle_json"]["campos_modificados"]["tarjeta_circulacion"] == {
+        "anterior": None,
+        "nuevo": "TC-1234567",
+    }
+    assert evento["detalle_json"]["campos_modificados"]["pbv"] == {
+        "anterior": None,
+        "nuevo": "3200",
+    }
+
+
 async def test_actualizar_vehiculo_sin_cambios_no_escribe_evento(client, db_session):
     sesion = await _sesion_captura(db_session)
     expediente = await crear_expediente(db_session, linea_id=1)

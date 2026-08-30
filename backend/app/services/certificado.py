@@ -26,6 +26,34 @@ class TipoCertificadoRequiereSeleccionManual(Exception):
     pass
 
 
+# Sección 7 del handoff (revisión Figma 2026-08-24): campos de propietario/
+# domicilio y del vehículo que el certificado exige. Opcionales al capturar
+# (ver app.models.vehiculo), obligatorios solo al momento de imprimir —
+# `campos_obligatorios_faltantes` es lo que hace cumplir eso.
+CAMPOS_OBLIGATORIOS_CERTIFICADO = {
+    "tarjeta_circulacion": "Número de tarjeta de circulación",
+    "propietario_estado": "Estado",
+    "propietario_municipio": "Municipio",
+    "propietario_codigo_postal": "Código postal",
+    "propietario_colonia": "Colonia",
+    "propietario_calle": "Calle",
+    "propietario_numero_exterior": "Número exterior",
+    "pbv": "Peso bruto vehicular (PBV)",
+    "traccion": "Tracción",
+}
+
+
+def campos_obligatorios_faltantes(vehiculo: Vehiculo) -> list[str]:
+    """Nombres legibles (no de columna) de los campos obligatorios del
+    certificado que el vehículo todavía no tiene capturados."""
+
+    return [
+        etiqueta
+        for campo, etiqueta in CAMPOS_OBLIGATORIOS_CERTIFICADO.items()
+        if not getattr(vehiculo, campo)
+    ]
+
+
 async def determinar_tipo_certificado(
     db: AsyncSession,
     verificacion: Verificacion,

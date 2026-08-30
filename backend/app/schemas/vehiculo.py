@@ -14,6 +14,15 @@ class VehiculoBase(BaseModel):
     tipo_vehiculo: str | None = None
     combustible: str | None = None
     razon_social: str | None = None
+    tarjeta_circulacion: str | None = None
+    propietario_estado: str | None = None
+    propietario_municipio: str | None = None
+    propietario_codigo_postal: str | None = None
+    propietario_colonia: str | None = None
+    propietario_calle: str | None = None
+    propietario_numero_exterior: str | None = None
+    pbv: str | None = None
+    traccion: str | None = None
 
 
 class VehiculoCreate(VehiculoBase):
@@ -39,3 +48,12 @@ class VehiculoUpdate(BaseModel):
     tipo_vehiculo: str | None = None
     combustible: str | None = None
     razon_social: str | None = None
+    tarjeta_circulacion: str | None = None
+    propietario_estado: str | None = None
+    propietario_municipio: str | None = None
+    propietario_codigo_postal: str | None = None
+    propietario_colonia: str | None = None
+    propietario_calle: str | None = None
+    propietario_numero_exterior: str | None = None
+    pbv: str | None = None
+    traccion: str | None = None

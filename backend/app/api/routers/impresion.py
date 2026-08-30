@@ -27,6 +27,7 @@ from app.services import state_machine
 from app.services.certificado import (
     TipoCertificadoIndeterminado,
     TipoCertificadoRequiereSeleccionManual,
+    campos_obligatorios_faltantes,
     determinar_tipo_certificado,
     generar_pdf_certificado,
 )
@@ -337,6 +338,13 @@ async def imprimir_certificado(
         raise HTTPException(
             status_code=409,
             detail="Primero debe calcularse/seleccionarse el tipo de certificado.",
+        )
+
+    faltantes = campos_obligatorios_faltantes(vehiculo)
+    if faltantes:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Faltan datos obligatorios del certificado: {', '.join(faltantes)}.",
         )
 
     print_job = (

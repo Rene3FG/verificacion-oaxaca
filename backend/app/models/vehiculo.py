@@ -16,6 +16,22 @@ class Vehiculo(Base, UUIDPKMixin, TimestampMixin):
     tipo_vehiculo: Mapped[str | None] = mapped_column(String(60))
     combustible: Mapped[str | None] = mapped_column(String(30))
     razon_social: Mapped[str | None] = mapped_column(String(200))
+
+    # Sección 7 del handoff (revisión Figma 2026-08-24): datos de propietario/
+    # domicilio y del vehículo que el certificado exige y hoy no se capturan.
+    # Opcionales a nivel de esquema; la obligatoriedad se valida al imprimir
+    # (ver `app.services.certificado.campos_obligatorios_faltantes`), no al
+    # capturar.
+    tarjeta_circulacion: Mapped[str | None] = mapped_column(String(60))
+    propietario_estado: Mapped[str | None] = mapped_column(String(60))
+    propietario_municipio: Mapped[str | None] = mapped_column(String(100))
+    propietario_codigo_postal: Mapped[str | None] = mapped_column(String(10))
+    propietario_colonia: Mapped[str | None] = mapped_column(String(100))
+    propietario_calle: Mapped[str | None] = mapped_column(String(150))
+    propietario_numero_exterior: Mapped[str | None] = mapped_column(String(20))
+    pbv: Mapped[str | None] = mapped_column(String(30))
+    traccion: Mapped[str | None] = mapped_column(String(30))
+
     fuente_datos: Mapped[FuenteDatos] = mapped_column(
         Enum(FuenteDatos, name="fuente_datos"), default=FuenteDatos.MANUAL
     )

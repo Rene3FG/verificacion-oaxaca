@@ -169,13 +169,37 @@ async def crear_expediente(
     combustible: str | None = None,
     modelo: int | None = None,
     combustible_validado: str | None = None,
+    datos_certificado_completos: bool = True,
 ) -> Verificacion:
+    """`datos_certificado_completos=True` (default) llena de una vez los
+    campos de propietario/domicilio/PBV/Tracción que el certificado exige
+    (sección 7 del handoff) con valores de prueba, para que las pruebas que
+    no son sobre ese requisito no tengan que preocuparse por él al llegar a
+    /imprimir. Pasar `False` para dejarlos en None (usado por las pruebas
+    que sí ejercitan el bloqueo por datos faltantes)."""
+
+    datos_certificado = (
+        dict(
+            tarjeta_circulacion="TC-0000001",
+            propietario_estado="Oaxaca",
+            propietario_municipio="Oaxaca de Juárez",
+            propietario_codigo_postal="68000",
+            propietario_colonia="Centro",
+            propietario_calle="Calle Falsa",
+            propietario_numero_exterior="123",
+            pbv="2500",
+            traccion="4x2",
+        )
+        if datos_certificado_completos
+        else {}
+    )
     vehiculo = Vehiculo(
         placa=placa or f"TST{uuid.uuid4().hex[:4].upper()}",
         fuente_datos=FuenteDatos.MANUAL,
         tipo_vehiculo=tipo_vehiculo,
         combustible=combustible,
         modelo=modelo,
+        **datos_certificado,
     )
     db_session.add(vehiculo)
     await db_session.flush()

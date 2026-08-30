@@ -27,7 +27,16 @@ const VEHICULO_CAMPOS = [
   "modelo",
   "tipo_vehiculo",
   "combustible",
+  "pbv",
+  "traccion",
   "razon_social",
+  "tarjeta_circulacion",
+  "propietario_estado",
+  "propietario_municipio",
+  "propietario_codigo_postal",
+  "propietario_colonia",
+  "propietario_calle",
+  "propietario_numero_exterior",
 ];
 
 const pasos = [
@@ -56,7 +65,16 @@ const vehiculoForm = reactive({
   modelo: null,
   tipo_vehiculo: null,
   combustible: null,
+  pbv: null,
+  traccion: null,
   razon_social: null,
+  tarjeta_circulacion: null,
+  propietario_estado: null,
+  propietario_municipio: null,
+  propietario_codigo_postal: null,
+  propietario_colonia: null,
+  propietario_calle: null,
+  propietario_numero_exterior: null,
 });
 const vehiculoOriginal = ref({});
 const guardandoVehiculo = ref(false);
@@ -469,6 +487,26 @@ onMounted(cargarExpedientesEnCurso);
                 :append-inner-icon="esCampoEditado('combustible') ? 'mdi-pencil' : undefined"
               />
             </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="vehiculoForm.pbv"
+                label="Peso bruto vehicular (PBV)"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('pbv') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="vehiculoForm.traccion"
+                label="Tracción"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('traccion') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
           </v-row>
           <v-btn
             class="mt-2"
@@ -483,20 +521,99 @@ onMounted(cargarExpedientesEnCurso);
       </v-card>
 
       <v-card class="mb-4" variant="outlined">
-        <v-card-title>Propietario</v-card-title>
+        <v-card-title>Propietario y domicilio</v-card-title>
         <v-card-text>
-          <v-text-field
-            v-model="vehiculoForm.razon_social"
-            label="Razón social"
+          <v-row dense>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="vehiculoForm.razon_social"
+                label="Razón social"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('razon_social') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="vehiculoForm.tarjeta_circulacion"
+                label="Número de tarjeta de circulación"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('tarjeta_circulacion') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-text-field
+                v-model="vehiculoForm.propietario_estado"
+                label="Estado"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('propietario_estado') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-text-field
+                v-model="vehiculoForm.propietario_municipio"
+                label="Municipio"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('propietario_municipio') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-text-field
+                v-model="vehiculoForm.propietario_colonia"
+                label="Colonia"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('propietario_colonia') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
+            <v-col cols="12" md="5">
+              <v-text-field
+                v-model="vehiculoForm.propietario_calle"
+                label="Calle"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('propietario_calle') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
+            <v-col cols="12" md="3">
+              <v-text-field
+                v-model="vehiculoForm.propietario_numero_exterior"
+                label="No. exterior"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('propietario_numero_exterior') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-text-field
+                v-model="vehiculoForm.propietario_codigo_postal"
+                label="Código postal"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('propietario_codigo_postal') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
+          </v-row>
+          <v-btn
+            class="mt-2"
             variant="outlined"
-            density="comfortable"
             :disabled="!puedeEditarVehiculo"
-            :append-inner-icon="esCampoEditado('razon_social') ? 'mdi-pencil' : undefined"
-          />
-          <v-alert type="info" variant="tonal" density="compact">
-            La tarjeta de circulación no tiene campo propio en el backend todavía
-            (ver Vehiculo/VehiculoUpdate) — pendiente de agregar si se necesita.
-          </v-alert>
+            :loading="guardandoVehiculo"
+            @click="guardarVehiculo"
+          >
+            Guardar propietario y domicilio
+          </v-btn>
         </v-card-text>
       </v-card>
 

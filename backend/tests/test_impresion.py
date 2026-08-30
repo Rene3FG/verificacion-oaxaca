@@ -228,6 +228,36 @@ async def test_imprimir_sin_tipo_certificado_responde_409(client, db_session):
     assert resp.status_code == 409
 
 
+async def test_imprimir_con_datos_obligatorios_faltantes_responde_409(client, db_session):
+    """Sección 7 del handoff: propietario/domicilio, tarjeta de circulación,
+    PBV y Tracción son opcionales al capturar pero obligatorios al imprimir
+    (`app.services.certificado.campos_obligatorios_faltantes`)."""
+
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.FOLIO_ASIGNADO,
+        datos_certificado_completos=False,
+    )
+    expediente.resultado_final = ResultadoFinal.APROBADO
+    expediente.folio_externo = "F-0001"
+    expediente.certificado_tipo = "PARTICULAR"
+    db_session.add(expediente)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/impresion/imprimir/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 409
+    detalle = resp.json()["detail"]
+    assert "Tracción" in detalle
+    assert "Peso bruto vehicular" in detalle
+    assert "tarjeta de circulación" in detalle
+
+
 async def test_imprimir_exitoso_crea_print_job_y_transiciona_a_impreso(client, db_session):
     sesion = await _sesion_impresion(db_session)
     expediente = await crear_expediente(
