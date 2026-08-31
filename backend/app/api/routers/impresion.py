@@ -20,6 +20,7 @@ from app.models.event_log import EventLog
 from app.models.folio import Folio
 from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
+from app.models.resultado_prueba import ResultadoPrueba
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
 from app.schemas.verificacion import ExpedienteCompleto
@@ -33,6 +34,7 @@ from app.services.certificado import (
 )
 from app.services.folio_inventario import SinFolioDisponible, asignar_siguiente_folio
 from app.services.impresora import imprimir as imprimir_en_impresora
+from app.services.proyeccion_certificado import LayoutSinMapeo, generar_proyeccion_certificado
 from app.services.sync import registrar_evento_con_sync
 
 router = APIRouter(prefix="/api/impresion", tags=["impresion"])
@@ -122,6 +124,43 @@ async def _folio_actual(db: AsyncSession, verificacion: Verificacion) -> Folio |
             )
         )
     ).scalars().first()
+
+
+async def _ultimo_resultado_prueba(
+    db: AsyncSession, verificacion_id: uuid.UUID
+) -> ResultadoPrueba | None:
+    """`None` cuando el expediente nunca pasó por Prueba (rechazo directo
+    desde inspección visual, regla de negocio #3) — ver
+    `generar_proyeccion_certificado` para cómo se maneja ese caso."""
+
+    return (
+        await db.execute(
+            select(ResultadoPrueba)
+            .where(ResultadoPrueba.verificacion_id == verificacion_id)
+            .order_by(ResultadoPrueba.created_at.desc())
+        )
+    ).scalars().first()
+
+
+async def _generar_y_fijar_proyeccion(
+    db: AsyncSession, verificacion: Verificacion, print_job: PrintJob
+) -> None:
+    """'Certificate Result Projection Contract v1' (sección 4): "antes del
+    primer clic en Imprimir, el Backend genera certificate_projection_json
+    ... se persisten snapshot + Hora Salida antes de generar/enviar el
+    trabajo a la impresora" — se llama antes de `_imprimir_y_registrar`,
+    independiente de si el envío físico tiene éxito o falla."""
+
+    resultado_prueba = await _ultimo_resultado_prueba(db, verificacion.id)
+    try:
+        proyeccion = generar_proyeccion_certificado(verificacion, resultado_prueba)
+    except LayoutSinMapeo as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    print_job.certificate_projection_json = proyeccion
+    print_job.projection_version = proyeccion["projection_version"]
+    print_job.layout_version = proyeccion["layout_version"]
+    db.add(print_job)
 
 
 async def _imprimir_y_registrar(
@@ -361,6 +400,13 @@ async def imprimir_certificado(
         db.add(print_job)
         await db.flush()
 
+    if print_job.certificate_projection_json is None:
+        # Se genera una sola vez, antes de llamar a la impresora — cubre
+        # tanto el primer clic real como un PrintJob viejo que por algún
+        # motivo se quedó sin proyección (nunca se regenera si ya existe:
+        # ver sección 3 del handoff, "reintento técnico conserva projection").
+        await _generar_y_fijar_proyeccion(db, verificacion, print_job)
+
     folio = await _folio_actual(db, verificacion)
     exito = await _imprimir_y_registrar(db, verificacion, vehiculo, folio, print_job)
 
@@ -541,10 +587,15 @@ async def reimprimir_por_dano(
             verificacion=verificacion,
         )
         folio_para_imprimir = folio_nuevo
+        # Reimpresión AUTORIZADA (sección 4, bloque 01): regenera la
+        # proyección solo por el folio nuevo — el resultado técnico sigue
+        # viniendo de la misma fila de ResultadoPrueba, inmutable.
+        await _generar_y_fijar_proyeccion(db, verificacion, print_job)
     elif folio_actual.estatus == EstadoFolio.ASIGNADO:
         # Reimpresión ya autorizada en una llamada previa (el canje de
         # folio ya ocurrió); esta es solo el reintento técnico del envío
-        # físico a la impresora, no una nueva decisión de reimpresión.
+        # físico a la impresora, no una nueva decisión de reimpresión —
+        # conserva la proyección ya generada, no se regenera.
         folio_para_imprimir = folio_actual
     else:
         raise HTTPException(
@@ -639,10 +690,16 @@ async def corregir_tipo_certificado_post_impresion(
             verificacion=verificacion,
         )
         folio_para_imprimir = folio_nuevo
+        # Reimpresión AUTORIZADA (sección 4, bloque 01): regenera la
+        # proyección con el certificado_tipo/folio corregidos — el
+        # resultado técnico sigue viniendo de la misma fila de
+        # ResultadoPrueba, inmutable (RECHAZO no llega aquí, ver guard de
+        # arriba).
+        await _generar_y_fijar_proyeccion(db, verificacion, print_job)
     elif folio_actual.estatus == EstadoFolio.ASIGNADO:
         # Corrección ya autorizada en una llamada previa (certificado_tipo
         # y folio ya se cambiaron); esta es solo el reintento técnico del
-        # envío físico a la impresora.
+        # envío físico a la impresora — conserva la proyección ya generada.
         folio_para_imprimir = folio_actual
     else:
         raise HTTPException(

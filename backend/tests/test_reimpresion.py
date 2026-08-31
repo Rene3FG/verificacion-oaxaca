@@ -6,10 +6,18 @@ para el texto íntegro de las reglas."""
 
 from sqlalchemy import select
 
-from app.models.enums import EstadoFolio, EstadoVerificacion, ResultadoFinal, StationType
+from app.models.enums import (
+    EstadoFolio,
+    EstadoVerificacion,
+    ResultadoFinal,
+    ResultadoPruebaEnum,
+    StationType,
+    TipoPrueba,
+)
 from app.models.folio import Folio
 from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
+from app.models.resultado_prueba import ResultadoPrueba
 from tests.conftest import (
     crear_estacion,
     crear_expediente,
@@ -80,6 +88,151 @@ async def _imprimir(client, sesion, expediente):
     assert resp.status_code == 200
     assert resp.json()["estado_expediente"] == EstadoVerificacion.IMPRESO.value
     return resp
+
+
+async def _con_resultado_prueba_gasolina(db_session, expediente):
+    """Adjunta un ResultadoPrueba de gasolina dinámica ya evaluado (bypass
+    de `POST /api/pruebas/resultado`, que no es lo que se está probando
+    aquí) para ejercitar 'Certificate Result Projection Contract v1'
+    (sección 4) con datos reales de lecturas."""
+
+    expediente.tipo_prueba_final = TipoPrueba.DINAMICA
+    db_session.add(expediente)
+    resultado = ResultadoPrueba(
+        verificacion_id=expediente.id,
+        tipo_prueba=TipoPrueba.DINAMICA,
+        combustible="GASOLINA",
+        resultado=ResultadoPruebaEnum.APROBADO,
+        valores_medidos_json={
+            "ralenti": {
+                "hc_ppm": 50, "co_pct": 0.3, "co2_pct": 10.0, "o2_pct": 1.0,
+                "nox_ppm": None, "speed_kph": None,
+            },
+            "crucero": {
+                "hc_ppm": 40, "co_pct": 0.2, "co2_pct": 11.0, "o2_pct": 1.2,
+                "nox_ppm": None, "speed_kph": None,
+            },
+        },
+        limites_aplicados_json={},
+        linea_id=expediente.linea_id,
+    )
+    db_session.add(resultado)
+    await db_session.commit()
+    await db_session.refresh(resultado)
+    return resultado
+
+
+# --- 'Certificate Result Projection Contract v1' (sección 4) --------------
+
+
+async def test_imprimir_genera_proyeccion_de_certificado(client, db_session):
+    """El snapshot se genera antes de enviar el trabajo a la impresora, a
+    partir de `ResultadoPrueba.valores_medidos_json` — nunca de un dato
+    crudo (bloque 01 del contrato)."""
+
+    sesion = await _sesion_impresion(db_session)
+    sesion_supervisor = await crear_sesion_supervisor(db_session, station_type=StationType.IMPRESION)
+    expediente = await _expediente_con_folio_asignado(client, db_session, sesion, sesion_supervisor)
+    resultado_prueba = await _con_resultado_prueba_gasolina(db_session, expediente)
+
+    await _imprimir(client, sesion, expediente)
+
+    print_job = (
+        await db_session.execute(select(PrintJob).where(PrintJob.verificacion_id == expediente.id))
+    ).scalar_one()
+    proyeccion = print_job.certificate_projection_json
+    assert proyeccion is not None
+    assert print_job.projection_version == "v1"
+    assert print_job.layout_version == "v1"
+    assert proyeccion["method"] == "GAS_DYNAMIC"
+    assert proyeccion["certificate_type"] == "PARTICULAR"
+    assert proyeccion["test_result_id"] == str(resultado_prueba.id)
+    assert proyeccion["evaluation_result"] == "APROBADO"
+    assert proyeccion["fields"]["ralenti"]["co_co2_pct"] == 10.3
+    assert proyeccion["fields"]["crucero"]["hc_ppm"] == 40
+    # Campos de equipo fuera del contrato de sobreimpresión (RPM, lambda,
+    # etc.) no están aquí: fields solo trae lo que sí se sobreimprime.
+    assert set(proyeccion["fields"]["ralenti"].keys()) == {
+        "hc_ppm", "co_pct", "co2_pct", "co_co2_pct", "o2_pct", "nox_ppm", "speed_kph",
+    }
+
+
+async def test_reintento_tecnico_conserva_la_proyeccion(client, db_session, monkeypatch):
+    """Sección 3/4 del handoff: un reintento técnico (misma impresión
+    fallida, mismo folio) NO regenera la proyección."""
+
+    sesion = await _sesion_impresion(db_session)
+    sesion_supervisor = await crear_sesion_supervisor(db_session, station_type=StationType.IMPRESION)
+    expediente = await _expediente_con_folio_asignado(client, db_session, sesion, sesion_supervisor)
+    await _con_resultado_prueba_gasolina(db_session, expediente)
+
+    resultados = iter([False, True])
+
+    async def _impresora_falla_luego_exitosa(pdf_bytes: bytes) -> bool:
+        return next(resultados)
+
+    monkeypatch.setattr(
+        "app.api.routers.impresion.imprimir_en_impresora", _impresora_falla_luego_exitosa
+    )
+
+    resp1 = await client.post(
+        f"/api/impresion/imprimir/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert resp1.json()["estado_expediente"] == EstadoVerificacion.IMPRESION_FALLIDA.value
+
+    print_job = (
+        await db_session.execute(select(PrintJob).where(PrintJob.verificacion_id == expediente.id))
+    ).scalar_one()
+    proyeccion_tras_falla = print_job.certificate_projection_json
+    assert proyeccion_tras_falla is not None
+
+    resp2 = await client.post(
+        f"/api/impresion/imprimir/{expediente.id}",
+        headers={"X-Session-Id": str(sesion_supervisor.id)},
+    )
+    assert resp2.json()["estado_expediente"] == EstadoVerificacion.IMPRESO.value
+
+    await db_session.refresh(print_job)
+    assert print_job.certificate_projection_json == proyeccion_tras_falla
+
+
+async def test_corregir_tipo_post_impresion_regenera_proyeccion_preservando_resultado_tecnico(
+    client, db_session
+):
+    """Bloque 01 del contrato: la reimpresión autorizada 'genera una nueva
+    proyección solo para los campos cuya sustitución esté autorizada (p.
+    ej. folio/tipo)' — `certificate_type` cambia, pero `test_result_id`,
+    `fields` y `evaluation_result` (el resultado técnico, inmutable) no."""
+
+    sesion = await _sesion_impresion(db_session)
+    sesion_supervisor = await crear_sesion_supervisor(db_session, station_type=StationType.IMPRESION)
+    await _registrar_lote(
+        client, sesion_supervisor, tipo_certificado="INTENSIVO",
+        folio_inicio="INT-000001", folio_fin="INT-000001",
+    )
+    expediente = await _expediente_con_folio_asignado(client, db_session, sesion, sesion_supervisor)
+    resultado_prueba = await _con_resultado_prueba_gasolina(db_session, expediente)
+    await _imprimir(client, sesion, expediente)
+
+    print_job = (
+        await db_session.execute(select(PrintJob).where(PrintJob.verificacion_id == expediente.id))
+    ).scalar_one()
+    proyeccion_antes = print_job.certificate_projection_json
+    assert proyeccion_antes["certificate_type"] == "PARTICULAR"
+
+    resp = await client.post(
+        f"/api/impresion/tipo-certificado-post-impresion/{expediente.id}",
+        params={"nuevo_tipo": "INTENSIVO"},
+        headers={"X-Session-Id": str(sesion_supervisor.id)},
+    )
+    assert resp.status_code == 200
+
+    await db_session.refresh(print_job)
+    proyeccion_despues = print_job.certificate_projection_json
+    assert proyeccion_despues["certificate_type"] == "INTENSIVO"
+    assert proyeccion_despues["test_result_id"] == proyeccion_antes["test_result_id"] == str(resultado_prueba.id)
+    assert proyeccion_despues["fields"] == proyeccion_antes["fields"]
+    assert proyeccion_despues["evaluation_result"] == proyeccion_antes["evaluation_result"] == "APROBADO"
 
 
 # --- Folio.estatus pasa a IMPRESO tras imprimir con éxito ------------------

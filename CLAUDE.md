@@ -1037,12 +1037,10 @@ backend).
 
 **Pendiente real tras esta sesión** (todo lo del orden sugerido está
 cerrado; esto es lo estructural que queda del PDF):
-1. `Certificate Result Projection Contract v1` (sección 4): snapshot de
-   proyección + `projection_version`/`layout_version`, lecturas fijas por
-   fase (`PAS_5024`/`PAS_2540` → RALENTÍ/CRUCERO), y el resultado de la
-   prueba calculado contra `limits_applied` en vez de elegido por el
-   operador — hoy `valores_medidos_json` sigue siendo editor libre de
-   pares clave/valor y `resultado` es un select manual.
+1. ~~`Certificate Result Projection Contract v1` (sección 4)~~ — mecanismo
+   de backend resuelto 2026-08-31, ver sección siguiente. Frontend
+   (campos fijos de lectura, editor libre eliminado) y layout impreso
+   siguen sin tocar.
 2. Semestre y prórroga (sección 5): cálculo por fecha + prórroga global
    del 1er periodo activable por Supervisor, pantalla propia.
 3. `capacidad_dinamometro_kg` (sección 10): parámetro por equipo/línea
@@ -1053,3 +1051,132 @@ cerrado; esto es lo estructural que queda del PDF):
 5. Diseño visual (sección 13): tokens/guinda institucional — nada del
    design system aplicado todavía; Sebastián está iterando la UI de
    Impresión por su lado.
+
+## Certificate Result Projection Contract v1 — mecanismo de backend (2026-08-31)
+
+Implementa el punto 1 pendiente de arriba (sección 4 del PDF). Decisiones
+explícitas de esta sesión, confirmadas con el usuario antes de escribir
+código:
+
+- **Sin valores reales de la NOM**: el contrato exige calcular
+  APROBADO/RECHAZADO comparando lecturas contra `limits_applied`, pero el
+  PDF no trae la tabla oficial de límites (NOM-042 gasolina, NOM-045
+  diésel) — solo dice que existen. Fabricar un umbral regulatorio real
+  sería distinto a proponer un checklist a falta de diseño (que sí se hizo
+  antes); se construyó el mecanismo completo (catálogo + comparación) con
+  los valores vacíos, a cargar por Administración cuando tenga la tabla
+  oficial.
+- **Alcance backend-only**: frontend (reemplazar el editor libre de
+  `PruebaView.vue` por campos fijos por método) y el layout impreso
+  (`generar_pdf_certificado` sigue siendo el HTML mínimo de trazabilidad)
+  quedan pendientes, igual que se hizo con reimpresión el 2026-08-27.
+
+### Resultado automático — ya no es selección manual del operador
+
+- **`MetodoPrueba`** (`app/models/enums.py`): GAS_STATIC/GAS_DYNAMIC/
+  DIESEL_OPACITY — no es lo mismo que `TipoPrueba` (ESTATICA→GAS_STATIC,
+  DINAMICA→GAS_DYNAMIC, OPACIDAD→DIESEL_OPACITY; `TipoPrueba.ALTERNA` no
+  tiene método aprobado, `metodo_de()` en `app/schemas/prueba.py` lanza
+  `MetodoSinMapeo` → 409).
+- **`LimiteEmision`** (`app/models/limite_emision.py`, tabla
+  `cat_limites_emision`): catálogo por `metodo`+`fase`(RALENTI/CRUCERO,
+  `NULL` para diésel)+`parametro`+`valor_maximo`. `POST`/`GET
+  /api/pruebas/limites-emision` (`requiere_supervisor`, upsert por
+  metodo+fase+parametro) — mismo criterio de "Supervisor como
+  aproximación temporal al Superadmin" que folios.
+- **`app/services/evaluacion_prueba.py`**: compara `normalized_payload`
+  contra `LimiteEmision`. Sin límites configurados para todos los
+  parámetros exigibles del método, lanza `LimitesNoConfigurados` → 409
+  ("Contactar a Administración para cargar el catálogo") — nunca inventa
+  un umbral ni cae a selección manual, mismo patrón que "Sin folio
+  disponible" en `folio_inventario.py`.
+- **`POST /api/pruebas/resultado/{id}`**: el payload cambió de
+  `{resultado, valores_medidos_json, limites_aplicados_json}` (elegidos
+  por el operador) a `{normalized_payload}` con shape fijo por método
+  (`app.schemas.prueba.NormalizedPayloadGasolina`/`NormalizedPayloadDiesel`,
+  422 si no matchea). `resultado` y `limites_aplicados_json` los calcula
+  el servidor; NOx/velocidad son opcionales en gasolina y no participan en
+  la evaluación (el contrato dice explícitamente "nunca fabricar 0" si no
+  aplican).
+
+### Snapshot de proyección — `PrintJob.certificate_projection_json`
+
+- **`app/services/proyeccion_certificado.py`**: `generar_proyeccion_certificado`
+  arma el JSON del contrato (`projection_version`, `layout_version`,
+  `certificate_type`, `verification_type`, `test_result_id`, `method`,
+  `semestre`, `fields`, `evaluation_result`, `generated_at`) siempre desde
+  `ResultadoPrueba.valores_medidos_json` (nunca desde un dato crudo, como
+  exige el contrato). `fields` para gasolina trae RALENTÍ/CRUCERO con
+  `co_co2_pct` calculado en backend (`co_pct+co2_pct`); para diésel,
+  únicamente `coefficient_absorption_final_k_m1` — el resto de las
+  lecturas diésel (temperatura, RPM, aceleraciones) se queda en
+  `ResultadoPrueba.valores_medidos_json` como evidencia, nunca se
+  sobreimprime, tal como pide la sección 4.
+- **Semestre**: `calcular_semestre` implementa solo la regla base por
+  fecha (1 ene-30 jun=1°, 1 jul-31 dic=2°) — la prórroga global del 1er
+  periodo (punto 2 de la lista de pendientes, con pantalla propia de
+  Supervisor) sigue sin construirse; el campo `semestre` del contrato
+  queda cubierto a medias a propósito.
+- **Hueco del contrato, no inventado**: un rechazo por inspección visual
+  nunca pasa por Prueba, así que no hay `ResultadoPrueba` — la sección 4
+  no define un payload de sobreimpresión para ese camino.
+  `generar_proyeccion_certificado(verificacion, None)` devuelve
+  `method`/`fields` vacíos y `evaluation_result="RECHAZADO"` (leído de
+  `certificado_tipo`, ya que `resultado_final` no siempre se llena en ese
+  camino — ver `app.services.certificado.determinar_tipo_certificado`).
+- **Cuándo se genera/regenera** (`app/api/routers/impresion.py`,
+  `_generar_y_fijar_proyeccion`): una sola vez, antes de llamar a la
+  impresora en el primer clic de `/imprimir` (mismo momento que fija
+  `hora_salida`, pero sin el gate de éxito — el bloque 01 del contrato
+  pide generarla *antes* de enviar el trabajo, no solo si tuvo éxito). Un
+  reintento técnico (`IMPRESION_FALLIDA` → reintentar) la conserva sin
+  cambios. Una reimpresión AUTORIZADA (`/folio/reimprimir-por-dano`,
+  `/tipo-certificado-post-impresion`) la regenera — el resultado técnico
+  (`test_result_id`, `fields`, `evaluation_result`) no cambia porque sigue
+  viniendo de la misma fila de `ResultadoPrueba`, inmutable; solo
+  `certificate_type` puede cambiar.
+- **Ambigüedad resuelta sin preguntar** (documentada aquí para
+  confirmar): el bloque 01 dice que una reimpresión autorizada "genera una
+  nueva proyección solo para los campos... (p. ej. folio/tipo)", lo que
+  sugiere que el folio vive dentro del JSON — pero el `SCHEMA:` explícito
+  del bloque 04 no lista ningún campo de folio. Se siguió el `SCHEMA:`
+  literal (el folio no está en `certificate_projection_json`, se sigue
+  rastreando donde ya vivía: `Verificacion.folio_externo`/`Folio`) — a
+  confirmar con el equipo de diseño si el folio debería vivir también
+  dentro del snapshot.
+- **Migración `90406768e121`**: tabla `cat_limites_emision` +
+  `print_jobs.certificate_projection_json`/`projection_version`/
+  `layout_version`.
+- `app/seed_demo.py` (`MKD-674-D`, diésel aprobado): `valores_medidos_json`
+  actualizado al shape nuevo (`coefficient_absorption_final_k_m1`) — la
+  fila vieja de dev con `opacidad_porcentaje` no se migró (mismo criterio
+  que otras sesiones: el seed es idempotente, no hay alta automática de
+  datos de sesiones previas).
+
+**13 pruebas nuevas** (`tests/test_pruebas.py`: evaluación gasolina/diésel
+aprobado/rechazado, límites no configurados, método sin mapeo, payload
+inválido, CRUD de límites; `tests/test_reimpresion.py`: generación en el
+primer clic, preservación en reintento técnico, regeneración en
+corrección post-impresión; `tests/test_proyeccion_certificado.py`: rechazo
+por inspección visual sin `ResultadoPrueba`, diésel solo sobreimprime el
+coeficiente, cálculo de semestre). **172 pruebas, todas pasan.** Verificado
+que la app importa y monta las rutas sin errores (`from app.main import
+app`); no se probó contra Chrome en esta sesión (alcance backend-only).
+Commit pendiente de crear y de confirmación explícita de push, como
+siempre en este proyecto.
+
+**Pendiente real:**
+1. Frontend de captura de lecturas (reemplazar el editor libre de
+   `valores_medidos_json` en `PruebaView.vue` por los campos fijos por
+   método) y consumo de `/api/pruebas/limites-emision` desde
+   `SupervisorView.vue`.
+2. Cargar los valores reales de la NOM en `cat_limites_emision` cuando
+   Administración tenga la tabla oficial — hoy vacío a propósito.
+3. Layout impreso: `generar_pdf_certificado` sigue sin usar
+   `certificate_projection_json` (bloque RALENTÍ/CRUCERO físico de la
+   sección 4, sección 02 del PDF).
+4. Confirmar con diseño la ambigüedad del folio dentro/fuera del snapshot
+   (ver arriba).
+5. Semestre y prórroga (sección 5), `capacidad_dinamometro_kg` (sección
+   10), frontend de reimpresión y diseño visual (sección 13) — sin
+   cambios, siguen en la lista de arriba.

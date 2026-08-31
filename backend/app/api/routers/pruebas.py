@@ -7,19 +7,37 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import SessionContext, assert_linea_permitida, get_db, requiere_estacion
+from pydantic import ValidationError
+
+from app.api.deps import (
+    SessionContext,
+    assert_linea_permitida,
+    get_db,
+    requiere_estacion,
+    requiere_supervisor,
+)
 from app.models.enums import (
     EstadoVerificacion,
+    FaseLectura,
+    MetodoPrueba,
     ResultadoFinal,
     ResultadoPruebaEnum,
     StationType,
     TipoPrueba,
 )
 from app.models.event_log import EventLog
+from app.models.limite_emision import LimiteEmision
 from app.models.resultado_prueba import ResultadoPrueba
 from app.models.verificacion import Verificacion
+from app.schemas.prueba import (
+    MetodoSinMapeo,
+    NormalizedPayloadDiesel,
+    NormalizedPayloadGasolina,
+    metodo_de,
+)
 from app.schemas.verificacion import ExpedienteCompleto
 from app.services import state_machine
+from app.services.evaluacion_prueba import LimitesNoConfigurados, evaluar_diesel, evaluar_gasolina
 
 router = APIRouter(prefix="/api/pruebas", tags=["pruebas"])
 
@@ -177,9 +195,13 @@ async def iniciar_prueba(
 
 
 class ResultadoPruebaInput(BaseModel):
-    resultado: ResultadoPruebaEnum
-    valores_medidos_json: dict
-    limites_aplicados_json: dict | None = None
+    """'Certificate Result Projection Contract v1' (sección 4): el operador
+    ya no elige `resultado` — lo calcula el servidor comparando
+    `normalized_payload` contra `LimiteEmision` (ver
+    app.services.evaluacion_prueba). El shape exacto de
+    `normalized_payload` depende del método (ver app.schemas.prueba)."""
+
+    normalized_payload: dict
     equipo_id: uuid.UUID | None = None
 
 
@@ -210,14 +232,31 @@ async def guardar_resultado_prueba(
             detail="El expediente no tiene combustible validado.",
         )
 
+    try:
+        metodo = metodo_de(verificacion.tipo_prueba_final)
+    except MetodoSinMapeo as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    try:
+        if metodo == MetodoPrueba.DIESEL_OPACITY:
+            payload_validado = NormalizedPayloadDiesel.model_validate(payload.normalized_payload)
+            resultado, limits_applied, excedidos = await evaluar_diesel(db, metodo, payload_validado)
+        else:
+            payload_validado = NormalizedPayloadGasolina.model_validate(payload.normalized_payload)
+            resultado, limits_applied, excedidos = await evaluar_gasolina(db, metodo, payload_validado)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except LimitesNoConfigurados as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     db.add(
         ResultadoPrueba(
             verificacion_id=verificacion.id,
             tipo_prueba=verificacion.tipo_prueba_final,
             combustible=verificacion.combustible_validado,
-            resultado=payload.resultado,
-            valores_medidos_json=payload.valores_medidos_json,
-            limites_aplicados_json=payload.limites_aplicados_json,
+            resultado=resultado,
+            valores_medidos_json=payload_validado.model_dump(),
+            limites_aplicados_json=limits_applied,
             equipo_id=payload.equipo_id,
             linea_id=verificacion.linea_id,
             operador_id=session.user_id,
@@ -228,7 +267,7 @@ async def guardar_resultado_prueba(
 
     verificacion.resultado_final = (
         ResultadoFinal.APROBADO
-        if payload.resultado == ResultadoPruebaEnum.APROBADO
+        if resultado == ResultadoPruebaEnum.APROBADO
         else ResultadoFinal.RECHAZADO
     )
 
@@ -239,7 +278,7 @@ async def guardar_resultado_prueba(
         usuario_id=session.user_id,
         modulo="prueba",
         evento="resultado_prueba_guardado",
-        detalle={"resultado": payload.resultado},
+        detalle={"resultado": resultado, "causales": excedidos} if excedidos else {"resultado": resultado},
     )
     await state_machine.transition(
         db,
@@ -253,3 +292,75 @@ async def guardar_resultado_prueba(
     )
     await db.commit()
     return {"estado_expediente": verificacion.estado}
+
+
+class LimiteEmisionInput(BaseModel):
+    metodo: MetodoPrueba
+    fase: FaseLectura | None = None
+    parametro: str
+    valor_maximo: float
+
+
+@router.get("/limites-emision")
+async def listar_limites_emision(
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> list[LimiteEmisionInput]:
+    """Catálogo configurable que consume `app.services.evaluacion_prueba`.
+    Vacío por defecto a propósito (ver docstring de `LimiteEmision`): no
+    hay valores reales de la NOM cargados en esta sesión."""
+
+    filas = (await db.execute(select(LimiteEmision))).scalars().all()
+    return [
+        LimiteEmisionInput(
+            metodo=fila.metodo, fase=fila.fase, parametro=fila.parametro, valor_maximo=fila.valor_maximo
+        )
+        for fila in filas
+    ]
+
+
+@router.post("/limites-emision")
+async def cargar_limite_emision(
+    payload: LimiteEmisionInput,
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Alta o actualización (upsert por metodo+fase+parametro) de un límite
+    de emisión. Exclusivo de Supervisor, mismo criterio que
+    `POST /api/folios/lotes` — el rol de plataforma/Superadmin que el
+    handoff describe para catálogos no existe todavía en este sistema."""
+
+    if payload.metodo == MetodoPrueba.DIESEL_OPACITY and payload.fase is not None:
+        raise HTTPException(
+            status_code=422, detail="DIESEL_OPACITY no tiene fases; omitir `fase`."
+        )
+    if payload.metodo != MetodoPrueba.DIESEL_OPACITY and payload.fase is None:
+        raise HTTPException(
+            status_code=422, detail=f"{payload.metodo.value} requiere `fase` (RALENTI/CRUCERO)."
+        )
+
+    existente = (
+        await db.execute(
+            select(LimiteEmision).where(
+                LimiteEmision.metodo == payload.metodo,
+                LimiteEmision.fase == payload.fase,
+                LimiteEmision.parametro == payload.parametro,
+            )
+        )
+    ).scalars().first()
+
+    if existente is not None:
+        existente.valor_maximo = payload.valor_maximo
+        db.add(existente)
+    else:
+        db.add(
+            LimiteEmision(
+                metodo=payload.metodo,
+                fase=payload.fase,
+                parametro=payload.parametro,
+                valor_maximo=payload.valor_maximo,
+            )
+        )
+
+    await db.commit()
+    return {"metodo": payload.metodo, "fase": payload.fase, "parametro": payload.parametro}

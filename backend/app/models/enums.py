@@ -65,6 +65,29 @@ class TipoPrueba(str, enum.Enum):
     ALTERNA = "ALTERNA"
 
 
+class MetodoPrueba(str, enum.Enum):
+    """'Certificate Result Projection Contract v1' (revisión Figma
+    2026-08-24, sección 4): el método técnico con mapping físico de
+    sobreimpresión aprobado — no es lo mismo que `TipoPrueba` (ESTATICA
+    mapea a GAS_STATIC, DINAMICA a GAS_DYNAMIC, OPACIDAD a
+    DIESEL_OPACITY). `TipoPrueba.ALTERNA` no tiene método aprobado
+    todavía: Preview/Print debe bloquearse por configuración si un
+    expediente llega con ese tipo."""
+
+    GAS_STATIC = "GAS_STATIC"
+    GAS_DYNAMIC = "GAS_DYNAMIC"
+    DIESEL_OPACITY = "DIESEL_OPACITY"
+
+
+class FaseLectura(str, enum.Enum):
+    """Fases físicas de lectura de gasolina (sección 4): RALENTÍ/CRUCERO.
+    No aplica a diésel (opacidad no tiene fases, ver `LimiteEmision.fase
+    IS NULL`)."""
+
+    RALENTI = "RALENTI"
+    CRUCERO = "CRUCERO"
+
+
 class ResultadoPruebaEnum(str, enum.Enum):
     APROBADO = "APROBADO"
     RECHAZADO = "RECHAZADO"

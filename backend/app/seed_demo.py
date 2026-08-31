@@ -209,8 +209,10 @@ async def seed_demo() -> None:
                     tipo_prueba=TipoPrueba.OPACIDAD,
                     combustible="diesel",
                     resultado=ResultadoPruebaEnum.APROBADO,
-                    valores_medidos_json={"opacidad_porcentaje": 32.5},
-                    limites_aplicados_json={"opacidad_maxima": 50},
+                    # Sección 4 del handoff ("Certificate Result Projection
+                    # Contract v1"): único campo diésel que se sobreimprime.
+                    valores_medidos_json={"coefficient_absorption_final_k_m1": 0.35},
+                    limites_aplicados_json={"coefficient_absorption_final_k_m1": 0.5},
                     linea_id=1,
                     operador_id=TEST_USER_ID,
                     started_at=_ahora(),
