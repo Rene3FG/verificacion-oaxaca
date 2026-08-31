@@ -42,6 +42,25 @@ const requiereSeleccionManual = computed(
   () => expediente.value?.resultado_final === "APROBADO"
 );
 
+// Concatenan solo las partes presentes (los campos de propietario son
+// opcionales a nivel de esquema, ver comentario en el template) sin dejar
+// separadores sueltos cuando falta alguna.
+const domicilioCompleto = computed(() => {
+  const v = expediente.value?.vehiculo;
+  if (!v) return "—";
+  const calleNumero = [v.propietario_calle, v.propietario_numero_exterior]
+    .filter(Boolean)
+    .join(" ");
+  const partes = [calleNumero, v.propietario_colonia].filter(Boolean);
+  return partes.length ? partes.join(", ") : "—";
+});
+const municipioEstado = computed(() => {
+  const v = expediente.value?.vehiculo;
+  if (!v) return "—";
+  const partes = [v.propietario_municipio, v.propietario_estado].filter(Boolean);
+  return partes.length ? partes.join(", ") : "—";
+});
+
 const puedeCalcularTipo = computed(
   () =>
     expediente.value && ESTADOS_SOLICITABLES.includes(expediente.value.estado)
@@ -325,22 +344,11 @@ onMounted(cargarCola);
                 </v-col>
                 <v-col cols="12">
                   <span class="text-caption text-medium-emphasis d-block">Domicilio</span>
-                  <span>
-                    {{ expediente.vehiculo?.propietario_calle ?? "—" }}
-                    {{ expediente.vehiculo?.propietario_numero_exterior ?? "" }}
-                    <template v-if="expediente.vehiculo?.propietario_colonia">
-                      , {{ expediente.vehiculo.propietario_colonia }}
-                    </template>
-                  </span>
+                  <span>{{ domicilioCompleto }}</span>
                 </v-col>
                 <v-col cols="8">
                   <span class="text-caption text-medium-emphasis d-block">Municipio / Estado</span>
-                  <span>
-                    {{ expediente.vehiculo?.propietario_municipio ?? "—" }}
-                    <template v-if="expediente.vehiculo?.propietario_estado">
-                      , {{ expediente.vehiculo.propietario_estado }}
-                    </template>
-                  </span>
+                  <span>{{ municipioEstado }}</span>
                 </v-col>
                 <v-col cols="4">
                   <span class="text-caption text-medium-emphasis d-block">Código postal</span>
