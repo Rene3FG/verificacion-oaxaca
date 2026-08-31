@@ -252,13 +252,19 @@ onMounted(cargarCola);
         <v-col cols="12" md="6">
           <!-- "Expediente completo" según Figma: Resultado, Tipo de
           certificado, Placa, NIV/Serie, Modelo, Combustible, Propietario,
-          Línea origen — mismo orden que el diseño. Domicilio, municipio,
-          tarjeta de circulación y código postal también los pide el Figma
-          pero no existen todavía en el backend (pendiente #5 que René
-          levantó tras revisarlo), así que no se inventan aquí. "Propietario"
-          en el diseño es el nombre del dueño; lo único que tenemos en el
-          backend es razón social (`vehiculo.razon_social`), que es lo que
-          se muestra. -->
+          Línea origen, domicilio, municipio/estado, código postal, tarjeta
+          de circulación, PBV y tracción — mismo orden que el diseño.
+          Domicilio/tarjeta de circulación/PBV/tracción (pendiente #5 que
+          René levantó tras revisar el Figma) ya existen en el backend desde
+          su actualización del 2026-08-29 (`vehiculo.tarjeta_circulacion`,
+          `.propietario_*`, `.pbv`, `.traccion`) — se muestran igual que el
+          resto de los campos ahora. "Propietario" en el diseño es el
+          nombre del dueño; lo único que tenemos en el backend es razón
+          social (`vehiculo.razon_social`), que es lo que se muestra. Estos
+          campos son opcionales a nivel de esquema (el backend los exige
+          recién al imprimir, ver 409 "Faltan datos obligatorios del
+          certificado" en `calcularTipoCertificado`/`imprimir`), así que
+          pueden venir vacíos si Captura todavía no los llenó. -->
           <v-card class="mb-4" variant="outlined">
             <v-card-title>Expediente completo</v-card-title>
             <v-card-subtitle class="text-wrap">
@@ -304,14 +310,43 @@ onMounted(cargarCola);
                   <span class="text-caption text-medium-emphasis d-block">Línea origen</span>
                   <span>{{ expediente.centro_id }} · Línea {{ expediente.linea_id }}</span>
                 </v-col>
+                <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">Tarjeta de circulación</span>
+                  <span>{{ expediente.vehiculo?.tarjeta_circulacion ?? "—" }}</span>
+                </v-col>
+                <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">PBV / Tracción</span>
+                  <span>
+                    {{ expediente.vehiculo?.pbv ?? "—" }}
+                    <template v-if="expediente.vehiculo?.traccion">
+                      · {{ expediente.vehiculo.traccion }}
+                    </template>
+                  </span>
+                </v-col>
+                <v-col cols="12">
+                  <span class="text-caption text-medium-emphasis d-block">Domicilio</span>
+                  <span>
+                    {{ expediente.vehiculo?.propietario_calle ?? "—" }}
+                    {{ expediente.vehiculo?.propietario_numero_exterior ?? "" }}
+                    <template v-if="expediente.vehiculo?.propietario_colonia">
+                      , {{ expediente.vehiculo.propietario_colonia }}
+                    </template>
+                  </span>
+                </v-col>
+                <v-col cols="8">
+                  <span class="text-caption text-medium-emphasis d-block">Municipio / Estado</span>
+                  <span>
+                    {{ expediente.vehiculo?.propietario_municipio ?? "—" }}
+                    <template v-if="expediente.vehiculo?.propietario_estado">
+                      , {{ expediente.vehiculo.propietario_estado }}
+                    </template>
+                  </span>
+                </v-col>
+                <v-col cols="4">
+                  <span class="text-caption text-medium-emphasis d-block">Código postal</span>
+                  <span>{{ expediente.vehiculo?.propietario_codigo_postal ?? "—" }}</span>
+                </v-col>
               </v-row>
-              <p class="text-caption text-medium-emphasis mt-3 mb-0">
-                El diseño (Figma) también pide domicilio, municipio, tarjeta de
-                circulación y código postal — esos campos no existen todavía en
-                el backend (pendiente #5 que René levantó tras revisar el
-                Figma), así que no se muestran aquí hasta que se capturen en
-                algún punto anterior del flujo.
-              </p>
             </v-card-text>
           </v-card>
 
