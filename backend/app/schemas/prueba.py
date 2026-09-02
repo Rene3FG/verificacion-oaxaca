@@ -18,10 +18,16 @@ METODO_POR_TIPO_PRUEBA = {
 # Parámetros con límite exigible por método (sección 4, bloques 02/03/04).
 # NOx y velocidad son opcionales en el contrato ("si NOx o Km/h no
 # aplican, dejar la posición vacía; nunca fabricar 0") — no participan en
-# la evaluación de aprobado/rechazado.
+# la evaluación de aprobado/rechazado. `co2_pct` se sigue leyendo (entra al
+# certificado como parte de co_co2_pct), pero NOM-041 no define un "co2_pct
+# máximo" — define un rango de dilución CO+CO2 (13%-16,5%), algo distinto
+# a un límite de emisión por parámetro; decisión 2026-09-01: sacarlo de
+# aquí hasta decidir cómo representar ese rango, en vez de inventar un
+# máximo que la norma no da. NOx/lambda (también exigidos por la Tabla 1
+# dinámica) tampoco están representados todavía — ver CLAUDE.md.
 PARAMETROS_CON_LIMITE = {
-    MetodoPrueba.GAS_STATIC: ("hc_ppm", "co_pct", "co2_pct", "o2_pct"),
-    MetodoPrueba.GAS_DYNAMIC: ("hc_ppm", "co_pct", "co2_pct", "o2_pct"),
+    MetodoPrueba.GAS_STATIC: ("hc_ppm", "co_pct", "o2_pct"),
+    MetodoPrueba.GAS_DYNAMIC: ("hc_ppm", "co_pct", "o2_pct"),
     MetodoPrueba.DIESEL_OPACITY: ("coefficient_absorption_final_k_m1",),
 }
 

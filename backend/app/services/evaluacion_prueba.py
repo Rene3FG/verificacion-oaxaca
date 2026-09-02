@@ -25,8 +25,22 @@ class LimitesNoConfigurados(Exception):
     pass
 
 
+def _en_rango_anio(anio: int | None, desde: int | None, hasta: int | None) -> bool:
+    """NOM-041 estratifica los límites por año-modelo (p. ej. Tabla 1:
+    1990 y anteriores / 1991 y posteriores). Si el vehículo no tiene
+    año-modelo capturado, solo matchean filas sin acotar (desde y hasta
+    ambos NULL) — nunca se asume un año para poder ubicarlo en un rango."""
+    if anio is None:
+        return desde is None and hasta is None
+    if desde is not None and anio < desde:
+        return False
+    if hasta is not None and anio > hasta:
+        return False
+    return True
+
+
 async def _limites_por_fase(
-    db: AsyncSession, metodo: MetodoPrueba, fase: FaseLectura | None
+    db: AsyncSession, metodo: MetodoPrueba, fase: FaseLectura | None, anio_modelo: int | None
 ) -> dict[str, float]:
     filas = (
         await db.execute(
@@ -35,7 +49,11 @@ async def _limites_por_fase(
             )
         )
     ).scalars().all()
-    return {fila.parametro: fila.valor_maximo for fila in filas}
+    return {
+        fila.parametro: fila.valor_maximo
+        for fila in filas
+        if _en_rango_anio(anio_modelo, fila.anio_modelo_desde, fila.anio_modelo_hasta)
+    }
 
 
 def _validar_completos(
@@ -45,10 +63,13 @@ def _validar_completos(
 
 
 async def evaluar_gasolina(
-    db: AsyncSession, metodo: MetodoPrueba, payload: NormalizedPayloadGasolina
+    db: AsyncSession,
+    metodo: MetodoPrueba,
+    payload: NormalizedPayloadGasolina,
+    anio_modelo: int | None,
 ) -> tuple[ResultadoPruebaEnum, dict, dict]:
-    limites_ralenti = await _limites_por_fase(db, metodo, FaseLectura.RALENTI)
-    limites_crucero = await _limites_por_fase(db, metodo, FaseLectura.CRUCERO)
+    limites_ralenti = await _limites_por_fase(db, metodo, FaseLectura.RALENTI, anio_modelo)
+    limites_crucero = await _limites_por_fase(db, metodo, FaseLectura.CRUCERO, anio_modelo)
 
     parametros = PARAMETROS_CON_LIMITE[metodo]
     faltantes = _validar_completos(limites_ralenti, parametros, "ralenti") + _validar_completos(
@@ -77,9 +98,16 @@ async def evaluar_gasolina(
 
 
 async def evaluar_diesel(
-    db: AsyncSession, metodo: MetodoPrueba, payload: NormalizedPayloadDiesel
+    db: AsyncSession,
+    metodo: MetodoPrueba,
+    payload: NormalizedPayloadDiesel,
+    anio_modelo: int | None,
 ) -> tuple[ResultadoPruebaEnum, dict, dict]:
-    limites = await _limites_por_fase(db, metodo, None)
+    # NOM-045 estratifica por peso bruto vehicular, no por año-modelo — hoy
+    # sin columna para eso (ver docstring de LimiteEmision), así que este
+    # `anio_modelo` no filtra nada todavía para diésel; se recibe para que
+    # la firma sea uniforme con evaluar_gasolina cuando se agregue.
+    limites = await _limites_por_fase(db, metodo, None, None)
     parametros = PARAMETROS_CON_LIMITE[metodo]
     faltantes = _validar_completos(limites, parametros, "diesel")
     if faltantes:

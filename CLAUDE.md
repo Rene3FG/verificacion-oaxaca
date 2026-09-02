@@ -1060,7 +1060,7 @@ código:
 
 - **Sin valores reales de la NOM**: el contrato exige calcular
   APROBADO/RECHAZADO comparando lecturas contra `limits_applied`, pero el
-  PDF no trae la tabla oficial de límites (NOM-042 gasolina, NOM-045
+  PDF no trae la tabla oficial de límites (NOM-041 gasolina, NOM-045
   diésel) — solo dice que existen. Fabricar un umbral regulatorio real
   sería distinto a proponer un checklist a falta de diseño (que sí se hizo
   antes); se construyó el mecanismo completo (catálogo + comparación) con
@@ -1170,13 +1170,100 @@ siempre en este proyecto.
    `valores_medidos_json` en `PruebaView.vue` por los campos fijos por
    método) y consumo de `/api/pruebas/limites-emision` desde
    `SupervisorView.vue`.
-2. Cargar los valores reales de la NOM en `cat_limites_emision` cuando
-   Administración tenga la tabla oficial — hoy vacío a propósito.
+2. ~~Cargar los valores reales de la NOM en `cat_limites_emision`~~ —
+   NOM-041 (gasolina) cargada 2026-09-01, ver sección siguiente. NOM-045
+   (diésel) sigue vacía, ver esa misma sección.
 3. Layout impreso: `generar_pdf_certificado` sigue sin usar
    `certificate_projection_json` (bloque RALENTÍ/CRUCERO físico de la
    sección 4, sección 02 del PDF).
 4. Confirmar con diseño la ambigüedad del folio dentro/fuera del snapshot
    (ver arriba).
+
+## Carga de NOM-041 (gasolina) en cat_limites_emision (2026-09-01)
+
+El usuario compartió el PDF oficial de NOM-041-SEMARNAT-2015 (DOF, 10 de
+junio de 2015) y el de NOM-045-SEMARNAT-2017 (diésel, opacidad). Antes de
+cargar nada se encontraron varias diferencias entre lo que el esquema
+`cat_limites_emision` esperaba (sesión 2026-08-31, ver arriba) y lo que las
+tablas oficiales realmente definen — resueltas con el usuario, no
+asumidas:
+
+- **Nombre de norma corregido**: el código/CLAUDE.md decían "NOM-042
+  gasolina". NOM-042-SEMARNAT-2003 es para vehículos **nuevos** (tipo de
+  aprobación), no para vehículos **en circulación** (lo que hace este
+  sistema) — la norma correcta es **NOM-041-SEMARNAT-2015**. Corregido en
+  el docstring de `LimiteEmision` y aquí. NOM-045 diésel ya estaba bien.
+- **Falta año-modelo**: `cat_limites_emision` no tenía cómo representar que
+  NOM-041 da límites distintos por año-modelo del vehículo (Tabla 1
+  dinámico: 1990 y anteriores/1991 y posteriores; Tabla 2 estático: 1993 y
+  anteriores/1994 y posteriores). Se agregaron `anio_modelo_desde`/
+  `anio_modelo_hasta` (ambos NULL = sin acotar) — migración `e3f8a1c9d2b4`,
+  unique constraint ampliado a incluir estas dos columnas.
+  `evaluacion_prueba._en_rango_anio` elige la fila cuyo rango contiene el
+  año-modelo del vehículo; **si el vehículo no tiene año-modelo capturado,
+  solo matchean filas sin acotar** — nunca asume un año para poder ubicarlo
+  en un bracket (verificado con un vehículo sin `modelo`: no matchea
+  ninguna fila de NOM-041, cae a `LimitesNoConfigurados` en vez de
+  adivinar).
+- **`co2_pct` sacado de la evaluación**: la norma no da un "co2_pct máximo"
+  — da un rango de dilución CO+CO2 (13%-16,5%), que es un chequeo de
+  validez de la muestra, no un límite de emisión por parámetro. Se sacó de
+  `PARAMETROS_CON_LIMITE` (ambos métodos de gasolina) hasta decidir cómo
+  representar ese rango; sigue siendo un campo de lectura obligatorio
+  (entra al certificado vía `co_co2_pct`), solo no participa en
+  aprobado/rechazado.
+- **RALENTI y CRUCERO con el mismo valor**: ninguna tabla oficial separa
+  ralentí de crucero — dan un solo set de límites por año-modelo. Se cargó
+  el mismo valor en ambas fases, bajo el supuesto (confirmado con el
+  usuario) de que corresponden a los dos modos de una prueba bimodal que
+  comparten el mismo límite, no a "ralentí real" vs. "crucero real" con
+  números distintos.
+- **NOx y Factor Lambda quedan fuera, documentado, no resuelto**: la Tabla
+  1 dinámica también exige NOx (máx. 1500-2500 ppm según año) y Factor
+  Lambda (máx. 1,05) — hoy `nox_ppm` es opcional y no participa en la
+  evaluación, y no hay columna para lambda. Decisión explícita de esta
+  sesión: no ampliar el contrato para esto ahora, solo dejarlo anotado
+  aquí como pendiente real.
+
+**`app/seed_limites_nom041.py`** (nuevo, patrón de `seed_demo.py`: `python
+-m app.seed_limites_nom041`, idempotente por upsert): carga las 24 filas
+(2 métodos × 2 brackets de año × 2 fases × 3 parámetros HC/CO/O2) de la
+tabla oficial. Ya ejecutado contra la base de dev — verificado con
+consultas directas a `_limites_por_fase` que un vehículo 2015 toma
+HC=100/CO=1.0/O2=2.0 (bracket 1991+), uno de 1988 toma HC=350/CO=2.5/O2=2.0
+(bracket 1990 y anteriores), y uno sin año no matchea nada (rechaza en vez
+de adivinar) — mismo patrón en método estático (1993 vs. 1994).
+
+**NOM-045 (diésel) sigue sin cargar, a propósito**: su tabla estratifica
+por **peso bruto vehicular** (≤3,856 kg / >3,856 kg), no por año-modelo —
+`cat_limites_emision` no tiene esa columna todavía. Cargar solo el número
+de opacidad sin poder acotar por peso sería fabricar un límite que no
+aplica igual a todos los vehículos diésel. Si se necesita pronto, es una
+migración análoga a la de año-modelo pero sobre `Vehiculo.pbv` (ya existe
+esa columna, agregada 2026-08-30).
+
+`tests/test_pruebas.py::test_limites_emision_upsert_y_listado` se ajustó:
+ya no asume que el catálogo esté vacío (`len(filas) == 1`) — busca su
+propia fila por combinación exacta de metodo+fase+parametro+año, mismo
+criterio que otras pruebas ya usan para convivir con datos de seed
+persistentes en la misma base. **172 pruebas, todas pasan** (con
+NOM-041 ya cargada en la base de dev). `python -c "from app.main import
+app"` confirma que la app monta sus 48 rutas sin error. No se tocó
+frontend en esta sesión — `PruebaView.vue` sigue sin consumir estos
+límites (punto 1 de arriba, sin cambios).
+
+Commits sobre `etapa1-y-siox`, **NO pusheados** — pendiente de
+confirmación explícita, como siempre en este proyecto.
+
+**Pendiente real:**
+1. Peso bruto vehicular como eje de estratificación para NOM-045 (diésel)
+   y cargar esa tabla una vez agregado.
+2. NOx y Factor Lambda en el método dinámico de gasolina (columna nueva +
+   ampliar el contrato de evaluación).
+3. Rango de dilución CO+CO2 (13%-16,5%): decidir si se representa como
+   chequeo de validez de la muestra o se descarta.
+4. Todo lo demás de la lista de arriba (frontend de captura, layout
+   impreso, ambigüedad del folio) sigue sin tocar.
 5. Semestre y prórroga (sección 5), `capacidad_dinamometro_kg` (sección
    10), frontend de reimpresión y diseño visual (sección 13) — sin
    cambios, siguen en la lista de arriba.

@@ -292,8 +292,23 @@ async def test_limites_emision_upsert_y_listado(client, db_session):
     )
     assert resp_listado.status_code == 200
     filas = resp_listado.json()
-    assert len(filas) == 1
-    assert filas[0]["valor_maximo"] == 250
+    # No se filtra por len(filas) == 1: la tabla real de NOM-041 (24 filas,
+    # ver app/seed_limites_nom041.py) puede ya estar cargada en la misma
+    # base que usan las pruebas (mismo criterio documentado para
+    # seed_demo.py). Se busca la fila propia de este test por su
+    # combinación exacta metodo+fase+parametro+año (sin acotar, la única
+    # que este test pudo haber creado).
+    fila_propia = [
+        f
+        for f in filas
+        if f["metodo"] == "GAS_DYNAMIC"
+        and f["fase"] == "RALENTI"
+        and f["parametro"] == "hc_ppm"
+        and f["anio_modelo_desde"] is None
+        and f["anio_modelo_hasta"] is None
+    ]
+    assert len(fila_propia) == 1
+    assert fila_propia[0]["valor_maximo"] == 250
 
 
 async def test_limites_emision_diesel_no_admite_fase(client, db_session):

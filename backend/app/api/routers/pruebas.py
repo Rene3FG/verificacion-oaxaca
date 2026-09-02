@@ -28,6 +28,7 @@ from app.models.enums import (
 from app.models.event_log import EventLog
 from app.models.limite_emision import LimiteEmision
 from app.models.resultado_prueba import ResultadoPrueba
+from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
 from app.schemas.prueba import (
     MetodoSinMapeo,
@@ -238,12 +239,18 @@ async def guardar_resultado_prueba(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     try:
+        vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
+        anio_modelo = vehiculo.modelo if vehiculo is not None else None
         if metodo == MetodoPrueba.DIESEL_OPACITY:
             payload_validado = NormalizedPayloadDiesel.model_validate(payload.normalized_payload)
-            resultado, limits_applied, excedidos = await evaluar_diesel(db, metodo, payload_validado)
+            resultado, limits_applied, excedidos = await evaluar_diesel(
+                db, metodo, payload_validado, anio_modelo
+            )
         else:
             payload_validado = NormalizedPayloadGasolina.model_validate(payload.normalized_payload)
-            resultado, limits_applied, excedidos = await evaluar_gasolina(db, metodo, payload_validado)
+            resultado, limits_applied, excedidos = await evaluar_gasolina(
+                db, metodo, payload_validado, anio_modelo
+            )
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
     except LimitesNoConfigurados as exc:
@@ -299,6 +306,12 @@ class LimiteEmisionInput(BaseModel):
     fase: FaseLectura | None = None
     parametro: str
     valor_maximo: float
+    # NULL = sin acotar por ese lado (ver docstring de LimiteEmision). Por
+    # ahora solo tiene sentido para gasolina (NOM-041, por año-modelo);
+    # diésel (NOM-045) estratifica por peso, no por año, así que se dejan
+    # en None ahí.
+    anio_modelo_desde: int | None = None
+    anio_modelo_hasta: int | None = None
 
 
 @router.get("/limites-emision")
@@ -307,13 +320,19 @@ async def listar_limites_emision(
     db: AsyncSession = Depends(get_db),
 ) -> list[LimiteEmisionInput]:
     """Catálogo configurable que consume `app.services.evaluacion_prueba`.
-    Vacío por defecto a propósito (ver docstring de `LimiteEmision`): no
-    hay valores reales de la NOM cargados en esta sesión."""
+    Los valores reales de NOM-041 (gasolina) ya están cargados (ver
+    `app/seed_limites_nom041.py`); NOM-045 (diésel) sigue vacío a
+    propósito (ver docstring de `LimiteEmision`)."""
 
     filas = (await db.execute(select(LimiteEmision))).scalars().all()
     return [
         LimiteEmisionInput(
-            metodo=fila.metodo, fase=fila.fase, parametro=fila.parametro, valor_maximo=fila.valor_maximo
+            metodo=fila.metodo,
+            fase=fila.fase,
+            parametro=fila.parametro,
+            valor_maximo=fila.valor_maximo,
+            anio_modelo_desde=fila.anio_modelo_desde,
+            anio_modelo_hasta=fila.anio_modelo_hasta,
         )
         for fila in filas
     ]
@@ -325,7 +344,8 @@ async def cargar_limite_emision(
     session: SessionContext = Depends(requiere_supervisor),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Alta o actualización (upsert por metodo+fase+parametro) de un límite
+    """Alta o actualización (upsert por
+    metodo+fase+parametro+anio_modelo_desde+anio_modelo_hasta) de un límite
     de emisión. Exclusivo de Supervisor, mismo criterio que
     `POST /api/folios/lotes` — el rol de plataforma/Superadmin que el
     handoff describe para catálogos no existe todavía en este sistema."""
@@ -338,6 +358,14 @@ async def cargar_limite_emision(
         raise HTTPException(
             status_code=422, detail=f"{payload.metodo.value} requiere `fase` (RALENTI/CRUCERO)."
         )
+    if (
+        payload.anio_modelo_desde is not None
+        and payload.anio_modelo_hasta is not None
+        and payload.anio_modelo_desde > payload.anio_modelo_hasta
+    ):
+        raise HTTPException(
+            status_code=422, detail="anio_modelo_desde no puede ser mayor que anio_modelo_hasta."
+        )
 
     existente = (
         await db.execute(
@@ -345,6 +373,8 @@ async def cargar_limite_emision(
                 LimiteEmision.metodo == payload.metodo,
                 LimiteEmision.fase == payload.fase,
                 LimiteEmision.parametro == payload.parametro,
+                LimiteEmision.anio_modelo_desde == payload.anio_modelo_desde,
+                LimiteEmision.anio_modelo_hasta == payload.anio_modelo_hasta,
             )
         )
     ).scalars().first()
@@ -359,8 +389,16 @@ async def cargar_limite_emision(
                 fase=payload.fase,
                 parametro=payload.parametro,
                 valor_maximo=payload.valor_maximo,
+                anio_modelo_desde=payload.anio_modelo_desde,
+                anio_modelo_hasta=payload.anio_modelo_hasta,
             )
         )
 
     await db.commit()
-    return {"metodo": payload.metodo, "fase": payload.fase, "parametro": payload.parametro}
+    return {
+        "metodo": payload.metodo,
+        "fase": payload.fase,
+        "parametro": payload.parametro,
+        "anio_modelo_desde": payload.anio_modelo_desde,
+        "anio_modelo_hasta": payload.anio_modelo_hasta,
+    }
