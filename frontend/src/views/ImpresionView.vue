@@ -17,6 +17,17 @@ const ESTADOS_SOLICITABLES = [
 ];
 const ESTADOS_IMPRIMIBLES = ["FOLIO_ASIGNADO", "IMPRESION_FALLIDA"];
 
+// Sección 3 del handoff (spec "4. Cierre y reimpresión" de Figma,
+// implementada por René en `a3e9899`/commits previos): una vez que existe
+// un certificado físico impreso, "reimpresión por daño" y "corrección de
+// tipo post-impresión" son las únicas dos operaciones válidas — mismo set
+// que ESTADOS_CON_CERTIFICADO_IMPRESO en backend/app/api/routers/impresion.py.
+const ESTADOS_CON_CERTIFICADO_IMPRESO = [
+  "IMPRESO",
+  "CERRADO_APROBADO",
+  "CERRADO_RECHAZADO",
+];
+
 // Tipos reales de certificado para un resultado APROBADO (RECHAZADO se
 // infiere solo — RECHAZO es el único tipo posible ahí, ver
 // backend/app/api/routers/impresion.py: calcular_tipo_certificado).
@@ -35,8 +46,13 @@ const solicitandoFolio = ref(false);
 const cargandoVistaPrevia = ref(false);
 const imprimiendo = ref(false);
 const cerrando = ref(false);
+const marcandoDanado = ref(false);
+const reimprimiendoPorDano = ref(false);
+const corrigiendoTipo = ref(false);
 
 const tipoCertificadoSeleccionado = ref(null);
+const motivoDano = ref("");
+const tipoNuevoCorreccion = ref(null);
 
 const requiereSeleccionManual = computed(
   () => expediente.value?.resultado_final === "APROBADO"
@@ -71,17 +87,54 @@ const puedeSolicitarFolio = computed(
     !expediente.value.folio_externo &&
     ESTADOS_SOLICITABLES.includes(expediente.value.estado)
 );
+// Sección 3 del handoff: el primer clic (desde FOLIO_ASIGNADO) lo puede
+// hacer cualquier operador; el reintento técnico (desde IMPRESION_FALLIDA,
+// la impresora ya falló una vez) es exclusivo de Supervisor — el backend
+// devuelve 403 si no, pero se deshabilita aquí de una vez para no dejar
+// que el operador se tope con el error.
+const reintentoRequiereSupervisor = computed(
+  () =>
+    expediente.value?.estado === "IMPRESION_FALLIDA" && !session.puedeSupervisar
+);
 const puedeImprimir = computed(
   () =>
     expediente.value &&
     expediente.value.folio_externo &&
-    ESTADOS_IMPRIMIBLES.includes(expediente.value.estado)
+    ESTADOS_IMPRIMIBLES.includes(expediente.value.estado) &&
+    !reintentoRequiereSupervisor.value
 );
 const puedeCerrar = computed(
   () =>
     expediente.value &&
     expediente.value.estado === "IMPRESO" &&
     !expediente.value.cerrado_at
+);
+// Sección 3 del handoff: antes del primer clic en Imprimir (folio ya
+// asignado, nada impreso todavía), cualquier operador puede marcar el
+// folio físico como dañado — sin Supervisor, sin motivo.
+const puedeMarcarFolioDanado = computed(
+  () => expediente.value?.estado === "FOLIO_ASIGNADO"
+);
+// Reimpresión por daño y corrección de tipo post-impresión: solo aplican
+// una vez que existe un certificado físico impreso, y ambas son
+// exclusivas de Supervisor (ver backend/app/api/routers/impresion.py:
+// reimprimir_por_dano / corregir_tipo_certificado_post_impresion).
+const puedeGestionarReimpresion = computed(
+  () =>
+    expediente.value &&
+    session.puedeSupervisar &&
+    ESTADOS_CON_CERTIFICADO_IMPRESO.includes(expediente.value.estado)
+);
+const puedeReimprimirPorDano = computed(
+  () => puedeGestionarReimpresion.value && motivoDano.value.trim().length > 0
+);
+// RECHAZO nunca admite corrección manual de tipo — se infiere solo (mismo
+// guard que el backend, ver corregir_tipo_certificado_post_impresion).
+const puedeCorregirTipo = computed(
+  () =>
+    puedeGestionarReimpresion.value &&
+    expediente.value.certificado_tipo !== "RECHAZO" &&
+    !!tipoNuevoCorreccion.value
 );
 
 async function cargarCola() {
@@ -193,6 +246,14 @@ async function imprimir() {
     const { data } = await api.post(`/impresion/imprimir/${expediente.value.id}`);
     expediente.value.estado = data.estado_expediente;
     if (data.estado_expediente === "IMPRESO") {
+      // El endpoint no devuelve hora_salida en la respuesta (solo
+      // estado_expediente/intentos), aunque el backend sí la fija en la
+      // primera impresión exitosa — mismo patrón de bug que
+      // folio_asignado_at/cerrado_at (ver commit 2026-08-26), misma
+      // solución: aproximar con "ahora" hasta el próximo fetch real.
+      if (!expediente.value.hora_salida) {
+        expediente.value.hora_salida = new Date().toISOString();
+      }
       aviso.value = "Certificado impreso correctamente.";
     } else {
       error.value = `La impresora no respondió. Intento número ${data.intentos}.`;
@@ -201,6 +262,77 @@ async function imprimir() {
     error.value = err.response?.data?.detail || "No se pudo imprimir el certificado.";
   } finally {
     imprimiendo.value = false;
+  }
+}
+
+async function marcarFolioDanado() {
+  marcandoDanado.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post(
+      `/impresion/folio/marcar-danado/${expediente.value.id}`
+    );
+    expediente.value.folio_externo = data.folio_externo;
+    expediente.value.folio_asignado_at = new Date().toISOString();
+    aviso.value = `Folio ${data.folio_danado} marcado como dañado. Folio nuevo: ${data.folio_externo}.`;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo marcar el folio como dañado.";
+    // Sin folios de ese tipo disponibles, el expediente cae a FOLIO_ERROR
+    // (backend/app/api/routers/impresion.py: marcar_folio_danado) — se
+    // recarga el detalle para reflejar el estado real en vez de dejar la
+    // UI mostrando el folio viejo como si siguiera vigente.
+    try {
+      const { data: fresco } = await api.get(`/impresion/cola`);
+      const actualizado = fresco.find((e) => e.id === expediente.value.id);
+      if (actualizado) expediente.value.estado = actualizado.estado;
+    } catch {
+      // Sin conexión o expediente ya fuera de la cola: se deja el error
+      // original visible, no hay más que hacer aquí.
+    }
+  } finally {
+    marcandoDanado.value = false;
+  }
+}
+
+async function reimprimirPorDano() {
+  reimprimiendoPorDano.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post(
+      `/impresion/folio/reimprimir-por-dano/${expediente.value.id}`,
+      { motivo: motivoDano.value.trim() }
+    );
+    expediente.value.folio_externo = data.folio;
+    motivoDano.value = "";
+    aviso.value = data.impreso
+      ? `Reimpreso con folio ${data.folio}.`
+      : `La impresora no respondió al reimprimir con folio ${data.folio}.`;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo reimprimir el certificado.";
+  } finally {
+    reimprimiendoPorDano.value = false;
+  }
+}
+
+async function corregirTipoPostImpresion() {
+  corrigiendoTipo.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post(
+      `/impresion/tipo-certificado-post-impresion/${expediente.value.id}`,
+      null,
+      { params: { nuevo_tipo: tipoNuevoCorreccion.value } }
+    );
+    expediente.value.certificado_tipo = data.certificado_tipo;
+    expediente.value.folio_externo = data.folio;
+    tipoNuevoCorreccion.value = null;
+    aviso.value = data.impreso
+      ? `Tipo corregido a ${data.certificado_tipo}, reimpreso con folio ${data.folio}.`
+      : `Tipo corregido a ${data.certificado_tipo}; la impresora no respondió con el folio ${data.folio}.`;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo corregir el tipo de certificado.";
+  } finally {
+    corrigiendoTipo.value = false;
   }
 }
 
@@ -413,6 +545,19 @@ onMounted(cargarCola);
               >
                 {{ expediente.estado === "FOLIO_ERROR" ? "Reintentar" : "Solicitar folio" }}
               </v-btn>
+              <!-- Sección 3 del handoff: antes del primer clic en Imprimir,
+              el Operador puede marcar el folio físico como dañado (sin
+              Supervisor, sin motivo) — el backend asigna el siguiente folio
+              del mismo tipo automáticamente. -->
+              <v-btn
+                variant="text"
+                class="ml-2"
+                :disabled="!puedeMarcarFolioDanado"
+                :loading="marcandoDanado"
+                @click="marcarFolioDanado"
+              >
+                Marcar folio dañado
+              </v-btn>
             </v-card-text>
           </v-card>
 
@@ -439,6 +584,16 @@ onMounted(cargarCola);
       <v-card class="mb-4" variant="outlined">
         <v-card-title>Impresión</v-card-title>
         <v-card-text>
+          <!-- Hora Salida (regla 2 del frame "Cierre y reimpresión"): se
+          fija una sola vez, en el primer clic EXITOSO de Imprimir; ningún
+          camino posterior (reintento, cierre, reimpresión, corrección) la
+          modifica — ver backend/app/api/routers/impresion.py:imprimir_certificado. -->
+          <p v-if="expediente.hora_salida" class="text-caption text-medium-emphasis mb-2">
+            Hora Salida: {{ formatearFecha(expediente.hora_salida) }}
+          </p>
+          <p v-if="reintentoRequiereSupervisor" class="text-caption text-error mb-2">
+            La impresora falló antes; reintentar requiere una sesión de Supervisor.
+          </p>
           <v-btn
             color="primary"
             :disabled="!puedeImprimir"
@@ -446,6 +601,67 @@ onMounted(cargarCola);
             @click="imprimir"
           >
             {{ expediente.estado === "IMPRESION_FALLIDA" ? "Reintentar impresión" : "Imprimir" }}
+          </v-btn>
+        </v-card-text>
+      </v-card>
+
+      <!-- Sección 3 del handoff: reimpresión por certificado físico dañado
+      y corrección de tipo después de imprimir — ambas exclusivas de
+      Supervisor, solo aplican con un certificado ya impreso (IMPRESO o
+      CERRADO_*). Ver backend/app/api/routers/impresion.py:
+      reimprimir_por_dano / corregir_tipo_certificado_post_impresion. -->
+      <v-card
+        v-if="
+          session.puedeSupervisar &&
+          expediente &&
+          ESTADOS_CON_CERTIFICADO_IMPRESO.includes(expediente.estado)
+        "
+        class="mb-4"
+        variant="outlined"
+      >
+        <v-card-title>Reimpresión y corrección (Supervisor)</v-card-title>
+        <v-card-text>
+          <p class="text-subtitle-2 mb-1">Reimpresión por certificado dañado</p>
+          <v-textarea
+            v-model="motivoDano"
+            label="Motivo (obligatorio)"
+            rows="2"
+            density="compact"
+            class="mb-2"
+          />
+          <v-btn
+            variant="outlined"
+            :disabled="!puedeReimprimirPorDano"
+            :loading="reimprimiendoPorDano"
+            @click="reimprimirPorDano"
+          >
+            Reimprimir por daño
+          </v-btn>
+
+          <v-divider class="my-4" />
+
+          <p class="text-subtitle-2 mb-1">Corrección de tipo después de imprimir</p>
+          <p
+            v-if="expediente.certificado_tipo === 'RECHAZO'"
+            class="text-caption text-medium-emphasis mb-2"
+          >
+            RECHAZO no admite corrección manual: se infiere solo.
+          </p>
+          <v-select
+            v-model="tipoNuevoCorreccion"
+            :items="TIPOS_CERTIFICADO_APROBADO"
+            label="Tipo correcto"
+            density="compact"
+            class="mb-2"
+            :disabled="expediente.certificado_tipo === 'RECHAZO'"
+          />
+          <v-btn
+            variant="outlined"
+            :disabled="!puedeCorregirTipo"
+            :loading="corrigiendoTipo"
+            @click="corregirTipoPostImpresion"
+          >
+            Corregir tipo
           </v-btn>
         </v-card-text>
       </v-card>
