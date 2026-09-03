@@ -17,17 +17,6 @@ const ESTADOS_SOLICITABLES = [
 ];
 const ESTADOS_IMPRIMIBLES = ["FOLIO_ASIGNADO", "IMPRESION_FALLIDA"];
 
-// Sección 3 del handoff (spec "4. Cierre y reimpresión" de Figma,
-// implementada por René en `a3e9899`/commits previos): una vez que existe
-// un certificado físico impreso, "reimpresión por daño" y "corrección de
-// tipo post-impresión" son las únicas dos operaciones válidas — mismo set
-// que ESTADOS_CON_CERTIFICADO_IMPRESO en backend/app/api/routers/impresion.py.
-const ESTADOS_CON_CERTIFICADO_IMPRESO = [
-  "IMPRESO",
-  "CERRADO_APROBADO",
-  "CERRADO_RECHAZADO",
-];
-
 // Tipos reales de certificado para un resultado APROBADO (RECHAZADO se
 // infiere solo — RECHAZO es el único tipo posible ahí, ver
 // backend/app/api/routers/impresion.py: calcular_tipo_certificado).
@@ -47,12 +36,8 @@ const cargandoVistaPrevia = ref(false);
 const imprimiendo = ref(false);
 const cerrando = ref(false);
 const marcandoDanado = ref(false);
-const reimprimiendoPorDano = ref(false);
-const corrigiendoTipo = ref(false);
 
 const tipoCertificadoSeleccionado = ref(null);
-const motivoDano = ref("");
-const tipoNuevoCorreccion = ref(null);
 
 const requiereSeleccionManual = computed(
   () => expediente.value?.resultado_final === "APROBADO"
@@ -115,27 +100,16 @@ const puedeCerrar = computed(
 const puedeMarcarFolioDanado = computed(
   () => expediente.value?.estado === "FOLIO_ASIGNADO"
 );
-// Reimpresión por daño y corrección de tipo post-impresión: solo aplican
-// una vez que existe un certificado físico impreso, y ambas son
-// exclusivas de Supervisor (ver backend/app/api/routers/impresion.py:
-// reimprimir_por_dano / corregir_tipo_certificado_post_impresion).
-const puedeGestionarReimpresion = computed(
-  () =>
-    expediente.value &&
-    session.puedeSupervisar &&
-    ESTADOS_CON_CERTIFICADO_IMPRESO.includes(expediente.value.estado)
-);
-const puedeReimprimirPorDano = computed(
-  () => puedeGestionarReimpresion.value && motivoDano.value.trim().length > 0
-);
-// RECHAZO nunca admite corrección manual de tipo — se infiere solo (mismo
-// guard que el backend, ver corregir_tipo_certificado_post_impresion).
-const puedeCorregirTipo = computed(
-  () =>
-    puedeGestionarReimpresion.value &&
-    expediente.value.certificado_tipo !== "RECHAZO" &&
-    !!tipoNuevoCorreccion.value
-);
+// Reimpresión por daño y corrección de tipo post-impresión: ya no viven
+// aquí. Esos estados (IMPRESO/CERRADO_*) no aparecen en esta cola y salen
+// de ella en cuanto se abren, así que la card equivalente que existió
+// brevemente en este archivo (commit 7c9c36d) solo era alcanzable
+// mientras el expediente seguía cargado en memoria — se perdía en cuanto
+// se navegaba fuera. René resolvió el mismo hueco con
+// GET /api/supervision/expedientes/buscar?placa= + la pestaña
+// "Reimpresión" en SupervisorView.vue (su archivo), así que ambas
+// operaciones quedan solo ahí — acordado con él el 2026-09-03 para no
+// duplicarlas en dos pantallas.
 
 async function cargarCola() {
   cargandoLista.value = true;
@@ -291,48 +265,6 @@ async function marcarFolioDanado() {
     }
   } finally {
     marcandoDanado.value = false;
-  }
-}
-
-async function reimprimirPorDano() {
-  reimprimiendoPorDano.value = true;
-  error.value = null;
-  try {
-    const { data } = await api.post(
-      `/impresion/folio/reimprimir-por-dano/${expediente.value.id}`,
-      { motivo: motivoDano.value.trim() }
-    );
-    expediente.value.folio_externo = data.folio;
-    motivoDano.value = "";
-    aviso.value = data.impreso
-      ? `Reimpreso con folio ${data.folio}.`
-      : `La impresora no respondió al reimprimir con folio ${data.folio}.`;
-  } catch (err) {
-    error.value = err.response?.data?.detail || "No se pudo reimprimir el certificado.";
-  } finally {
-    reimprimiendoPorDano.value = false;
-  }
-}
-
-async function corregirTipoPostImpresion() {
-  corrigiendoTipo.value = true;
-  error.value = null;
-  try {
-    const { data } = await api.post(
-      `/impresion/tipo-certificado-post-impresion/${expediente.value.id}`,
-      null,
-      { params: { nuevo_tipo: tipoNuevoCorreccion.value } }
-    );
-    expediente.value.certificado_tipo = data.certificado_tipo;
-    expediente.value.folio_externo = data.folio;
-    tipoNuevoCorreccion.value = null;
-    aviso.value = data.impreso
-      ? `Tipo corregido a ${data.certificado_tipo}, reimpreso con folio ${data.folio}.`
-      : `Tipo corregido a ${data.certificado_tipo}; la impresora no respondió con el folio ${data.folio}.`;
-  } catch (err) {
-    error.value = err.response?.data?.detail || "No se pudo corregir el tipo de certificado.";
-  } finally {
-    corrigiendoTipo.value = false;
   }
 }
 
@@ -605,66 +537,12 @@ onMounted(cargarCola);
         </v-card-text>
       </v-card>
 
-      <!-- Sección 3 del handoff: reimpresión por certificado físico dañado
-      y corrección de tipo después de imprimir — ambas exclusivas de
-      Supervisor, solo aplican con un certificado ya impreso (IMPRESO o
-      CERRADO_*). Ver backend/app/api/routers/impresion.py:
-      reimprimir_por_dano / corregir_tipo_certificado_post_impresion. -->
-      <v-card
-        v-if="
-          session.puedeSupervisar &&
-          expediente &&
-          ESTADOS_CON_CERTIFICADO_IMPRESO.includes(expediente.estado)
-        "
-        class="mb-4"
-        variant="outlined"
-      >
-        <v-card-title>Reimpresión y corrección (Supervisor)</v-card-title>
-        <v-card-text>
-          <p class="text-subtitle-2 mb-1">Reimpresión por certificado dañado</p>
-          <v-textarea
-            v-model="motivoDano"
-            label="Motivo (obligatorio)"
-            rows="2"
-            density="compact"
-            class="mb-2"
-          />
-          <v-btn
-            variant="outlined"
-            :disabled="!puedeReimprimirPorDano"
-            :loading="reimprimiendoPorDano"
-            @click="reimprimirPorDano"
-          >
-            Reimprimir por daño
-          </v-btn>
-
-          <v-divider class="my-4" />
-
-          <p class="text-subtitle-2 mb-1">Corrección de tipo después de imprimir</p>
-          <p
-            v-if="expediente.certificado_tipo === 'RECHAZO'"
-            class="text-caption text-medium-emphasis mb-2"
-          >
-            RECHAZO no admite corrección manual: se infiere solo.
-          </p>
-          <v-select
-            v-model="tipoNuevoCorreccion"
-            :items="TIPOS_CERTIFICADO_APROBADO"
-            label="Tipo correcto"
-            density="compact"
-            class="mb-2"
-            :disabled="expediente.certificado_tipo === 'RECHAZO'"
-          />
-          <v-btn
-            variant="outlined"
-            :disabled="!puedeCorregirTipo"
-            :loading="corrigiendoTipo"
-            @click="corregirTipoPostImpresion"
-          >
-            Corregir tipo
-          </v-btn>
-        </v-card-text>
-      </v-card>
+      <!-- Reimpresión por certificado físico dañado y corrección de tipo
+      después de imprimir: exclusivas de Supervisor, y solo alcanzan al
+      expediente una vez que ya salió de esta cola (IMPRESO/CERRADO_*).
+      Viven en SupervisorView.vue (pestaña "Reimpresión", buscador por
+      placa) — acordado con René el 2026-09-03 para no duplicarlas aquí,
+      ver nota en puedeMarcarFolioDanado arriba. -->
 
       <v-card variant="outlined">
         <v-card-title>Cierre</v-card-title>
