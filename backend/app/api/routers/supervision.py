@@ -10,7 +10,7 @@ from app.models.enums import EstadoVerificacion
 from app.models.event_log import EventLog
 from app.models.verificacion import Verificacion
 from app.schemas.event_log import EventLogRead
-from app.schemas.verificacion import ExpedienteCompleto
+from app.schemas.verificacion import ExpedienteCompleto, ExpedienteRead
 
 router = APIRouter(prefix="/api/supervision", tags=["supervision"])
 
@@ -44,6 +44,41 @@ async def monitor_centro(
             Verificacion.estado.not_in(ESTADOS_TERMINALES),
         )
         .order_by(Verificacion.linea_id, Verificacion.created_at)
+    )
+    return list(result.scalars().all())
+
+
+@router.get("/expedientes/buscar", response_model=list[ExpedienteRead])
+async def buscar_expedientes(
+    placa: str,
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> list[Verificacion]:
+    """Punto de entrada para reimpresión por daño y corrección de tipo
+    post-impresión (sección 3 del handoff, 2026-09-03): esas dos
+    operaciones solo aplican en `IMPRESO`/`CERRADO_APROBADO`/
+    `CERRADO_RECHAZADO`, que `GET /impresion/cola` excluye a propósito
+    (ya no son "piso") y `GET /supervision/monitor` también excluye
+    (`ESTADOS_TERMINALES`) — hasta ahora ninguna pantalla de Supervisor
+    permitía abrir un expediente en esos estados. Sin restricción de
+    `estado` aquí (a diferencia de monitor): el Supervisor necesita
+    encontrar el expediente para decidir qué operación aplica, no al
+    revés. Todas las líneas del centro de la sesión, igual que
+    `monitor_centro` — no acotado por `lineas_visibles()` (esa
+    restricción es para las colas por estación, no para Supervisor)."""
+
+    if session.center_id is None:
+        raise HTTPException(status_code=400, detail="La sesión no tiene centro asociado.")
+    if not placa.strip():
+        raise HTTPException(status_code=422, detail="Falta la placa a buscar.")
+
+    result = await db.execute(
+        select(Verificacion)
+        .where(
+            Verificacion.centro_id == session.center_id,
+            Verificacion.placa.ilike(f"%{placa.strip()}%"),
+        )
+        .order_by(Verificacion.created_at.desc())
     )
     return list(result.scalars().all())
 

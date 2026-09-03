@@ -35,6 +35,7 @@ const solicitandoFolio = ref(false);
 const cargandoVistaPrevia = ref(false);
 const imprimiendo = ref(false);
 const cerrando = ref(false);
+const marcandoDanado = ref(false);
 
 const tipoCertificadoSeleccionado = ref(null);
 
@@ -103,6 +104,11 @@ const puedeCerrar = computed(
     expediente.value.estado === "IMPRESO" &&
     !expediente.value.cerrado_at
 );
+// Sección 3 del handoff: folio dañado ANTES de imprimir — solo aplica con
+// un folio ya asignado y sin haber impreso todavía (no cuenta como
+// reimpresión). Después de imprimir es otra operación, exclusiva de
+// Supervisor (ver pestaña "Reimpresión" en SupervisorView.vue).
+const puedeMarcarDanado = computed(() => expediente.value?.estado === "FOLIO_ASIGNADO");
 
 async function cargarCola() {
   cargandoLista.value = true;
@@ -221,6 +227,33 @@ async function imprimir() {
     error.value = err.response?.data?.detail || "No se pudo imprimir el certificado.";
   } finally {
     imprimiendo.value = false;
+  }
+}
+
+async function recargarExpediente() {
+  try {
+    const { data } = await api.get(`/expedientes/${expediente.value.id}`);
+    expediente.value = data;
+  } catch {
+    // Si falla el refresco se deja el estado local tal cual — no es un
+    // error nuevo que reportar, la operación que lo disparó ya reportó
+    // el suyo si falló.
+  }
+}
+
+async function marcarFolioDanado() {
+  marcandoDanado.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post(`/impresion/folio/marcar-danado/${expediente.value.id}`);
+    aviso.value = `Folio ${data.folio_danado} marcado como dañado. Nuevo folio: ${data.folio_externo}.`;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo marcar el folio dañado.";
+  } finally {
+    marcandoDanado.value = false;
+    // Refresca siempre: si el inventario del tipo se agotó, el backend ya
+    // transicionó el expediente a FOLIO_ERROR antes de devolver el 409.
+    await recargarExpediente();
   }
 }
 
@@ -447,6 +480,16 @@ onMounted(cargarCola);
                 @click="solicitarFolio"
               >
                 {{ expediente.estado === "FOLIO_ERROR" ? "Reintentar" : "Solicitar folio" }}
+              </v-btn>
+              <v-btn
+                v-if="puedeMarcarDanado"
+                variant="text"
+                color="warning"
+                class="ml-2"
+                :loading="marcandoDanado"
+                @click="marcarFolioDanado"
+              >
+                Marcar folio dañado
               </v-btn>
             </v-card-text>
           </v-card>

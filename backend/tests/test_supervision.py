@@ -99,3 +99,65 @@ async def test_bitacora_de_otro_centro_responde_403(client, db_session):
     )
 
     assert resp.status_code == 403
+
+
+async def test_buscar_expedientes_sin_supervisor_responde_403(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.IMPRESION, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/supervision/expedientes/buscar",
+        params={"placa": "ABC"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
+
+
+async def test_buscar_expedientes_encuentra_por_placa_parcial_en_cualquier_linea(
+    client, db_session
+):
+    """Punto de entrada 2026-09-03 para reimpresión/corrección post-
+    impresión: a diferencia de la cola de Impresión y del Monitor, sí debe
+    encontrar expedientes en IMPRESO/CERRADO_* (donde esas dos operaciones
+    aplican), y de cualquier línea del centro, no solo la de la sesión de
+    login del supervisor."""
+
+    sesion = await crear_sesion_supervisor(db_session, center_id="OAX-01", line_id=1)
+    impreso = await crear_expediente(
+        db_session, linea_id=2, centro_id="OAX-01", placa="XYZ-123-A",
+        estado=EstadoVerificacion.IMPRESO,
+    )
+    await crear_expediente(
+        db_session, linea_id=1, centro_id="OAX-01", placa="OTR-999-B",
+        estado=EstadoVerificacion.CREADO,
+    )
+    await crear_expediente(
+        db_session, linea_id=1, centro_id="OAX-02", placa="XYZ-777-C",
+        estado=EstadoVerificacion.IMPRESO,
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/supervision/expedientes/buscar",
+        params={"placa": "xyz"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    ids = {e["id"] for e in resp.json()}
+    assert ids == {str(impreso.id)}
+
+
+async def test_buscar_expedientes_placa_vacia_responde_422(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session, center_id="OAX-01")
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/supervision/expedientes/buscar",
+        params={"placa": "   "},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 422

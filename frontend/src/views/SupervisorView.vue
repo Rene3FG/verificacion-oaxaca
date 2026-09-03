@@ -339,6 +339,103 @@ async function guardarLimite() {
   }
 }
 
+// --- Reimpresión (sección 3 del handoff, 2026-09-03) ---
+// IMPRESO/CERRADO_* no aparecen en el monitor (ESTADOS_TERMINALES) ni en
+// la cola de Impresión (ya no son "piso") — se busca por placa vía
+// GET /supervision/expedientes/buscar, el punto de entrada nuevo que
+// hacía falta para llegar a un expediente en esos estados.
+const ESTADOS_CON_CERTIFICADO_IMPRESO = ["IMPRESO", "CERRADO_APROBADO", "CERRADO_RECHAZADO"];
+const TIPOS_CERTIFICADO_APROBADO = ["PARTICULAR", "DOBLE_CERO", "INTENSIVO"];
+
+const busquedaPlaca = ref("");
+const buscandoExpediente = ref(false);
+const resultadosBusqueda = ref([]);
+const expedienteReimpresion = ref(null);
+const motivoReimpresion = ref("");
+const reimprimiendoPorDano = ref(false);
+const nuevoTipoCorreccion = ref(null);
+const corrigiendoTipoPost = ref(false);
+
+const puedeReimprimir = computed(
+  () =>
+    expedienteReimpresion.value &&
+    ESTADOS_CON_CERTIFICADO_IMPRESO.includes(expedienteReimpresion.value.estado)
+);
+// RECHAZO se infiere solo — nunca admite corrección manual, ni como tipo
+// nuevo ni como tipo previo a corregir (ver backend).
+const puedeCorregirTipo = computed(
+  () => puedeReimprimir.value && expedienteReimpresion.value.certificado_tipo !== "RECHAZO"
+);
+
+async function buscarExpediente() {
+  if (!busquedaPlaca.value.trim()) return;
+  buscandoExpediente.value = true;
+  error.value = null;
+  resultadosBusqueda.value = [];
+  try {
+    const { data } = await api.get("/supervision/expedientes/buscar", {
+      params: { placa: busquedaPlaca.value.trim() },
+    });
+    resultadosBusqueda.value = data;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo buscar el expediente.";
+  } finally {
+    buscandoExpediente.value = false;
+  }
+}
+
+function abrirExpedienteReimpresion(exp) {
+  expedienteReimpresion.value = exp;
+  motivoReimpresion.value = "";
+  nuevoTipoCorreccion.value = null;
+}
+
+function cerrarExpedienteReimpresion() {
+  expedienteReimpresion.value = null;
+}
+
+async function reimprimirPorDano() {
+  reimprimiendoPorDano.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post(
+      `/impresion/folio/reimprimir-por-dano/${expedienteReimpresion.value.id}`,
+      { motivo: motivoReimpresion.value }
+    );
+    aviso.value = data.impreso
+      ? `Reimpreso con folio ${data.folio}.`
+      : `Folio ${data.folio} canjeado, pero la impresora no respondió — reintentar.`;
+    expedienteReimpresion.value.estado = data.estado_expediente;
+    motivoReimpresion.value = "";
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo reimprimir por daño.";
+  } finally {
+    reimprimiendoPorDano.value = false;
+  }
+}
+
+async function corregirTipoPostImpresion() {
+  corrigiendoTipoPost.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post(
+      `/impresion/tipo-certificado-post-impresion/${expedienteReimpresion.value.id}`,
+      null,
+      { params: { nuevo_tipo: nuevoTipoCorreccion.value } }
+    );
+    aviso.value = data.impreso
+      ? `Tipo corregido a ${data.certificado_tipo}, folio nuevo ${data.folio}.`
+      : `Tipo corregido a ${data.certificado_tipo}, folio ${data.folio} canjeado, pero la impresora no respondió — reintentar.`;
+    expedienteReimpresion.value.certificado_tipo = data.certificado_tipo;
+    expedienteReimpresion.value.estado = data.estado_expediente;
+    nuevoTipoCorreccion.value = null;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo corregir el tipo de certificado.";
+  } finally {
+    corrigiendoTipoPost.value = false;
+  }
+}
+
 onMounted(() => {
   cargarMonitor();
   cargarUsuarios();
@@ -368,6 +465,7 @@ onMounted(() => {
       <v-tab value="sincronizacion">Sincronización</v-tab>
       <v-tab value="folios">Folios</v-tab>
       <v-tab value="limites">Límites de emisión</v-tab>
+      <v-tab value="reimpresion">Reimpresión</v-tab>
     </v-tabs>
 
     <v-window v-model="tab">
@@ -673,6 +771,107 @@ onMounted(() => {
                 </tr>
               </tbody>
             </v-table>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+
+      <v-window-item value="reimpresion">
+        <v-card class="mb-4" variant="outlined">
+          <v-card-title>Buscar expediente</v-card-title>
+          <v-card-subtitle class="text-wrap">
+            Folio dañado/reimpresión por daño y corrección de tipo solo aplican con
+            certificado ya impreso o cerrado — busca por placa, esos expedientes ya no
+            aparecen en el Monitor ni en la cola de Impresión.
+          </v-card-subtitle>
+          <v-card-text>
+            <div class="d-flex ga-2 mb-3">
+              <v-text-field
+                v-model="busquedaPlaca"
+                label="Placa (o parte de ella)"
+                variant="outlined"
+                density="comfortable"
+                hide-details
+                @keyup.enter="buscarExpediente"
+              />
+              <v-btn color="primary" :loading="buscandoExpediente" @click="buscarExpediente">
+                Buscar
+              </v-btn>
+            </div>
+            <p v-if="resultadosBusqueda.length === 0" class="text-medium-emphasis">
+              Sin resultados todavía.
+            </p>
+            <v-list v-else density="compact">
+              <v-list-item
+                v-for="exp in resultadosBusqueda"
+                :key="exp.id"
+                :title="`Placa ${exp.placa}`"
+                :subtitle="`${exp.estado} · certificado: ${exp.certificado_tipo ?? 'sin determinar'} · folio: ${exp.folio_externo ?? 'sin asignar'}`"
+                @click="abrirExpedienteReimpresion(exp)"
+              />
+            </v-list>
+          </v-card-text>
+        </v-card>
+
+        <v-card v-if="expedienteReimpresion" variant="outlined">
+          <v-card-title class="d-flex align-center ga-2">
+            Placa {{ expedienteReimpresion.placa }}
+            <v-spacer />
+            <v-btn variant="text" size="small" @click="cerrarExpedienteReimpresion">Cerrar</v-btn>
+          </v-card-title>
+          <v-card-subtitle>
+            Estado: {{ expedienteReimpresion.estado }} · Certificado:
+            {{ expedienteReimpresion.certificado_tipo ?? "sin determinar" }} · Folio:
+            {{ expedienteReimpresion.folio_externo ?? "sin asignar" }}
+          </v-card-subtitle>
+          <v-card-text>
+            <v-alert v-if="!puedeReimprimir" type="info" variant="tonal" density="compact">
+              Este expediente no tiene un certificado impreso o cerrado — estas dos
+              operaciones no aplican en su estado actual.
+            </v-alert>
+            <template v-else>
+              <p class="text-subtitle-2 mb-2">Reimpresión por certificado físico dañado</p>
+              <v-textarea
+                v-model="motivoReimpresion"
+                label="Motivo (obligatorio)"
+                variant="outlined"
+                density="comfortable"
+                rows="2"
+              />
+              <v-btn
+                color="warning"
+                :loading="reimprimiendoPorDano"
+                :disabled="!motivoReimpresion.trim()"
+                @click="reimprimirPorDano"
+              >
+                Reimprimir por daño
+              </v-btn>
+
+              <v-divider class="my-4" />
+
+              <p class="text-subtitle-2 mb-2">Corrección de tipo después de imprimir</p>
+              <p v-if="!puedeCorregirTipo" class="text-caption text-medium-emphasis mb-2">
+                RECHAZO no admite corrección manual de tipo — se infiere solo.
+              </p>
+              <template v-else>
+                <v-select
+                  v-model="nuevoTipoCorreccion"
+                  :items="TIPOS_CERTIFICADO_APROBADO"
+                  label="Tipo correcto"
+                  variant="outlined"
+                  density="comfortable"
+                  style="max-width: 320px"
+                  class="mb-2"
+                />
+                <v-btn
+                  color="primary"
+                  :loading="corrigiendoTipoPost"
+                  :disabled="!nuevoTipoCorreccion"
+                  @click="corregirTipoPostImpresion"
+                >
+                  Corregir tipo y reimprimir
+                </v-btn>
+              </template>
+            </template>
           </v-card-text>
         </v-card>
       </v-window-item>

@@ -1426,13 +1426,70 @@ y `PruebaView.vue` no se probaron contra Chrome en esta sesión (sin
 extensión conectada). Commits sobre `etapa1-y-siox`, **NO pusheados** —
 pendiente de confirmación explícita, como siempre en este proyecto.
 
-**Pendiente real:**
+**Pendiente real (al cierre de la primera sesión del 2026-09-03):**
 1. NOx y Factor Lambda en el método dinámico de gasolina, rango de
    dilución CO+CO2 (13%-16.5%) — sin cambios, siguen en la lista.
 2. Layout impreso (`generar_pdf_certificado` sigue sin usar
    `certificate_projection_json`), ambigüedad del folio en el snapshot,
-   semestre/prórroga, `capacidad_dinamometro_kg`, frontend de
-   reimpresión, diseño visual — sin cambios.
-3. No probado visualmente en navegador (Chrome) en esta sesión — sería el
-   siguiente paso antes de dar por cerrado el frontend de captura de
-   lecturas.
+   semestre/prórroga, `capacidad_dinamometro_kg`, ~~frontend de
+   reimpresión~~ (hecho más tarde el mismo día, ver sección siguiente),
+   diseño visual — sin cambios.
+3. No probado visualmente en navegador (Chrome) en esta sesión — sigue
+   pendiente.
+
+## Frontend de reimpresión (2026-09-03, sesión posterior)
+
+Punto 1 pendiente desde el 2026-08-27: el backend completo de folio
+dañado/reimpresión por daño/corrección de tipo post-impresión existía sin
+ninguna UI. Esta sesión lo cierra.
+
+- **`POST /impresion/folio/marcar-danado/{id}`** ("antes de imprimir", sin
+  Supervisor, sin motivo) — botón nuevo en `ImpresionView.vue`, junto a
+  "Solicitar folio", habilitado solo en `FOLIO_ASIGNADO`. Tras la llamada
+  siempre se refresca el expediente completo (`recargarExpediente`, nuevo
+  helper que hace `GET /expedientes/{id}`) en vez de solo parchear campos
+  locales — necesario porque si el inventario del tipo también está
+  agotado, el backend ya transicionó a `FOLIO_ERROR` antes del 409, y el
+  estado local quedaría desincronizado sin el refresh.
+- **Reimpresión por daño y corrección de tipo post-impresión** (ambas
+  exclusivas de Supervisor, aplican solo en `IMPRESO`/`CERRADO_APROBADO`/
+  `CERRADO_RECHAZADO`): estos tres estados **no aparecen ni en la cola de
+  Impresión ni en el Monitor de Supervisor** (`ESTADOS_TERMINALES` los
+  excluye) — no había ningún punto de entrada para abrir un expediente
+  específico en ellos, como ya había anotado la sesión del 2026-08-27.
+  - **`GET /api/supervision/expedientes/buscar?placa=`** (nuevo,
+    `requiere_supervisor`): búsqueda parcial case-insensitive por placa,
+    SIN restricción de estado (a diferencia de `/monitor`) y por todas
+    las líneas del centro de la sesión (igual que `/monitor`, NO acotado
+    por `lineas_visibles()` — esa restricción es de las colas por
+    estación, no de Supervisor). 422 si la placa viene vacía.
+  - **`SupervisorView.vue`** gana pestaña "Reimpresión": buscador por
+    placa + panel de detalle que muestra las dos acciones solo si el
+    expediente encontrado está en uno de los 3 estados con certificado
+    impreso; "corrección de tipo" además se oculta si `certificado_tipo
+    === "RECHAZO"` (se infiere solo, nunca corrección manual, ver
+    backend). `reimprimir-por-dano` manda `{motivo}` en el body;
+    `tipo-certificado-post-impresion` manda `nuevo_tipo` como query param
+    (el endpoint lo declara como parámetro simple, no un body Pydantic).
+- **3 pruebas nuevas** (`tests/test_supervision.py`): 403 sin supervisor,
+  encuentra un `IMPRESO` de otra línea del mismo centro por coincidencia
+  parcial de placa y excluye el de otro centro, 422 con placa vacía.
+  **179 pruebas, todas pasan** (176→179). Build de frontend limpio.
+- No probado contra Chrome en esta sesión (sin extensión conectada, mismo
+  gap que la sesión anterior).
+- **Nota de higiene del entorno, no un bug de esta sesión**: una corrida
+  de la suite mostró 5 fallos transitorios en `test_sync.py` (conteos
+  globales de `sync_outbox` inflados) — una segunda corrida inmediata
+  pasó limpia (179/179) y una consulta directa confirmó `sync_outbox` en
+  0 filas. Mismo síntoma ya documentado varias veces en este archivo
+  (BD de dev compartida con pytest): no se investigó más a fondo porque
+  no fue reproducible y ninguno de los cambios de esta sesión escribe en
+  `sync_outbox`.
+
+**Pendiente real:**
+1. NOx y Factor Lambda en gasolina dinámico, rango CO+CO2, layout
+   impreso, ambigüedad del folio en el snapshot, semestre/prórroga,
+   `capacidad_dinamometro_kg`, diseño visual — sin cambios.
+2. Prueba visual en navegador (Chrome) — sigue sin hacerse en ninguna
+   sesión reciente, acumulando riesgo. Sería lo primero a resolver en
+   cuanto haya extensión conectada.
