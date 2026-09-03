@@ -245,7 +245,7 @@ async def guardar_resultado_prueba(
             peso_bruto_kg = vehiculo.peso_bruto_vehicular_kg if vehiculo is not None else None
             payload_validado = NormalizedPayloadDiesel.model_validate(payload.normalized_payload)
             resultado, limits_applied, excedidos = await evaluar_diesel(
-                db, metodo, payload_validado, peso_bruto_kg
+                db, metodo, payload_validado, peso_bruto_kg, anio_modelo
             )
         else:
             payload_validado = NormalizedPayloadGasolina.model_validate(payload.normalized_payload)
@@ -380,16 +380,12 @@ async def cargar_limite_emision(
             status_code=422,
             detail="peso_bruto_desde_kg no puede ser mayor que peso_bruto_hasta_kg.",
         )
-    # Cada norma estratifica por un solo eje (ver docstring de
-    # LimiteEmision): NOM-041 gasolina por año-modelo, NOM-045 diésel por
-    # peso bruto. Mezclar ambos en una fila sería un dato sin sentido.
-    if payload.metodo == MetodoPrueba.DIESEL_OPACITY and (
-        payload.anio_modelo_desde is not None or payload.anio_modelo_hasta is not None
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail="DIESEL_OPACITY no estratifica por año-modelo; usar peso_bruto_desde_kg/hasta_kg.",
-        )
+    # NOM-045 (diésel) estratifica por año-modelo Y peso bruto a la vez
+    # (verificado contra el texto oficial del DOF 2026-09-03) — a
+    # diferencia de NOM-041 (gasolina), que solo usa año-modelo. Por eso
+    # DIESEL_OPACITY sí admite anio_modelo_desde/hasta (no se rechaza); lo
+    # único que sigue sin sentido es que un método de gasolina traiga
+    # peso_bruto_*_kg, ver docstring de LimiteEmision.
     if payload.metodo != MetodoPrueba.DIESEL_OPACITY and (
         payload.peso_bruto_desde_kg is not None or payload.peso_bruto_hasta_kg is not None
     ):

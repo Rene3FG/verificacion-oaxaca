@@ -292,19 +292,143 @@ async def test_guardar_resultado_diesel_estratifica_por_peso_bruto(client, db_se
     assert "Límites de emisión no configurados" in resp_sin_peso.json()["detail"]
 
 
-async def test_limites_emision_diesel_no_admite_anio_modelo(client, db_session):
+async def test_guardar_resultado_diesel_estratifica_por_anio_y_peso_a_la_vez(client, db_session):
+    """NOM-045 real (TABLA 1/TABLA 2 del DOF, ver
+    app/seed_limites_nom045.py): a diferencia del test anterior (valores de
+    prueba, un solo eje), este usa los 4 brackets oficiales completos —
+    PBV ≤/>3,856 kg cruzado con año-modelo — para verificar que ambos ejes
+    se aplican a la vez, no solo peso bruto."""
+
+    sesion = await _sesion_prueba(db_session)
+    db_session.add_all(
+        [
+            LimiteEmision(
+                metodo=MetodoPrueba.DIESEL_OPACITY,
+                parametro="coefficient_absorption_final_k_m1",
+                valor_maximo=2.00,
+                anio_modelo_hasta=2003,
+                peso_bruto_hasta_kg=3856,
+            ),
+            LimiteEmision(
+                metodo=MetodoPrueba.DIESEL_OPACITY,
+                parametro="coefficient_absorption_final_k_m1",
+                valor_maximo=1.50,
+                anio_modelo_desde=2004,
+                peso_bruto_hasta_kg=3856,
+            ),
+            LimiteEmision(
+                metodo=MetodoPrueba.DIESEL_OPACITY,
+                parametro="coefficient_absorption_final_k_m1",
+                valor_maximo=2.25,
+                anio_modelo_hasta=1997,
+                peso_bruto_desde_kg=3856.01,
+            ),
+            LimiteEmision(
+                metodo=MetodoPrueba.DIESEL_OPACITY,
+                parametro="coefficient_absorption_final_k_m1",
+                valor_maximo=1.50,
+                anio_modelo_desde=1998,
+                peso_bruto_desde_kg=3856.01,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    # Ligero (PBV 3000 <= 3856) y viejo (año 2000 <= 2003): límite 2.00.
+    # 1.90 aprueba, ambos límites vecinos (1.50 de año-posterior, 2.25 de
+    # peso-pesado) habrían rechazado o aprobado distinto si el eje
+    # equivocado se hubiera aplicado.
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="DIESEL",
+        modelo=2000,
+        peso_bruto_vehicular_kg=3000,
+    )
+    expediente.tipo_prueba_final = TipoPrueba.OPACIDAD
+    db_session.add(expediente)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/resultado/{expediente.id}",
+        json={"normalized_payload": {"coefficient_absorption_final_k_m1": 1.90}},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["estado_expediente"] == EstadoVerificacion.PENDIENTE_IMPRESION.value
+
+    # Mismo peso ligero, pero año 2010 (posterior a 2004): límite baja a
+    # 1.50 — el mismo 1.90 que aprobó arriba ahora rechaza.
+    expediente_nuevo = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="DIESEL",
+        modelo=2010,
+        peso_bruto_vehicular_kg=3000,
+    )
+    expediente_nuevo.tipo_prueba_final = TipoPrueba.OPACIDAD
+    db_session.add(expediente_nuevo)
+    await db_session.commit()
+
+    resp_nuevo = await client.post(
+        f"/api/pruebas/resultado/{expediente_nuevo.id}",
+        json={"normalized_payload": {"coefficient_absorption_final_k_m1": 1.90}},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp_nuevo.status_code == 200
+    assert (
+        resp_nuevo.json()["estado_expediente"]
+        == EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO.value
+    )
+
+    # Pesado (PBV 4000 > 3856) y viejo (año 1990 <= 1997): límite 2.25 —
+    # mismo año-bracket "y anteriores" que el primer caso, pero el bracket
+    # de peso correcto le da un límite distinto (2.25, no 2.00).
+    expediente_pesado_viejo = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="DIESEL",
+        modelo=1990,
+        peso_bruto_vehicular_kg=4000,
+    )
+    expediente_pesado_viejo.tipo_prueba_final = TipoPrueba.OPACIDAD
+    db_session.add(expediente_pesado_viejo)
+    await db_session.commit()
+
+    resp_pesado_viejo = await client.post(
+        f"/api/pruebas/resultado/{expediente_pesado_viejo.id}",
+        json={"normalized_payload": {"coefficient_absorption_final_k_m1": 2.10}},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp_pesado_viejo.status_code == 200
+    assert (
+        resp_pesado_viejo.json()["estado_expediente"]
+        == EstadoVerificacion.PENDIENTE_IMPRESION.value
+    )
+
+
+async def test_limites_emision_diesel_admite_anio_modelo_y_peso_bruto(client, db_session):
+    """Corrección 2026-09-03: NOM-045 (verificado contra el texto oficial
+    del DOF) estratifica por año-modelo Y peso bruto a la vez — antes se
+    asumía (2026-09-02) que diésel era de un solo eje (peso bruto) y esto
+    se rechazaba con 422. Ver docstring de LimiteEmision."""
+
     sesion_supervisor = await crear_sesion_supervisor(db_session, station_type=StationType.PRUEBA)
     resp = await client.post(
         "/api/pruebas/limites-emision",
         json={
             "metodo": "DIESEL_OPACITY",
             "parametro": "coefficient_absorption_final_k_m1",
-            "valor_maximo": 0.5,
-            "anio_modelo_desde": 2000,
+            "valor_maximo": 2.0,
+            "anio_modelo_hasta": 2003,
+            "peso_bruto_hasta_kg": 3856,
         },
         headers={"X-Session-Id": str(sesion_supervisor.id)},
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 200
 
 
 async def test_limites_emision_gasolina_no_admite_peso_bruto(client, db_session):

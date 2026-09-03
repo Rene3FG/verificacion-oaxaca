@@ -61,10 +61,13 @@ async def _limites_por_fase(
     anio_modelo: int | None = None,
     peso_bruto_kg: float | None = None,
 ) -> dict[str, float]:
-    """Filtra por año-modelo (NOM-041 gasolina) y por peso bruto (NOM-045
-    diésel) a la vez: cada norma solo estratifica por su propio eje, así
-    que las filas de la otra dejan esas columnas en NULL/NULL y matchean
-    siempre que el llamador correspondiente no les pase ese parámetro."""
+    """Filtra por año-modelo y por peso bruto a la vez. NOM-041 (gasolina)
+    solo estratifica por año-modelo — sus filas dejan peso_bruto_*_kg en
+    NULL/NULL (sin acotar), y el caller no pasa `peso_bruto_kg`. NOM-045
+    (diésel) estratifica por AMBOS ejes simultáneamente (confirmado contra
+    el texto oficial del DOF el 2026-09-03: TABLA 1/TABLA 2 por PBV ≤/>
+    3,856 kg, cada una con dos brackets de año-modelo) — corrige el
+    supuesto de "un solo eje por norma" de la sesión 2026-09-02."""
     filas = (
         await db.execute(
             select(LimiteEmision).where(
@@ -130,11 +133,15 @@ async def evaluar_diesel(
     metodo: MetodoPrueba,
     payload: NormalizedPayloadDiesel,
     peso_bruto_kg: float | None,
+    anio_modelo: int | None,
 ) -> tuple[ResultadoPruebaEnum, dict, dict]:
-    # NOM-045 estratifica por peso bruto vehicular, no por año-modelo (ver
-    # docstring de LimiteEmision) — se recibe `peso_bruto_kg`, no
-    # `anio_modelo`, a diferencia de evaluar_gasolina.
-    limites = await _limites_por_fase(db, metodo, None, peso_bruto_kg=peso_bruto_kg)
+    # NOM-045 estratifica por peso bruto vehicular Y por año-modelo a la vez
+    # (TABLA 1/TABLA 2 del DOF, verificado 2026-09-03) — a diferencia de lo
+    # asumido el 2026-09-02, diésel sí recibe `anio_modelo` igual que
+    # evaluar_gasolina, además de `peso_bruto_kg`.
+    limites = await _limites_por_fase(
+        db, metodo, None, anio_modelo=anio_modelo, peso_bruto_kg=peso_bruto_kg
+    )
     parametros = PARAMETROS_CON_LIMITE[metodo]
     faltantes = _validar_completos(limites, parametros, "diesel")
     if faltantes:

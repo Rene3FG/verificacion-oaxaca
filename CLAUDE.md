@@ -1325,10 +1325,114 @@ sesión anterior pero no quedó guardado en disco).
   pasan.** `python -c "from app.main import app"` confirma 48 rutas sin
   error. Build de frontend (`npm run build`) limpio.
 
-**Pendiente real:**
-1. **Cargar NOM-045 real**: falta el PDF/tabla oficial (límite de
-   opacidad por rango de PBV) — pedido al usuario, no fabricado.
+**Pendiente real (al cierre de esta sesión):**
+1. ~~Cargar NOM-045 real~~ — cargada 2026-09-03, ver sección siguiente
+   (con una corrección importante al mecanismo mismo).
 2. Todo lo demás sin cambios respecto a la lista de la sección anterior
    (frontend de captura de lecturas, NOx/Lambda, rango CO+CO2, layout
    impreso, ambigüedad del folio, semestre/prórroga,
    `capacidad_dinamometro_kg`, frontend de reimpresión, diseño visual).
+
+## Frontend de captura de lecturas + corrección de NOM-045 (2026-09-03)
+
+Dos piezas en esta sesión: el punto 1 pendiente de arriba (frontend de
+`PruebaView.vue`) y, al verificar el PDF oficial de NOM-045 que el usuario
+compartió, una corrección real al mecanismo backend construido el
+2026-09-02.
+
+### Frontend de captura de lecturas — punto 1 del pendiente
+
+`PruebaView.vue` mandaba el shape viejo (`{resultado,
+valores_medidos_json}`) contra un backend que desde el 2026-08-31 espera
+`{normalized_payload}` — el formulario llevaba **roto** (422 garantizado)
+desde esa sesión, nadie lo había ejercitado contra el backend real todavía.
+
+- Reemplazado el editor libre de pares clave/valor por campos fijos según
+  `metodoPrueba` (mismo mapping que el backend,
+  `app/schemas/prueba.py::METODO_POR_TIPO_PRUEBA`, duplicado en el
+  frontend): gasolina muestra dos bloques RALENTÍ/CRUCERO con
+  HC/CO/CO2/O2 obligatorios y NOx/velocidad opcionales; diésel muestra el
+  coeficiente de absorción K obligatorio y el resto (opacidad, temp.
+  motor, RPMs) opcional como evidencia.
+  `aceleraciones` (lista de diccionarios, diésel) no tiene UI — se omite
+  del payload, es opcional en el schema.
+- El `v-select` de `resultado` se quitó — el servidor lo calcula. El botón
+  "Guardar resultado" se deshabilita hasta que los campos obligatorios
+  del método correspondiente estén completos; tras guardar, el aviso
+  distingue Aprobada/Rechazada leyendo `estado_expediente` de la
+  respuesta (`PENDIENTE_DE_IMPRESION_RECHAZO` vs. `PENDIENTE_IMPRESION`).
+- **`SupervisorView.vue`** gana pestaña "Límites de emisión": tabla de
+  `GET /api/pruebas/limites-emision` (método, fase, parámetro, máximo,
+  rango de año-modelo, rango de peso bruto) y diálogo de alta/actualización
+  contra `POST /api/pruebas/limites-emision`, con los mismos campos que
+  exige el backend (fase solo para gasolina; año-modelo siempre visible;
+  peso bruto solo para diésel — ver corrección abajo).
+
+### Corrección: NOM-045 no es de un solo eje
+
+El usuario compartió los PDFs oficiales de NOM-041 (ya cargada) y NOM-045
+(DOF, numerales 4.1/4.2). Verificado el texto de NOM-045 dos veces
+(fetch independiente, misma cita literal ambas veces) antes de tocar
+código: **el supuesto del 2026-09-02 ("cada norma usa un solo eje") era
+incorrecto para diésel** — NOM-045 tiene TABLA 1 (PBV ≤3,856 kg) y TABLA 2
+(PBV >3,856 kg), y CADA tabla da límites distintos por año-modelo. Diésel
+estratifica por año-modelo Y peso bruto **a la vez**, no solo por peso.
+Gasolina (NOM-041) sigue siendo de un solo eje (año-modelo), eso sí estaba
+bien.
+
+Como `LimiteEmision` ya tenía las 7 columnas (año-modelo + peso bruto,
+migraciones del 2026-09-01/02) y `_limites_por_fase` ya filtraba por
+ambos ejes simultáneamente (código genérico, nunca hacía falta tocarlo),
+la corrección fue quitar las trabas que asumían el supuesto viejo, no
+construir nada nuevo:
+
+- **`evaluar_diesel`** (`app/services/evaluacion_prueba.py`) gana el
+  parámetro `anio_modelo` (antes solo recibía `peso_bruto_kg`) y lo pasa a
+  `_limites_por_fase` igual que `evaluar_gasolina`.
+- **`guardar_resultado_prueba`** (`app/api/routers/pruebas.py`): el
+  camino diésel ahora pasa `anio_modelo` (ya se leía de
+  `vehiculo.modelo` para el camino gasolina, se reusa la misma variable)
+  además de `peso_bruto_kg`.
+- **`cargar_limite_emision`**: se quitó la regla 422 que rechazaba
+  `DIESEL_OPACITY` con `anio_modelo_desde`/`_hasta` — ahora es válido y
+  esperado que diésel traiga ambos rangos. La regla que sigue vigente es
+  la inversa (gasolina no admite `peso_bruto_*_kg`, eso sí es cierto).
+- **`app/seed_limites_nom045.py`** (nuevo, patrón de
+  `seed_limites_nom041.py`): carga las 4 filas oficiales — PBV ≤3,856 kg
+  (año ≤2003→K=2.00, año ≥2004→K=1.50) y PBV >3,856 kg (año ≤1997→K=2.25,
+  año ≥1998→K=1.50). El corte "mayor a 3,856 kg" es estricto; como
+  `_en_rango_peso` es de rango cerrado, se usa `peso_bruto_desde_kg=3856.01`
+  (no `3856`) para que un vehículo de exactamente 3,856 kg caiga solo en
+  la TABLA 1, sin traslape. Ya ejecutado contra la base de dev — verificado
+  con `_limites_por_fase` directo: PBV 3000/año 2000→2.00, PBV 3000/año
+  2010→1.50, PBV 4500/año 1990→2.25, PBV 4500/año 2005→1.50, PBV
+  3856 exacto/año 2003→2.00 (sin traslape), sin peso ni año→`{}` (rechaza,
+  no adivina). Solo se carga `coefficient_absorption_final_k_m1` — el "por
+  ciento de opacidad" de la tabla oficial es el mismo límite en otra
+  unidad, no un parámetro adicional que se compare aparte.
+- Docstrings corregidos en `LimiteEmision` y `evaluacion_prueba.py`.
+- **Prueba reescrita**: `test_limites_emision_diesel_no_admite_anio_modelo`
+  (afirmaba el supuesto viejo) → `test_limites_emision_diesel_admite_anio_modelo_y_peso_bruto`
+  (200, no 422). **Prueba nueva**:
+  `test_guardar_resultado_diesel_estratifica_por_anio_y_peso_a_la_vez`
+  carga los 4 brackets oficiales y verifica que el mismo PBV con distinto
+  año da resultados distintos (y viceversa) — el test de peso-solo del
+  2026-09-02 (`test_guardar_resultado_diesel_estratifica_por_peso_bruto`)
+  se dejó igual, sigue siendo válido porque sus filas no acotan año
+  (matchea cualquier año-modelo, incluido `None`).
+
+**176 pruebas, todas pasan.** Build de frontend limpio. `SupervisorView.vue`
+y `PruebaView.vue` no se probaron contra Chrome en esta sesión (sin
+extensión conectada). Commits sobre `etapa1-y-siox`, **NO pusheados** —
+pendiente de confirmación explícita, como siempre en este proyecto.
+
+**Pendiente real:**
+1. NOx y Factor Lambda en el método dinámico de gasolina, rango de
+   dilución CO+CO2 (13%-16.5%) — sin cambios, siguen en la lista.
+2. Layout impreso (`generar_pdf_certificado` sigue sin usar
+   `certificate_projection_json`), ambigüedad del folio en el snapshot,
+   semestre/prórroga, `capacidad_dinamometro_kg`, frontend de
+   reimpresión, diseño visual — sin cambios.
+3. No probado visualmente en navegador (Chrome) en esta sesión — sería el
+   siguiente paso antes de dar por cerrado el frontend de captura de
+   lecturas.

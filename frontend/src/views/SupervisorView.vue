@@ -257,12 +257,95 @@ async function registrarLoteFolios() {
   }
 }
 
+// --- Límites de emisión (Certificate Result Projection Contract v1) ---
+const METODOS_PRUEBA = ["GAS_STATIC", "GAS_DYNAMIC", "DIESEL_OPACITY"];
+const FASES_LECTURA = ["RALENTI", "CRUCERO"];
+const PARAMETROS_POR_METODO = {
+  GAS_STATIC: ["hc_ppm", "co_pct", "o2_pct"],
+  GAS_DYNAMIC: ["hc_ppm", "co_pct", "o2_pct"],
+  DIESEL_OPACITY: ["coefficient_absorption_final_k_m1"],
+};
+const limitesEmision = ref([]);
+const cargandoLimites = ref(false);
+const limiteAbierto = ref(false);
+const limiteForm = reactive({
+  metodo: "GAS_DYNAMIC",
+  fase: "RALENTI",
+  parametro: "hc_ppm",
+  valor_maximo: null,
+  anio_modelo_desde: null,
+  anio_modelo_hasta: null,
+  peso_bruto_desde_kg: null,
+  peso_bruto_hasta_kg: null,
+});
+const guardandoLimite = ref(false);
+
+const limiteEsDiesel = computed(() => limiteForm.metodo === "DIESEL_OPACITY");
+const parametrosDisponibles = computed(() => PARAMETROS_POR_METODO[limiteForm.metodo] ?? []);
+
+function rangoTexto(desde, hasta) {
+  if (desde == null && hasta == null) return "Sin acotar";
+  return `${desde ?? "—"} – ${hasta ?? "—"}`;
+}
+
+async function cargarLimitesEmision() {
+  cargandoLimites.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.get("/pruebas/limites-emision");
+    limitesEmision.value = data;
+  } catch (err) {
+    error.value =
+      err.response?.data?.detail || "No se pudo cargar el catálogo de límites de emisión.";
+  } finally {
+    cargandoLimites.value = false;
+  }
+}
+
+function onMetodoLimiteChange(valor) {
+  limiteForm.metodo = valor;
+  limiteForm.fase = valor === "DIESEL_OPACITY" ? null : "RALENTI";
+  limiteForm.parametro = PARAMETROS_POR_METODO[valor][0];
+  limiteForm.anio_modelo_desde = null;
+  limiteForm.anio_modelo_hasta = null;
+  limiteForm.peso_bruto_desde_kg = null;
+  limiteForm.peso_bruto_hasta_kg = null;
+}
+
+function abrirNuevoLimite() {
+  onMetodoLimiteChange("GAS_DYNAMIC");
+  limiteForm.valor_maximo = null;
+  limiteAbierto.value = true;
+}
+
+async function guardarLimite() {
+  guardandoLimite.value = true;
+  error.value = null;
+  try {
+    await api.post("/pruebas/limites-emision", { ...limiteForm });
+    aviso.value = "Límite de emisión guardado.";
+    limiteAbierto.value = false;
+    await cargarLimitesEmision();
+  } catch (err) {
+    const detail = err.response?.data?.detail;
+    error.value =
+      typeof detail === "string"
+        ? detail
+        : detail
+          ? JSON.stringify(detail)
+          : "No se pudo guardar el límite de emisión.";
+  } finally {
+    guardandoLimite.value = false;
+  }
+}
+
 onMounted(() => {
   cargarMonitor();
   cargarUsuarios();
   cargarPermisos();
   cargarEstadoSync();
   cargarInventarioFolios();
+  cargarLimitesEmision();
 });
 </script>
 
@@ -284,6 +367,7 @@ onMounted(() => {
       <v-tab value="permisos">Permisos</v-tab>
       <v-tab value="sincronizacion">Sincronización</v-tab>
       <v-tab value="folios">Folios</v-tab>
+      <v-tab value="limites">Límites de emisión</v-tab>
     </v-tabs>
 
     <v-window v-model="tab">
@@ -544,6 +628,54 @@ onMounted(() => {
           </v-card-text>
         </v-card>
       </v-window-item>
+
+      <v-window-item value="limites">
+        <v-card variant="outlined">
+          <v-card-title class="d-flex align-center ga-2">
+            Límites de emisión (NOM-041/NOM-045)
+            <v-spacer />
+            <v-btn
+              variant="text"
+              icon="mdi-refresh"
+              :loading="cargandoLimites"
+              @click="cargarLimitesEmision"
+            />
+            <v-btn color="primary" prepend-icon="mdi-plus" @click="abrirNuevoLimite">
+              Nuevo límite
+            </v-btn>
+          </v-card-title>
+          <v-card-text>
+            <v-progress-linear v-if="cargandoLimites" indeterminate class="mb-4" />
+            <p v-else-if="limitesEmision.length === 0" class="text-medium-emphasis">
+              Sin límites cargados. NOM-041 (gasolina) debería estar precargada por
+              <code>seed_limites_nom041.py</code>; NOM-045 (diésel) sigue pendiente de la tabla
+              oficial.
+            </p>
+            <v-table v-else density="compact">
+              <thead>
+                <tr>
+                  <th>Método</th>
+                  <th>Fase</th>
+                  <th>Parámetro</th>
+                  <th>Máximo</th>
+                  <th>Año-modelo</th>
+                  <th>Peso bruto (kg)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(fila, i) in limitesEmision" :key="i">
+                  <td>{{ fila.metodo }}</td>
+                  <td>{{ fila.fase ?? "—" }}</td>
+                  <td>{{ fila.parametro }}</td>
+                  <td>{{ fila.valor_maximo }}</td>
+                  <td>{{ rangoTexto(fila.anio_modelo_desde, fila.anio_modelo_hasta) }}</td>
+                  <td>{{ rangoTexto(fila.peso_bruto_desde_kg, fila.peso_bruto_hasta_kg) }}</td>
+                </tr>
+              </tbody>
+            </v-table>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
     </v-window>
 
     <v-dialog v-model="bitacoraAbierta" max-width="640">
@@ -660,6 +792,90 @@ onMounted(() => {
             @click="crearPermiso"
           >
             Crear
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="limiteAbierto" max-width="480">
+      <v-card>
+        <v-card-title>Nuevo límite de emisión</v-card-title>
+        <v-card-text>
+          <v-select
+            :model-value="limiteForm.metodo"
+            :items="METODOS_PRUEBA"
+            label="Método"
+            variant="outlined"
+            density="comfortable"
+            @update:model-value="onMetodoLimiteChange"
+          />
+          <v-select
+            v-if="!limiteEsDiesel"
+            v-model="limiteForm.fase"
+            :items="FASES_LECTURA"
+            label="Fase"
+            variant="outlined"
+            density="comfortable"
+          />
+          <v-select
+            v-model="limiteForm.parametro"
+            :items="parametrosDisponibles"
+            label="Parámetro"
+            variant="outlined"
+            density="comfortable"
+          />
+          <v-text-field
+            v-model.number="limiteForm.valor_maximo"
+            label="Valor máximo"
+            type="number"
+            variant="outlined"
+            density="comfortable"
+          />
+          <v-text-field
+            v-model.number="limiteForm.anio_modelo_desde"
+            label="Año-modelo desde (vacío = sin acotar)"
+            type="number"
+            variant="outlined"
+            density="comfortable"
+          />
+          <v-text-field
+            v-model.number="limiteForm.anio_modelo_hasta"
+            label="Año-modelo hasta (vacío = sin acotar)"
+            type="number"
+            variant="outlined"
+            density="comfortable"
+          />
+          <!-- NOM-045 (diésel) estratifica por año-modelo Y peso bruto a la
+               vez (corrección 2026-09-03, ver CLAUDE.md) — solo diésel
+               admite estos dos campos adicionales; gasolina (NOM-041) no
+               estratifica por peso. -->
+          <template v-if="limiteEsDiesel">
+            <v-text-field
+              v-model.number="limiteForm.peso_bruto_desde_kg"
+              label="Peso bruto desde, kg (vacío = sin acotar)"
+              type="number"
+              variant="outlined"
+              density="comfortable"
+            />
+            <v-text-field
+              v-model.number="limiteForm.peso_bruto_hasta_kg"
+              label="Peso bruto hasta, kg (vacío = sin acotar)"
+              type="number"
+              variant="outlined"
+              density="comfortable"
+            />
+          </template>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="limiteAbierto = false">Cancelar</v-btn>
+          <v-btn
+            color="primary"
+            :loading="guardandoLimite"
+            :disabled="!limiteForm.parametro || limiteForm.valor_maximo === null"
+            @click="guardarLimite"
+          >
+            Guardar
           </v-btn>
         </v-card-actions>
       </v-card>

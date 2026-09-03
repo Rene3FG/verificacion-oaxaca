@@ -27,16 +27,20 @@ class LimiteEmision(Base, UUIDPKMixin, TimestampMixin):
 
     `peso_bruto_desde_kg`/`peso_bruto_hasta_kg` (ambos NULL por defecto =
     sin acotar) reflejan que NOM-045-SEMARNAT-2017 (diésel, opacidad)
-    estratifica sus límites por PESO BRUTO VEHICULAR, no por año-modelo —
-    agregado 2026-09-02, mismo patrón que `anio_modelo_desde`/`_hasta`
-    (2026-09-01). `evaluar_resultado` elige la fila cuyo rango de peso
-    contiene `Vehiculo.peso_bruto_vehicular_kg`; si el vehículo no tiene ese
-    dato capturado, solo matchean filas sin acotar — nunca asume un peso.
-    Las filas de NOM-041 (gasolina) dejan estas dos columnas en NULL/NULL
-    (sin acotar), igual que las de NOM-045 dejan `anio_modelo_desde`/
-    `_hasta` en NULL/NULL: cada norma solo usa su propio eje de
-    estratificación. Los valores reales de NOM-045 siguen sin cargar — el
-    mecanismo se construye antes de tener la tabla oficial (ver CLAUDE.md).
+    estratifica sus límites por PESO BRUTO VEHICULAR — agregado
+    2026-09-02, mismo patrón que `anio_modelo_desde`/`_hasta` (2026-09-01).
+    `evaluar_resultado` elige la fila cuyo rango de peso contiene
+    `Vehiculo.peso_bruto_vehicular_kg`; si el vehículo no tiene ese dato
+    capturado, solo matchean filas sin acotar — nunca asume un peso.
+
+    **Corrección 2026-09-03** (contra el texto oficial del DOF): NOM-045 NO
+    es de un solo eje — TABLA 1 (PBV ≤3,856 kg) y TABLA 2 (PBV >3,856 kg)
+    cada una da límites distintos por año-modelo (numerales 4.1/4.2). Las
+    filas de diésel usan AMBAS columnas de rango (`anio_modelo_*` y
+    `peso_bruto_*_kg`) simultáneamente; solo gasolina (NOM-041) deja
+    `peso_bruto_*_kg` en NULL/NULL, porque esa norma sí es de un solo eje
+    (año-modelo). Los valores reales de NOM-045 ya están cargados vía
+    `app/seed_limites_nom045.py`.
 
     Sin una fila que matchee para un método/fase/parámetro/año/peso dado,
     `evaluar_resultado` rechaza con 409 ("límites no configurados"), nunca

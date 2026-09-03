@@ -144,20 +144,75 @@ const tipoPruebaElegido = computed(() =>
 const configurando = ref(false);
 const iniciando = ref(false);
 const guardandoResultado = ref(false);
-const resultadoPrueba = ref("APROBADO");
-const valoresMedidos = ref([{ clave: "", valor: "" }]);
 
-function agregarValorMedido() {
-  valoresMedidos.value.push({ clave: "", valor: "" });
+// 'Certificate Result Projection Contract v1' (sección 4, 2026-08-31):
+// reemplaza el editor libre de pares clave/valor. El shape depende del
+// método técnico (no es lo mismo que tipo_prueba_final — ver
+// app/schemas/prueba.py::METODO_POR_TIPO_PRUEBA en el backend); el
+// resultado ya no lo elige el operador, lo calcula el servidor.
+const METODO_POR_TIPO_PRUEBA = {
+  DINAMICA: "GAS_DYNAMIC",
+  ESTATICA: "GAS_STATIC",
+  OPACIDAD: "DIESEL_OPACITY",
+};
+const metodoPrueba = computed(() => METODO_POR_TIPO_PRUEBA[expediente.value?.tipo_prueba_final] ?? null);
+const esMetodoGasolina = computed(
+  () => metodoPrueba.value === "GAS_DYNAMIC" || metodoPrueba.value === "GAS_STATIC"
+);
+
+function faseVacia() {
+  return { hc_ppm: null, co_pct: null, co2_pct: null, o2_pct: null, nox_ppm: null, speed_kph: null };
 }
-function quitarValorMedido(i) {
-  valoresMedidos.value.splice(i, 1);
+const lecturaGasolina = reactive({ ralenti: faseVacia(), crucero: faseVacia() });
+const lecturaDiesel = reactive({
+  coefficient_absorption_final_k_m1: null,
+  opacity_pct: null,
+  engine_temp_c: null,
+  rpm_idle: null,
+  rpm_governed_max: null,
+  rpm_peak: null,
+});
+
+function faseCompleta(fase) {
+  return ["hc_ppm", "co_pct", "co2_pct", "o2_pct"].every((c) => fase[c] !== null && fase[c] !== "");
 }
+const lecturaCompleta = computed(() =>
+  esMetodoGasolina.value
+    ? faseCompleta(lecturaGasolina.ralenti) && faseCompleta(lecturaGasolina.crucero)
+    : lecturaDiesel.coefficient_absorption_final_k_m1 !== null &&
+      lecturaDiesel.coefficient_absorption_final_k_m1 !== ""
+);
+
+function limpiarFase(fase) {
+  const out = { hc_ppm: fase.hc_ppm, co_pct: fase.co_pct, co2_pct: fase.co2_pct, o2_pct: fase.o2_pct };
+  if (fase.nox_ppm !== null && fase.nox_ppm !== "") out.nox_ppm = fase.nox_ppm;
+  if (fase.speed_kph !== null && fase.speed_kph !== "") out.speed_kph = fase.speed_kph;
+  return out;
+}
+function construirNormalizedPayload() {
+  if (esMetodoGasolina.value) {
+    return { ralenti: limpiarFase(lecturaGasolina.ralenti), crucero: limpiarFase(lecturaGasolina.crucero) };
+  }
+  const out = { coefficient_absorption_final_k_m1: lecturaDiesel.coefficient_absorption_final_k_m1 };
+  for (const campo of ["opacity_pct", "engine_temp_c", "rpm_idle", "rpm_governed_max", "rpm_peak"]) {
+    if (lecturaDiesel[campo] !== null && lecturaDiesel[campo] !== "") out[campo] = lecturaDiesel[campo];
+  }
+  return out;
+}
+
 function reiniciarPrueba() {
   cambioAEstatica.value = false;
   motivoCambio.value = "";
-  resultadoPrueba.value = "APROBADO";
-  valoresMedidos.value = [{ clave: "", valor: "" }];
+  Object.assign(lecturaGasolina.ralenti, faseVacia());
+  Object.assign(lecturaGasolina.crucero, faseVacia());
+  Object.assign(lecturaDiesel, {
+    coefficient_absorption_final_k_m1: null,
+    opacity_pct: null,
+    engine_temp_c: null,
+    rpm_idle: null,
+    rpm_governed_max: null,
+    rpm_peak: null,
+  });
 }
 
 async function cargarExpedientesEnCurso() {
@@ -309,17 +364,22 @@ async function guardarResultadoPrueba() {
   guardandoResultado.value = true;
   error.value = null;
   try {
-    const valores = Object.fromEntries(
-      valoresMedidos.value.filter((v) => v.clave.trim()).map((v) => [v.clave.trim(), v.valor])
-    );
-    await api.post(`/pruebas/resultado/${expediente.value.id}`, {
-      resultado: resultadoPrueba.value,
-      valores_medidos_json: valores,
+    const { data } = await api.post(`/pruebas/resultado/${expediente.value.id}`, {
+      normalized_payload: construirNormalizedPayload(),
     });
-    aviso.value = "Resultado de prueba guardado. Expediente enviado a Impresión Central.";
+    aviso.value =
+      data.estado_expediente === "PENDIENTE_DE_IMPRESION_RECHAZO"
+        ? "Prueba rechazada (fuera de límites). Expediente enviado a Impresión Central."
+        : "Prueba aprobada. Expediente enviado a Impresión Central.";
     cerrarExpediente();
   } catch (err) {
-    error.value = err.response?.data?.detail || "No se pudo guardar el resultado de la prueba.";
+    const detail = err.response?.data?.detail;
+    error.value =
+      typeof detail === "string"
+        ? detail
+        : detail
+          ? JSON.stringify(detail)
+          : "No se pudo guardar el resultado de la prueba.";
   } finally {
     guardandoResultado.value = false;
   }
@@ -589,42 +649,64 @@ onMounted(() => {
               Tipo de prueba: <strong>{{ expediente.tipo_prueba_final }}</strong>
             </p>
 
-            <p class="text-subtitle-2 mb-2">Valores medidos</p>
-            <div
-              v-for="(fila, i) in valoresMedidos"
-              :key="i"
-              class="d-flex ga-2 mb-2 align-center"
-            >
-              <v-text-field
-                v-model="fila.clave"
-                label="Parámetro"
-                variant="outlined"
-                density="compact"
-                hide-details
-              />
-              <v-text-field
-                v-model="fila.valor"
-                label="Valor"
-                variant="outlined"
-                density="compact"
-                hide-details
-              />
-              <v-btn icon="mdi-delete" variant="text" size="small" @click="quitarValorMedido(i)" />
-            </div>
-            <v-btn variant="text" prepend-icon="mdi-plus" class="mb-4" @click="agregarValorMedido">
-              Agregar valor
-            </v-btn>
+            <v-alert v-if="!metodoPrueba" type="warning" variant="tonal" density="compact" class="mb-3">
+              Este tipo de prueba no tiene un método de proyección de certificado aprobado; no se
+              puede guardar el resultado.
+            </v-alert>
 
-            <v-select
-              v-model="resultadoPrueba"
-              :items="['APROBADO', 'RECHAZADO', 'ERROR']"
-              label="Resultado de la prueba"
-              variant="outlined"
-              density="comfortable"
-              style="max-width: 320px"
-              class="mb-2"
-            />
-            <v-btn color="primary" :loading="guardandoResultado" @click="guardarResultadoPrueba">
+            <template v-else-if="esMetodoGasolina">
+              <p class="text-caption text-medium-emphasis mb-2">
+                HC/CO/CO2/O2 son obligatorios en ambas fases; NOx y velocidad solo si el equipo
+                los reporta.
+              </p>
+
+              <p class="text-subtitle-2 mb-2">Ralentí</p>
+              <v-row dense class="mb-2">
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.hc_ppm" label="HC (ppm)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.co_pct" label="CO (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.co2_pct" label="CO2 (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.o2_pct" label="O2 (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.nox_ppm" label="NOx (ppm, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.speed_kph" label="Velocidad (km/h, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+              </v-row>
+
+              <p class="text-subtitle-2 mb-2">Crucero</p>
+              <v-row dense class="mb-2">
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.hc_ppm" label="HC (ppm)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.co_pct" label="CO (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.co2_pct" label="CO2 (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.o2_pct" label="O2 (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.nox_ppm" label="NOx (ppm, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.speed_kph" label="Velocidad (km/h, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+              </v-row>
+            </template>
+
+            <template v-else>
+              <p class="text-caption text-medium-emphasis mb-2">
+                El coeficiente de absorción final K es obligatorio; el resto queda como evidencia
+                técnica, no se sobreimprime en el certificado.
+              </p>
+              <v-row dense class="mb-2">
+                <v-col cols="12" sm="6"><v-text-field v-model.number="lecturaDiesel.coefficient_absorption_final_k_m1" label="Coeficiente de absorción final K (m⁻¹)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaDiesel.opacity_pct" label="Opacidad (%, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaDiesel.engine_temp_c" label="Temp. motor (°C, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaDiesel.rpm_idle" label="RPM ralentí (opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaDiesel.rpm_governed_max" label="RPM gobernado máx. (opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaDiesel.rpm_peak" label="RPM pico (opcional)" type="number" variant="outlined" density="compact" /></v-col>
+              </v-row>
+            </template>
+
+            <v-alert v-if="metodoPrueba" type="info" variant="tonal" density="compact" class="my-3">
+              El resultado (Aprobada/Rechazada) lo calcula el servidor comparando estas lecturas
+              contra los límites de emisión configurados.
+            </v-alert>
+
+            <v-btn
+              color="primary"
+              :loading="guardandoResultado"
+              :disabled="!metodoPrueba || !lecturaCompleta"
+              @click="guardarResultadoPrueba"
+            >
               Guardar resultado
             </v-btn>
           </template>
