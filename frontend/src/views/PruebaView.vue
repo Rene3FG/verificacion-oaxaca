@@ -54,6 +54,7 @@ const CAMPOS_VEHICULO = [
   "modelo",
   "tipo_vehiculo",
   "pbv",
+  "peso_bruto_vehicular_kg",
   "traccion",
   "razon_social",
   "tarjeta_circulacion",
@@ -404,6 +405,7 @@ onMounted(() => {
             <v-col cols="12" sm="6"><v-text-field v-model.number="vehiculoForm.modelo" label="Modelo" type="number" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.tipo_vehiculo" label="Tipo de vehículo" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.pbv" label="Peso bruto vehicular (PBV)" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model.number="vehiculoForm.peso_bruto_vehicular_kg" label="Peso bruto vehicular (kg)" type="number" variant="outlined" density="compact" hint="Numérico, para evaluar opacidad (NOM-045)" persistent-hint /></v-col>
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.traccion" label="Tracción" variant="outlined" density="compact" /></v-col>
           </v-row>
           <p class="text-caption text-medium-emphasis mb-1 mt-2">

@@ -200,6 +200,129 @@ async def test_guardar_resultado_diesel_evalua_coeficiente_de_absorcion(client, 
     )
 
 
+async def test_guardar_resultado_diesel_estratifica_por_peso_bruto(client, db_session):
+    """NOM-045 (2026-09-02): igual que NOM-041 estratifica por año-modelo,
+    diésel estratifica por `peso_bruto_vehicular_kg` — mismo mecanismo
+    (`_en_rango_peso`), valores de prueba (no la tabla oficial, todavía sin
+    cargar)."""
+
+    sesion = await _sesion_prueba(db_session)
+    db_session.add_all(
+        [
+            LimiteEmision(
+                metodo=MetodoPrueba.DIESEL_OPACITY,
+                fase=None,
+                parametro="coefficient_absorption_final_k_m1",
+                valor_maximo=0.5,
+                peso_bruto_desde_kg=None,
+                peso_bruto_hasta_kg=3856,
+            ),
+            LimiteEmision(
+                metodo=MetodoPrueba.DIESEL_OPACITY,
+                fase=None,
+                parametro="coefficient_absorption_final_k_m1",
+                valor_maximo=0.7,
+                peso_bruto_desde_kg=3857,
+                peso_bruto_hasta_kg=None,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    expediente_ligero = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="DIESEL",
+        peso_bruto_vehicular_kg=3000,
+    )
+    expediente_ligero.tipo_prueba_final = TipoPrueba.OPACIDAD
+    db_session.add(expediente_ligero)
+    await db_session.commit()
+
+    # 0.6 excede el límite del bracket ligero (0.5) pero no el pesado (0.7)
+    resp_ligero = await client.post(
+        f"/api/pruebas/resultado/{expediente_ligero.id}",
+        json={"normalized_payload": {"coefficient_absorption_final_k_m1": 0.6}},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp_ligero.status_code == 200
+    assert (
+        resp_ligero.json()["estado_expediente"]
+        == EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO.value
+    )
+
+    expediente_pesado = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="DIESEL",
+        peso_bruto_vehicular_kg=4000,
+    )
+    expediente_pesado.tipo_prueba_final = TipoPrueba.OPACIDAD
+    db_session.add(expediente_pesado)
+    await db_session.commit()
+
+    resp_pesado = await client.post(
+        f"/api/pruebas/resultado/{expediente_pesado.id}",
+        json={"normalized_payload": {"coefficient_absorption_final_k_m1": 0.6}},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp_pesado.status_code == 200
+    assert resp_pesado.json()["estado_expediente"] == EstadoVerificacion.PENDIENTE_IMPRESION.value
+
+    # Sin peso capturado no se asume ningún bracket — rechaza en vez de
+    # adivinar, mismo criterio que año-modelo faltante en gasolina.
+    expediente_sin_peso = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="DIESEL",
+    )
+    expediente_sin_peso.tipo_prueba_final = TipoPrueba.OPACIDAD
+    db_session.add(expediente_sin_peso)
+    await db_session.commit()
+
+    resp_sin_peso = await client.post(
+        f"/api/pruebas/resultado/{expediente_sin_peso.id}",
+        json={"normalized_payload": {"coefficient_absorption_final_k_m1": 0.1}},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp_sin_peso.status_code == 409
+    assert "Límites de emisión no configurados" in resp_sin_peso.json()["detail"]
+
+
+async def test_limites_emision_diesel_no_admite_anio_modelo(client, db_session):
+    sesion_supervisor = await crear_sesion_supervisor(db_session, station_type=StationType.PRUEBA)
+    resp = await client.post(
+        "/api/pruebas/limites-emision",
+        json={
+            "metodo": "DIESEL_OPACITY",
+            "parametro": "coefficient_absorption_final_k_m1",
+            "valor_maximo": 0.5,
+            "anio_modelo_desde": 2000,
+        },
+        headers={"X-Session-Id": str(sesion_supervisor.id)},
+    )
+    assert resp.status_code == 422
+
+
+async def test_limites_emision_gasolina_no_admite_peso_bruto(client, db_session):
+    sesion_supervisor = await crear_sesion_supervisor(db_session, station_type=StationType.PRUEBA)
+    resp = await client.post(
+        "/api/pruebas/limites-emision",
+        json={
+            "metodo": "GAS_DYNAMIC",
+            "fase": "RALENTI",
+            "parametro": "hc_ppm",
+            "valor_maximo": 200,
+            "peso_bruto_desde_kg": 1000,
+        },
+        headers={"X-Session-Id": str(sesion_supervisor.id)},
+    )
+    assert resp.status_code == 422
+
+
 async def test_guardar_resultado_tipo_prueba_sin_metodo_responde_409(client, db_session):
     """TipoPrueba.ALTERNA no tiene método de proyección aprobado (sección
     4) — bloquear en vez de adivinar."""

@@ -1256,8 +1256,11 @@ Commits sobre `etapa1-y-siox`, **NO pusheados** — pendiente de
 confirmación explícita, como siempre en este proyecto.
 
 **Pendiente real:**
-1. Peso bruto vehicular como eje de estratificación para NOM-045 (diésel)
-   y cargar esa tabla una vez agregado.
+1. ~~Peso bruto vehicular como eje de estratificación para NOM-045
+   (diésel)~~ — mecanismo resuelto 2026-09-02, ver sección siguiente.
+   **Cargar la tabla oficial sigue pendiente**: no se tiene el PDF de
+   NOM-045-SEMARNAT-2017 en este entorno (se compartió en una sesión
+   anterior, no quedó guardado en disco) — a re-compartir.
 2. NOx y Factor Lambda en el método dinámico de gasolina (columna nueva +
    ampliar el contrato de evaluación).
 3. Rango de dilución CO+CO2 (13%-16,5%): decidir si se representa como
@@ -1267,3 +1270,65 @@ confirmación explícita, como siempre en este proyecto.
 5. Semestre y prórroga (sección 5), `capacidad_dinamometro_kg` (sección
    10), frontend de reimpresión y diseño visual (sección 13) — sin
    cambios, siguen en la lista de arriba.
+
+## Estratificación por peso bruto vehicular — mecanismo para NOM-045 (2026-09-02)
+
+Implementa el mecanismo (punto 1 de la sección anterior), no la tabla
+oficial: igual que la sesión del 2026-08-31 construyó el mecanismo de
+evaluación con `cat_limites_emision` vacío antes de tener los valores
+reales de NOM-041, esta sesión hace lo mismo para el eje de peso de
+NOM-045 — **sigue sin cargarse ningún valor real de opacidad**, no se
+tiene el PDF de NOM-045-SEMARNAT-2017 en este entorno (se compartió en
+sesión anterior pero no quedó guardado en disco).
+
+- **Decisión de diseño confirmada con el usuario antes de escribir
+  código**: `Vehiculo.pbv` (texto libre, `String(30)`, lo que el operador
+  teclea de la tarjeta de circulación, sin unidad) no sirve para comparar
+  contra un umbral en kg. Se agregó `Vehiculo.peso_bruto_vehicular_kg`
+  (`Float`, opcional) como columna **separada** — `pbv` no se toca, sigue
+  siendo el texto que se imprime en el certificado tal cual viene de la
+  tarjeta; la columna nueva es solo para esta comparación numérica.
+  Migración `f6b3d8e1a9c2`.
+- **`cat_limites_emision` gana `peso_bruto_desde_kg`/`peso_bruto_hasta_kg`**
+  (ambos NULL por defecto = sin acotar), mismo patrón exacto que
+  `anio_modelo_desde`/`_hasta` (2026-09-01) — mismo helper `_en_rango_peso`
+  espejo de `_en_rango_anio` en `app/services/evaluacion_prueba.py`: sin
+  peso capturado en el vehículo, solo matchean filas sin acotar, nunca se
+  asume un peso para ubicarlo en un bracket. Unique constraint ampliado a
+  las 7 columnas (`uq_limite_emision_metodo_fase_parametro_anio_peso`).
+- **Cada norma usa un solo eje**: las filas de NOM-041 (gasolina) dejan
+  `peso_bruto_desde_kg`/`_hasta_kg` en NULL/NULL; las de NOM-045 (diésel)
+  dejan `anio_modelo_desde`/`_hasta` en NULL/NULL. `POST
+  /api/pruebas/limites-emision` ahora rechaza (422) mezclar los dos ejes
+  en una fila — año-modelo en `DIESEL_OPACITY` o peso bruto en cualquier
+  método de gasolina.
+- **`evaluar_diesel`** (`app/services/evaluacion_prueba.py`) cambió de
+  firma: recibía `anio_modelo` sin usarlo (comentario explícito de que
+  diésel no estratifica por año); ahora recibe `peso_bruto_kg` y sí lo
+  usa. El caller (`app/api/routers/pruebas.py::guardar_resultado`) lee
+  `vehiculo.peso_bruto_vehicular_kg` en vez de `vehiculo.modelo` para el
+  camino diésel — el camino gasolina sigue leyendo `vehiculo.modelo` sin
+  cambios.
+- **Frontend**: campo numérico nuevo "Peso bruto vehicular (kg)" junto al
+  `pbv` de texto existente, en `CapturaView.vue` y en el panel de
+  corrección de vehículo de `PruebaView.vue` — con hint explicando que es
+  para NOM-045, no lo que se imprime. Reusa `actualizar_datos_vehiculo`
+  sin tocarla (igual que los 9 campos de la sesión 2026-08-30): bastó con
+  agregar el campo a `VehiculoBase`/`VehiculoUpdate` y a los arrays
+  `VEHICULO_CAMPOS`/`CAMPOS_VEHICULO` del frontend.
+- **3 pruebas nuevas** (`tests/test_pruebas.py`): estratificación por peso
+  con dos brackets de prueba (mismo valor de corte que dará la tabla real,
+  3,856 kg, pero con límites de opacidad inventados — no son el dato
+  oficial), vehículo sin peso capturado no matchea ningún bracket (409),
+  y las dos validaciones nuevas del POST (422 si diésel manda
+  año-modelo, 422 si gasolina manda peso bruto). **175 pruebas, todas
+  pasan.** `python -c "from app.main import app"` confirma 48 rutas sin
+  error. Build de frontend (`npm run build`) limpio.
+
+**Pendiente real:**
+1. **Cargar NOM-045 real**: falta el PDF/tabla oficial (límite de
+   opacidad por rango de PBV) — pedido al usuario, no fabricado.
+2. Todo lo demás sin cambios respecto a la lista de la sección anterior
+   (frontend de captura de lecturas, NOx/Lambda, rango CO+CO2, layout
+   impreso, ambigüedad del folio, semestre/prórroga,
+   `capacidad_dinamometro_kg`, frontend de reimpresión, diseño visual).

@@ -242,9 +242,10 @@ async def guardar_resultado_prueba(
         vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
         anio_modelo = vehiculo.modelo if vehiculo is not None else None
         if metodo == MetodoPrueba.DIESEL_OPACITY:
+            peso_bruto_kg = vehiculo.peso_bruto_vehicular_kg if vehiculo is not None else None
             payload_validado = NormalizedPayloadDiesel.model_validate(payload.normalized_payload)
             resultado, limits_applied, excedidos = await evaluar_diesel(
-                db, metodo, payload_validado, anio_modelo
+                db, metodo, payload_validado, peso_bruto_kg
             )
         else:
             payload_validado = NormalizedPayloadGasolina.model_validate(payload.normalized_payload)
@@ -306,12 +307,14 @@ class LimiteEmisionInput(BaseModel):
     fase: FaseLectura | None = None
     parametro: str
     valor_maximo: float
-    # NULL = sin acotar por ese lado (ver docstring de LimiteEmision). Por
-    # ahora solo tiene sentido para gasolina (NOM-041, por año-modelo);
-    # diésel (NOM-045) estratifica por peso, no por año, así que se dejan
-    # en None ahí.
+    # NULL = sin acotar por ese lado (ver docstring de LimiteEmision).
+    # anio_modelo_* solo tiene sentido para gasolina (NOM-041, por
+    # año-modelo); peso_bruto_*_kg solo para diésel (NOM-045, por peso
+    # bruto vehicular) — cada norma usa un solo eje, ver validación abajo.
     anio_modelo_desde: int | None = None
     anio_modelo_hasta: int | None = None
+    peso_bruto_desde_kg: float | None = None
+    peso_bruto_hasta_kg: float | None = None
 
 
 @router.get("/limites-emision")
@@ -333,6 +336,8 @@ async def listar_limites_emision(
             valor_maximo=fila.valor_maximo,
             anio_modelo_desde=fila.anio_modelo_desde,
             anio_modelo_hasta=fila.anio_modelo_hasta,
+            peso_bruto_desde_kg=fila.peso_bruto_desde_kg,
+            peso_bruto_hasta_kg=fila.peso_bruto_hasta_kg,
         )
         for fila in filas
     ]
@@ -366,6 +371,32 @@ async def cargar_limite_emision(
         raise HTTPException(
             status_code=422, detail="anio_modelo_desde no puede ser mayor que anio_modelo_hasta."
         )
+    if (
+        payload.peso_bruto_desde_kg is not None
+        and payload.peso_bruto_hasta_kg is not None
+        and payload.peso_bruto_desde_kg > payload.peso_bruto_hasta_kg
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="peso_bruto_desde_kg no puede ser mayor que peso_bruto_hasta_kg.",
+        )
+    # Cada norma estratifica por un solo eje (ver docstring de
+    # LimiteEmision): NOM-041 gasolina por año-modelo, NOM-045 diésel por
+    # peso bruto. Mezclar ambos en una fila sería un dato sin sentido.
+    if payload.metodo == MetodoPrueba.DIESEL_OPACITY and (
+        payload.anio_modelo_desde is not None or payload.anio_modelo_hasta is not None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="DIESEL_OPACITY no estratifica por año-modelo; usar peso_bruto_desde_kg/hasta_kg.",
+        )
+    if payload.metodo != MetodoPrueba.DIESEL_OPACITY and (
+        payload.peso_bruto_desde_kg is not None or payload.peso_bruto_hasta_kg is not None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{payload.metodo.value} no estratifica por peso bruto; usar anio_modelo_desde/hasta.",
+        )
 
     existente = (
         await db.execute(
@@ -375,6 +406,8 @@ async def cargar_limite_emision(
                 LimiteEmision.parametro == payload.parametro,
                 LimiteEmision.anio_modelo_desde == payload.anio_modelo_desde,
                 LimiteEmision.anio_modelo_hasta == payload.anio_modelo_hasta,
+                LimiteEmision.peso_bruto_desde_kg == payload.peso_bruto_desde_kg,
+                LimiteEmision.peso_bruto_hasta_kg == payload.peso_bruto_hasta_kg,
             )
         )
     ).scalars().first()
@@ -391,6 +424,8 @@ async def cargar_limite_emision(
                 valor_maximo=payload.valor_maximo,
                 anio_modelo_desde=payload.anio_modelo_desde,
                 anio_modelo_hasta=payload.anio_modelo_hasta,
+                peso_bruto_desde_kg=payload.peso_bruto_desde_kg,
+                peso_bruto_hasta_kg=payload.peso_bruto_hasta_kg,
             )
         )
 
@@ -401,4 +436,6 @@ async def cargar_limite_emision(
         "parametro": payload.parametro,
         "anio_modelo_desde": payload.anio_modelo_desde,
         "anio_modelo_hasta": payload.anio_modelo_hasta,
+        "peso_bruto_desde_kg": payload.peso_bruto_desde_kg,
+        "peso_bruto_hasta_kg": payload.peso_bruto_hasta_kg,
     }

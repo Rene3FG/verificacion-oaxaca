@@ -1,4 +1,4 @@
-from sqlalchemy import Enum, String
+from sqlalchemy import Enum, Float, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
@@ -31,6 +31,13 @@ class Vehiculo(Base, UUIDPKMixin, TimestampMixin):
     propietario_numero_exterior: Mapped[str | None] = mapped_column(String(20))
     pbv: Mapped[str | None] = mapped_column(String(30))
     traccion: Mapped[str | None] = mapped_column(String(30))
+
+    # `pbv` (arriba) es texto libre para el certificado impreso, tal cual
+    # viene de la tarjeta de circulación (2026-08-30) — no sirve para
+    # estratificar límites de emisión por rango de peso (NOM-045 diésel,
+    # 2026-09-02). Columna numérica separada, opcional, solo para esa
+    # comparación; `pbv` no se toca ni se deriva de aquí.
+    peso_bruto_vehicular_kg: Mapped[float | None] = mapped_column(Float)
 
     fuente_datos: Mapped[FuenteDatos] = mapped_column(
         Enum(FuenteDatos, name="fuente_datos"), default=FuenteDatos.MANUAL

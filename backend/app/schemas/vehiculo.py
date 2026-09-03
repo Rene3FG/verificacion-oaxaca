@@ -23,6 +23,7 @@ class VehiculoBase(BaseModel):
     propietario_numero_exterior: str | None = None
     pbv: str | None = None
     traccion: str | None = None
+    peso_bruto_vehicular_kg: float | None = None
 
 
 class VehiculoCreate(VehiculoBase):
@@ -57,3 +58,4 @@ class VehiculoUpdate(BaseModel):
     propietario_numero_exterior: str | None = None
     pbv: str | None = None
     traccion: str | None = None
+    peso_bruto_vehicular_kg: float | None = None

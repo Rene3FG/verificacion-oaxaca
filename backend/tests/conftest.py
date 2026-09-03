@@ -168,6 +168,7 @@ async def crear_expediente(
     tipo_vehiculo: str | None = None,
     combustible: str | None = None,
     modelo: int | None = None,
+    peso_bruto_vehicular_kg: float | None = None,
     combustible_validado: str | None = None,
     datos_certificado_completos: bool = True,
 ) -> Verificacion:
@@ -199,6 +200,7 @@ async def crear_expediente(
         tipo_vehiculo=tipo_vehiculo,
         combustible=combustible,
         modelo=modelo,
+        peso_bruto_vehicular_kg=peso_bruto_vehicular_kg,
         **datos_certificado,
     )
     db_session.add(vehiculo)

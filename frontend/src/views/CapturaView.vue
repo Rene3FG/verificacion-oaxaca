@@ -28,6 +28,7 @@ const VEHICULO_CAMPOS = [
   "tipo_vehiculo",
   "combustible",
   "pbv",
+  "peso_bruto_vehicular_kg",
   "traccion",
   "razon_social",
   "tarjeta_circulacion",
@@ -66,6 +67,7 @@ const vehiculoForm = reactive({
   tipo_vehiculo: null,
   combustible: null,
   pbv: null,
+  peso_bruto_vehicular_kg: null,
   traccion: null,
   razon_social: null,
   tarjeta_circulacion: null,
@@ -495,6 +497,19 @@ onMounted(cargarExpedientesEnCurso);
                 density="comfortable"
                 :disabled="!puedeEditarVehiculo"
                 :append-inner-icon="esCampoEditado('pbv') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model.number="vehiculoForm.peso_bruto_vehicular_kg"
+                label="Peso bruto vehicular (kg)"
+                type="number"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                hint="Numérico, para evaluar la prueba de opacidad (NOM-045). El PBV de arriba es el texto que se imprime en el certificado."
+                persistent-hint
+                :append-inner-icon="esCampoEditado('peso_bruto_vehicular_kg') ? 'mdi-pencil' : undefined"
               />
             </v-col>
             <v-col cols="12" md="6">

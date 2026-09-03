@@ -23,11 +23,22 @@ class LimiteEmision(Base, UUIDPKMixin, TimestampMixin):
     filas sin acotar (ambos NULL) — nunca asume un año.
 
     Los valores reales de NOM-041 (gasolina, cargados 2026-09-01 desde el
-    DOF) ya están en esta tabla vía `app/seed_limites_nom041.py`. NOM-045
-    (diésel, opacidad) sigue vacío a propósito: su tabla oficial estratifica
-    por PESO BRUTO VEHICULAR, no por año-modelo — este esquema todavía no
-    tiene esa columna, fabricar un valor sin ella sería peor que dejarlo
-    vacío. Sin una fila que matchee para un método/fase/parámetro/año dado,
+    DOF) ya están en esta tabla vía `app/seed_limites_nom041.py`.
+
+    `peso_bruto_desde_kg`/`peso_bruto_hasta_kg` (ambos NULL por defecto =
+    sin acotar) reflejan que NOM-045-SEMARNAT-2017 (diésel, opacidad)
+    estratifica sus límites por PESO BRUTO VEHICULAR, no por año-modelo —
+    agregado 2026-09-02, mismo patrón que `anio_modelo_desde`/`_hasta`
+    (2026-09-01). `evaluar_resultado` elige la fila cuyo rango de peso
+    contiene `Vehiculo.peso_bruto_vehicular_kg`; si el vehículo no tiene ese
+    dato capturado, solo matchean filas sin acotar — nunca asume un peso.
+    Las filas de NOM-041 (gasolina) dejan estas dos columnas en NULL/NULL
+    (sin acotar), igual que las de NOM-045 dejan `anio_modelo_desde`/
+    `_hasta` en NULL/NULL: cada norma solo usa su propio eje de
+    estratificación. Los valores reales de NOM-045 siguen sin cargar — el
+    mecanismo se construye antes de tener la tabla oficial (ver CLAUDE.md).
+
+    Sin una fila que matchee para un método/fase/parámetro/año/peso dado,
     `evaluar_resultado` rechaza con 409 ("límites no configurados"), nunca
     inventa ni cae a selección manual — mismo patrón que "Sin folio
     disponible" en `folio_inventario.py`. Administración carga/corrige esta
@@ -41,7 +52,9 @@ class LimiteEmision(Base, UUIDPKMixin, TimestampMixin):
             "parametro",
             "anio_modelo_desde",
             "anio_modelo_hasta",
-            name="uq_limite_emision_metodo_fase_parametro_anio",
+            "peso_bruto_desde_kg",
+            "peso_bruto_hasta_kg",
+            name="uq_limite_emision_metodo_fase_parametro_anio_peso",
         ),
     )
 
@@ -55,3 +68,5 @@ class LimiteEmision(Base, UUIDPKMixin, TimestampMixin):
     valor_maximo: Mapped[float] = mapped_column(Float, nullable=False)
     anio_modelo_desde: Mapped[int | None] = mapped_column(Integer, nullable=True)
     anio_modelo_hasta: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    peso_bruto_desde_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    peso_bruto_hasta_kg: Mapped[float | None] = mapped_column(Float, nullable=True)

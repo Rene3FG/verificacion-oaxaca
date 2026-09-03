@@ -39,9 +39,32 @@ def _en_rango_anio(anio: int | None, desde: int | None, hasta: int | None) -> bo
     return True
 
 
+def _en_rango_peso(peso_kg: float | None, desde: float | None, hasta: float | None) -> bool:
+    """Mismo criterio que `_en_rango_anio`, sobre `peso_bruto_vehicular_kg`
+    (NOM-045 diésel, 2026-09-02). Si el vehículo no tiene peso capturado,
+    solo matchean filas sin acotar — nunca se asume un peso para poder
+    ubicarlo en un bracket."""
+    if peso_kg is None:
+        return desde is None and hasta is None
+    if desde is not None and peso_kg < desde:
+        return False
+    if hasta is not None and peso_kg > hasta:
+        return False
+    return True
+
+
 async def _limites_por_fase(
-    db: AsyncSession, metodo: MetodoPrueba, fase: FaseLectura | None, anio_modelo: int | None
+    db: AsyncSession,
+    metodo: MetodoPrueba,
+    fase: FaseLectura | None,
+    *,
+    anio_modelo: int | None = None,
+    peso_bruto_kg: float | None = None,
 ) -> dict[str, float]:
+    """Filtra por año-modelo (NOM-041 gasolina) y por peso bruto (NOM-045
+    diésel) a la vez: cada norma solo estratifica por su propio eje, así
+    que las filas de la otra dejan esas columnas en NULL/NULL y matchean
+    siempre que el llamador correspondiente no les pase ese parámetro."""
     filas = (
         await db.execute(
             select(LimiteEmision).where(
@@ -53,6 +76,7 @@ async def _limites_por_fase(
         fila.parametro: fila.valor_maximo
         for fila in filas
         if _en_rango_anio(anio_modelo, fila.anio_modelo_desde, fila.anio_modelo_hasta)
+        and _en_rango_peso(peso_bruto_kg, fila.peso_bruto_desde_kg, fila.peso_bruto_hasta_kg)
     }
 
 
@@ -68,8 +92,12 @@ async def evaluar_gasolina(
     payload: NormalizedPayloadGasolina,
     anio_modelo: int | None,
 ) -> tuple[ResultadoPruebaEnum, dict, dict]:
-    limites_ralenti = await _limites_por_fase(db, metodo, FaseLectura.RALENTI, anio_modelo)
-    limites_crucero = await _limites_por_fase(db, metodo, FaseLectura.CRUCERO, anio_modelo)
+    limites_ralenti = await _limites_por_fase(
+        db, metodo, FaseLectura.RALENTI, anio_modelo=anio_modelo
+    )
+    limites_crucero = await _limites_por_fase(
+        db, metodo, FaseLectura.CRUCERO, anio_modelo=anio_modelo
+    )
 
     parametros = PARAMETROS_CON_LIMITE[metodo]
     faltantes = _validar_completos(limites_ralenti, parametros, "ralenti") + _validar_completos(
@@ -101,13 +129,12 @@ async def evaluar_diesel(
     db: AsyncSession,
     metodo: MetodoPrueba,
     payload: NormalizedPayloadDiesel,
-    anio_modelo: int | None,
+    peso_bruto_kg: float | None,
 ) -> tuple[ResultadoPruebaEnum, dict, dict]:
-    # NOM-045 estratifica por peso bruto vehicular, no por año-modelo — hoy
-    # sin columna para eso (ver docstring de LimiteEmision), así que este
-    # `anio_modelo` no filtra nada todavía para diésel; se recibe para que
-    # la firma sea uniforme con evaluar_gasolina cuando se agregue.
-    limites = await _limites_por_fase(db, metodo, None, None)
+    # NOM-045 estratifica por peso bruto vehicular, no por año-modelo (ver
+    # docstring de LimiteEmision) — se recibe `peso_bruto_kg`, no
+    # `anio_modelo`, a diferencia de evaluar_gasolina.
+    limites = await _limites_por_fase(db, metodo, None, peso_bruto_kg=peso_bruto_kg)
     parametros = PARAMETROS_CON_LIMITE[metodo]
     faltantes = _validar_completos(limites, parametros, "diesel")
     if faltantes:
