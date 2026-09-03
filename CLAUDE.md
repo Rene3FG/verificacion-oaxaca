@@ -1493,3 +1493,61 @@ ninguna UI. Esta sesión lo cierra.
 2. Prueba visual en navegador (Chrome) — sigue sin hacerse en ninguna
    sesión reciente, acumulando riesgo. Sería lo primero a resolver en
    cuanto haya extensión conectada.
+
+## Layout impreso: `generar_pdf_certificado` ya usa `certificate_projection_json` (2026-09-03, tercera sesión)
+
+Cierra el punto 3 pendiente de la lista de la sección "Certificate Result
+Projection Contract v1" (2026-08-31): el PDF seguía siendo HTML mínimo de
+trazabilidad, ignoraba el snapshot que ya se generaba y persistía desde
+esa sesión.
+
+- **`app/services/certificado.py::generar_pdf_certificado`** cambia de
+  firma: recibía `tipo_certificado: str`, ahora recibe `proyeccion: dict`
+  (el shape completo de `generar_proyeccion_certificado`). Agrega el
+  bloque de mediciones que exige la sección 4 (bloques 02/04): tabla
+  RALENTÍ/CRUCERO (HC/CO/CO2/CO+CO2/O2/NOx/velocidad) para gasolina,
+  coeficiente de absorción K para diésel — leído **exclusivamente** de
+  `proyeccion["fields"]`, nunca de `ResultadoPrueba.valores_medidos_json`
+  directo (ese es el punto del contrato: fuente única congelada). Vacío
+  sin romper cuando `method`/`fields` vienen vacíos (rechazo por
+  inspección visual, o método sin mapping — mismos huecos ya documentados
+  en `generar_proyeccion_certificado`). También agrega Semestre y Método
+  de prueba, que antes no se mostraban en ningún lado.
+- **Dos llamadores actualizados**:
+  - `_imprimir_y_registrar` (impresión definitiva, los 3 caminos que la
+    comparten: primer clic, reimpresión por daño, corrección post-
+    impresión): ahora pasa `print_job.certificate_projection_json` — el
+    snapshot ya congelado por `_generar_y_fijar_proyeccion`, que siempre
+    se llama antes en los 3 call sites.
+  - `vista_previa_certificado` (HU-062, "no es la impresión definitiva",
+    sin `PrintJob`): genera la proyección al vuelo, sin persistir
+    (mismo `_ultimo_resultado_prueba` + `generar_proyeccion_certificado`
+    que usa `_generar_y_fijar_proyeccion`), para que la vista previa
+    muestre el mismo layout que producirá la impresión real. `LayoutSinMapeo`
+    → 409, mismo criterio que el camino de impresión.
+- **3 pruebas nuevas** (`tests/test_certificado_pdf.py`, unitarias sobre
+  `generar_pdf_certificado` directo, sin HTTP): bloque gasolina, bloque
+  diésel, y el hueco de rechazo sin `ResultadoPrueba` no rompe el layout.
+  Verificado además a mano generando PDFs reales (gasolina y diésel) y
+  leyéndolos — la tabla RALENTÍ/CRUCERO y el coeficiente K se renderizan
+  correctamente, incluida la unidad "m⁻¹" (entidades HTML, sin problemas
+  de encoding con WeasyPrint). **182 pruebas, todas pasan** (179→182).
+- **Bug de datos de dev encontrado y corregido al verificar**: la fila
+  `ResultadoPrueba` del expediente demo `MKD-674-D` (sembrado antes del
+  2026-08-31) seguía con el shape viejo
+  (`{"opacidad_porcentaje": 32.5}`) — `seed_demo.py` ya se había
+  actualizado al shape nuevo esa misma sesión, pero por ser idempotente
+  nunca tocó la fila ya existente (mismo patrón ya documentado con
+  `RSC-238-F` el 2026-08-26). Antes de esta sesión eso solo rompía
+  `/imprimir` (silencioso, nadie lo había ejercitado); ahora también
+  rompería `/vista-previa` con un 500 sin manejar. Corregido a mano por
+  UPDATE directo a `{"coefficient_absorption_final_k_m1": 0.35}`
+  (el mismo valor que ya trae `seed_demo.py`), verificado que la
+  proyección y el PDF se generan sin error contra esa fila real.
+
+**Pendiente real:**
+1. NOx y Factor Lambda en gasolina dinámico, rango CO+CO2, ambigüedad del
+   folio en el snapshot, semestre/prórroga, `capacidad_dinamometro_kg`,
+   diseño visual — sin cambios.
+2. Prueba visual en navegador (Chrome) — sigue sin hacerse en ninguna
+   sesión reciente.

@@ -88,13 +88,97 @@ async def determinar_tipo_certificado(
     )
 
 
+_ETIQUETAS_METODO = {
+    "GAS_STATIC": "Método estático (gasolina)",
+    "GAS_DYNAMIC": "Método dinámico (gasolina)",
+    "DIESEL_OPACITY": "Opacidad (diésel)",
+}
+
+
+def _fila_fase_gasolina(etiqueta: str, fase: dict | None) -> str:
+    fase = fase or {}
+
+    def valor(campo: str, sufijo: str = "") -> str:
+        v = fase.get(campo)
+        return f"{v}{sufijo}" if v is not None else "—"
+
+    return f"""
+      <tr>
+        <td style="padding: 4px 8px;">{etiqueta}</td>
+        <td style="padding: 4px 8px;">{valor("hc_ppm", " ppm")}</td>
+        <td style="padding: 4px 8px;">{valor("co_pct", " %")}</td>
+        <td style="padding: 4px 8px;">{valor("co2_pct", " %")}</td>
+        <td style="padding: 4px 8px;">{valor("co_co2_pct", " %")}</td>
+        <td style="padding: 4px 8px;">{valor("o2_pct", " %")}</td>
+        <td style="padding: 4px 8px;">{valor("nox_ppm", " ppm")}</td>
+        <td style="padding: 4px 8px;">{valor("speed_kph", " km/h")}</td>
+      </tr>
+    """
+
+
+def _bloque_mediciones_html(proyeccion: dict) -> str:
+    """Sección 4, bloques 02 (gasolina RALENTÍ/CRUCERO)/04 (diésel): el
+    único bloque de mediciones que se sobreimprime en el certificado, leído
+    exclusivamente de `proyeccion["fields"]` — nunca de
+    `ResultadoPrueba.valores_medidos_json` directo, ese es el punto del
+    contrato (fuente única, snapshot congelado). Vacío cuando el expediente
+    nunca pasó por Prueba (rechazo por inspección visual) o el método no
+    tiene mapping aprobado — `generar_proyeccion_certificado` ya deja
+    `method`/`fields` vacíos en esos casos, no hay nada que renderizar."""
+
+    metodo = proyeccion.get("method")
+    fields = proyeccion.get("fields") or {}
+    if not metodo or not fields:
+        return ""
+
+    if metodo == "DIESEL_OPACITY":
+        k = fields.get("coefficient_absorption_final_k_m1")
+        valor = f"{k}" if k is not None else "—"
+        return f"""
+        <table style="border-collapse: collapse; width: 100%; margin-top: 12px;">
+          <tr><th colspan="2" style="text-align:left; border-bottom: 1px solid #999;">Opacidad</th></tr>
+          <tr>
+            <td style="padding: 4px 8px;">Coeficiente de absorción final K (m&#8315;&#185;)</td>
+            <td style="padding: 4px 8px;"><strong>{valor}</strong></td>
+          </tr>
+        </table>
+        """
+
+    return f"""
+    <table style="border-collapse: collapse; width: 100%; margin-top: 12px; font-size: 0.9em;">
+      <tr>
+        <th style="text-align:left; border-bottom: 1px solid #999;">Fase</th>
+        <th style="text-align:left; border-bottom: 1px solid #999;">HC</th>
+        <th style="text-align:left; border-bottom: 1px solid #999;">CO</th>
+        <th style="text-align:left; border-bottom: 1px solid #999;">CO2</th>
+        <th style="text-align:left; border-bottom: 1px solid #999;">CO+CO2</th>
+        <th style="text-align:left; border-bottom: 1px solid #999;">O2</th>
+        <th style="text-align:left; border-bottom: 1px solid #999;">NOx</th>
+        <th style="text-align:left; border-bottom: 1px solid #999;">Vel.</th>
+      </tr>
+      {_fila_fase_gasolina("Ralentí", fields.get("ralenti"))}
+      {_fila_fase_gasolina("Crucero", fields.get("crucero"))}
+    </table>
+    """
+
+
 def generar_pdf_certificado(
-    verificacion: Verificacion, vehiculo: Vehiculo, tipo_certificado: str
+    verificacion: Verificacion, vehiculo: Vehiculo, proyeccion: dict
 ) -> bytes:
-    """Contenido mínimo de trazabilidad — no es el layout final del
-    certificado oficial ('Certificate Result Projection Contract v1' en el
-    Figma define el contrato completo de sobreimpresión, pendiente de
-    implementar)."""
+    """'Certificate Result Projection Contract v1' (sección 4): sobreimprime
+    EXCLUSIVAMENTE desde `proyeccion` — el snapshot congelado en
+    `print_jobs.certificate_projection_json` para la impresión definitiva
+    (`_imprimir_y_registrar`), o su equivalente generado al vuelo sin
+    persistir para la vista previa (`vista_previa_certificado`, "no es la
+    impresión definitiva"). El resto de los datos del expediente (placa,
+    NIV, marca, modelo) no forma parte del contrato de proyección — se
+    sigue leyendo del expediente/vehículo directo, igual que antes."""
+
+    tipo_certificado = proyeccion.get("certificate_type") or "—"
+    resultado = proyeccion.get("evaluation_result") or verificacion.resultado_final or "—"
+    semestre = proyeccion.get("semestre")
+    metodo_etiqueta = _ETIQUETAS_METODO.get(proyeccion.get("method"), "—")
+    bloque_mediciones = _bloque_mediciones_html(proyeccion)
 
     html = f"""
     <html>
@@ -103,12 +187,15 @@ def generar_pdf_certificado(
         <h1>Certificado de Verificación Vehicular</h1>
         <p><strong>Tipo:</strong> {tipo_certificado}</p>
         <p><strong>Folio:</strong> {verificacion.folio_externo or "—"}</p>
+        <p><strong>Semestre:</strong> {semestre or "—"}</p>
         <p><strong>Expediente:</strong> {verificacion.id}</p>
         <p><strong>Placa:</strong> {verificacion.placa}</p>
         <p><strong>Marca / línea:</strong> {vehiculo.marca or "—"} {vehiculo.linea or ""}</p>
         <p><strong>Modelo:</strong> {vehiculo.modelo or "—"}</p>
         <p><strong>Combustible:</strong> {verificacion.combustible_validado or "—"}</p>
-        <p><strong>Resultado final:</strong> {verificacion.resultado_final or "—"}</p>
+        <p><strong>Método de prueba:</strong> {metodo_etiqueta}</p>
+        <p><strong>Resultado final:</strong> {resultado}</p>
+        {bloque_mediciones}
       </body>
     </html>
     """

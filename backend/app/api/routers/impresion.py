@@ -177,7 +177,7 @@ async def _imprimir_y_registrar(
     de tipo) — la mecánica de "generar → enviar → registrar intento" es
     idéntica en los tres casos, solo cambia qué folio/tipo se imprime."""
 
-    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, verificacion.certificado_tipo)
+    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, print_job.certificate_projection_json)
     exito = await imprimir_en_impresora(pdf_bytes)
 
     db.add(
@@ -319,7 +319,17 @@ async def vista_previa_certificado(
             detail="Primero debe calcularse/seleccionarse el tipo de certificado.",
         )
 
-    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, verificacion.certificado_tipo)
+    # No es la impresión definitiva, así que no hay PrintJob todavía —
+    # se genera el mismo shape de proyección al vuelo, sin persistir, para
+    # que la vista previa muestre el mismo layout (sección 4) que
+    # producirá la impresión real.
+    resultado_prueba = await _ultimo_resultado_prueba(db, verificacion.id)
+    try:
+        proyeccion = generar_proyeccion_certificado(verificacion, resultado_prueba)
+    except LayoutSinMapeo as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, proyeccion)
     return Response(content=pdf_bytes, media_type="application/pdf")
 
 
