@@ -22,7 +22,7 @@ function colorEstado(estado) {
   if (estado?.includes("RECHAZAD") || estado?.includes("ERROR") || estado?.includes("FALLIDA")) {
     return estadoColors.rechazado;
   }
-  if (estado?.includes("APROBAD") || estado === "CERRADO" || estado === "IMPRESO") {
+  if (estado?.includes("APROBAD") || estado === "IMPRESO") {
     return estadoColors.aprobado;
   }
   if (estado?.includes("PROCESO") || estado?.includes("SOLICITADO")) {
