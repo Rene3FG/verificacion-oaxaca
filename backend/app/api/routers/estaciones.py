@@ -17,6 +17,28 @@ from app.services.auth import verify_password
 router = APIRouter(prefix="/api/estaciones", tags=["estaciones"])
 
 
+@router.get("", response_model=list[WorkstationRead])
+async def listar_estaciones(
+    center_id: str | None = None,
+    station_type: StationType | None = None,
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> list[Workstation]:
+    """Necesario para que Supervisor pueda editar
+    `capacidad_dinamometro_kg` por línea (`PATCH
+    .../{id}/capacidad-dinamometro`) sin conocer de antemano el UUID de
+    cada estación — mismo criterio que `GET /api/permisos`."""
+
+    query = select(Workstation).where(Workstation.is_active.is_(True))
+    if center_id is not None:
+        query = query.where(Workstation.center_id == center_id)
+    if station_type is not None:
+        query = query.where(Workstation.station_type == station_type)
+
+    result = await db.execute(query.order_by(Workstation.center_id, Workstation.line_id))
+    return list(result.scalars().all())
+
+
 @router.get("/{device_identifier}", response_model=WorkstationRead)
 async def detectar_estacion(
     device_identifier: str, db: AsyncSession = Depends(get_db)

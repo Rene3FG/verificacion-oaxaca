@@ -68,3 +68,34 @@ async def test_actualizar_capacidad_dinamometro_exitoso_y_null_la_limpia(client,
     )
     assert resp_null.status_code == 200
     assert resp_null.json()["capacidad_dinamometro_kg"] is None
+
+
+async def test_listar_estaciones_sin_supervisor_responde_403(client, db_session):
+    estacion = await crear_estacion(db_session, station_type=StationType.PRUEBA)
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+
+    resp = await client.get("/api/estaciones", headers={"X-Session-Id": str(sesion.id)})
+    assert resp.status_code == 403
+
+
+async def test_listar_estaciones_filtra_por_centro_y_tipo(client, db_session):
+    await crear_estacion(
+        db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=1
+    )
+    await crear_estacion(
+        db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=2
+    )
+    await crear_estacion(db_session, station_type=StationType.CAPTURA, center_id="OAX-01")
+    await crear_estacion(db_session, station_type=StationType.PRUEBA, center_id="OAX-02")
+    sesion_supervisor = await crear_sesion_supervisor(db_session)
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/estaciones",
+        params={"center_id": "OAX-01", "station_type": "prueba"},
+        headers={"X-Session-Id": str(sesion_supervisor.id)},
+    )
+    assert resp.status_code == 200
+    lineas = sorted(fila["line_id"] for fila in resp.json())
+    assert lineas == [1, 2]

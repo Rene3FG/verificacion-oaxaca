@@ -339,6 +339,80 @@ async function guardarLimite() {
   }
 }
 
+// --- Equipos: capacidad_dinamometro_kg por línea (sección 10 del handoff) ---
+const estacionesPrueba = ref([]);
+const cargandoEstaciones = ref(false);
+const guardandoCapacidad = reactive({});
+
+async function cargarEstacionesPrueba() {
+  cargandoEstaciones.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.get("/estaciones", {
+      params: { center_id: session.estacion?.center_id, station_type: "prueba" },
+    });
+    estacionesPrueba.value = data.map((e) => ({ ...e, _valor: e.capacidad_dinamometro_kg }));
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo cargar el listado de estaciones.";
+  } finally {
+    cargandoEstaciones.value = false;
+  }
+}
+
+async function guardarCapacidad(estacion) {
+  guardandoCapacidad[estacion.id] = true;
+  error.value = null;
+  try {
+    const { data } = await api.patch(`/estaciones/${estacion.id}/capacidad-dinamometro`, {
+      capacidad_dinamometro_kg: estacion._valor === "" ? null : estacion._valor,
+    });
+    estacion.capacidad_dinamometro_kg = data.capacidad_dinamometro_kg;
+    estacion._valor = data.capacidad_dinamometro_kg;
+    aviso.value = `Capacidad de línea ${estacion.line_id ?? "—"} actualizada.`;
+  } catch (err) {
+    error.value =
+      err.response?.data?.detail || "No se pudo actualizar la capacidad del dinamómetro.";
+  } finally {
+    guardandoCapacidad[estacion.id] = false;
+  }
+}
+
+// --- Semestre y prórroga (sección 5 del handoff) ---
+const semestreInfo = ref(null);
+const cargandoSemestre = ref(false);
+const prorrogaForm = reactive({ fecha_final: null, motivo: "" });
+const guardandoProrroga = ref(false);
+
+async function cargarSemestre() {
+  cargandoSemestre.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.get("/supervision/semestre");
+    semestreInfo.value = data;
+  } catch (err) {
+    error.value =
+      err.response?.data?.detail || "No se pudo cargar la configuración de semestre.";
+  } finally {
+    cargandoSemestre.value = false;
+  }
+}
+
+async function guardarProrroga() {
+  guardandoProrroga.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post("/supervision/semestre/prorroga", { ...prorrogaForm });
+    semestreInfo.value = data;
+    aviso.value = "Prórroga configurada.";
+    prorrogaForm.fecha_final = null;
+    prorrogaForm.motivo = "";
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo configurar la prórroga.";
+  } finally {
+    guardandoProrroga.value = false;
+  }
+}
+
 // --- Reimpresión (sección 3 del handoff, 2026-09-03) ---
 // IMPRESO/CERRADO_* no aparecen en el monitor (ESTADOS_TERMINALES) ni en
 // la cola de Impresión (ya no son "piso") — se busca por placa vía
@@ -443,6 +517,8 @@ onMounted(() => {
   cargarEstadoSync();
   cargarInventarioFolios();
   cargarLimitesEmision();
+  cargarEstacionesPrueba();
+  cargarSemestre();
 });
 </script>
 
@@ -465,6 +541,8 @@ onMounted(() => {
       <v-tab value="sincronizacion">Sincronización</v-tab>
       <v-tab value="folios">Folios</v-tab>
       <v-tab value="limites">Límites de emisión</v-tab>
+      <v-tab value="equipos">Equipos</v-tab>
+      <v-tab value="semestre">Semestre</v-tab>
       <v-tab value="reimpresion">Reimpresión</v-tab>
     </v-tabs>
 
@@ -771,6 +849,137 @@ onMounted(() => {
                 </tr>
               </tbody>
             </v-table>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+
+      <v-window-item value="equipos">
+        <v-card variant="outlined">
+          <v-card-title class="d-flex align-center ga-2">
+            Capacidad del dinamómetro por línea
+            <v-spacer />
+            <v-btn
+              variant="text"
+              icon="mdi-refresh"
+              :loading="cargandoEstaciones"
+              @click="cargarEstacionesPrueba"
+            />
+          </v-card-title>
+          <v-card-subtitle class="text-wrap">
+            Sección 10 del handoff: si el peso bruto del vehículo excede la capacidad
+            configurada aquí, la prueba de gasolina en esa línea deja de proponer dinámica
+            por default y no se puede forzar (límite físico del equipo).
+          </v-card-subtitle>
+          <v-card-text>
+            <v-progress-linear v-if="cargandoEstaciones" indeterminate class="mb-4" />
+            <p v-else-if="estacionesPrueba.length === 0" class="text-medium-emphasis">
+              Sin estaciones de Prueba en este centro.
+            </p>
+            <v-table v-else density="compact">
+              <thead>
+                <tr>
+                  <th>Línea</th>
+                  <th>Estación</th>
+                  <th>Capacidad (kg)</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="estacion in estacionesPrueba" :key="estacion.id">
+                  <td>{{ estacion.line_id ?? "—" }}</td>
+                  <td>{{ estacion.name }}</td>
+                  <td style="max-width: 160px">
+                    <v-text-field
+                      v-model.number="estacion._valor"
+                      type="number"
+                      variant="outlined"
+                      density="compact"
+                      hide-details
+                      placeholder="Sin configurar"
+                    />
+                  </td>
+                  <td>
+                    <v-btn
+                      size="small"
+                      variant="text"
+                      :loading="guardandoCapacidad[estacion.id]"
+                      @click="guardarCapacidad(estacion)"
+                    >
+                      Guardar
+                    </v-btn>
+                  </td>
+                </tr>
+              </tbody>
+            </v-table>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+
+      <v-window-item value="semestre">
+        <v-card class="mb-4" variant="outlined">
+          <v-card-title class="d-flex align-center ga-2">
+            Semestre y prórroga
+            <v-spacer />
+            <v-btn
+              variant="text"
+              icon="mdi-refresh"
+              :loading="cargandoSemestre"
+              @click="cargarSemestre"
+            />
+          </v-card-title>
+          <v-card-text>
+            <v-progress-linear v-if="cargandoSemestre" indeterminate class="mb-4" />
+            <template v-else-if="semestreInfo">
+              <p class="mb-2">
+                <strong>Semestre actual:</strong> {{ semestreInfo.semestre_actual }}°
+              </p>
+              <p class="mb-2">
+                <strong>Prórroga:</strong>
+                <v-chip
+                  size="small"
+                  :color="semestreInfo.prorroga_activa ? 'success' : undefined"
+                  class="ml-1"
+                >
+                  {{ semestreInfo.prorroga_activa ? "Activa" : "Inactiva" }}
+                </v-chip>
+              </p>
+              <p v-if="semestreInfo.prorroga_activa" class="text-caption text-medium-emphasis">
+                Hasta {{ semestreInfo.fecha_final_prorroga }} — {{ semestreInfo.motivo_prorroga }}
+              </p>
+            </template>
+          </v-card-text>
+        </v-card>
+
+        <v-card variant="outlined">
+          <v-card-title>Configurar prórroga del 1er periodo</v-card-title>
+          <v-card-subtitle class="text-wrap">
+            Hasta la fecha final, se imprime Semestre 1 para todos los vehículos sin importar
+            el mes. No se contempla prórroga del 2º periodo. Una fecha final en el pasado
+            desactiva la prórroga vigente antes de tiempo.
+          </v-card-subtitle>
+          <v-card-text>
+            <v-text-field
+              v-model="prorrogaForm.fecha_final"
+              label="Fecha final"
+              type="date"
+              variant="outlined"
+              density="comfortable"
+            />
+            <v-textarea
+              v-model="prorrogaForm.motivo"
+              label="Motivo (obligatorio)"
+              variant="outlined"
+              density="comfortable"
+              rows="2"
+            />
+            <v-btn
+              color="primary"
+              :loading="guardandoProrroga"
+              :disabled="!prorrogaForm.fecha_final || !prorrogaForm.motivo.trim()"
+              @click="guardarProrroga"
+            >
+              Guardar
+            </v-btn>
           </v-card-text>
         </v-card>
       </v-window-item>
