@@ -35,12 +35,21 @@ class LayoutSinMapeo(Exception):
     bloquearse por configuración (sección 4, bloque 04, regla explícita)."""
 
 
-def calcular_semestre(fecha: datetime.date) -> int:
+def calcular_semestre(
+    fecha: datetime.date, fecha_final_prorroga: datetime.date | None = None
+) -> int:
     """Sección 5 del handoff: "cálculo automático (1 ene-30 jun = 1°; 1
-    jul-31 dic = 2°)". La prórroga global del 1er periodo (ítem 2 pendiente
-    de esta lista, sin pantalla de Supervisor todavía) NO está implementada
-    aquí — este cálculo es solo la regla base por fecha."""
+    jul-31 dic = 2°)". Con una prórroga activa (`fecha <=
+    fecha_final_prorroga`) se fuerza Semestre 1 sin importar el mes — la
+    excepción documentada explícitamente ("hasta ese día se imprime
+    Semestre 1 para todos los vehículos"); no se contempla prórroga del 2º
+    periodo. `fecha_final_prorroga=None` (sin prórroga vigente) es el
+    comportamiento de siempre. El llamador resuelve la prórroga vigente
+    (`app.services.semestre.obtener_prorroga_activa`) — esta función se
+    mantiene pura, sin acceso a base de datos."""
 
+    if fecha_final_prorroga is not None and fecha <= fecha_final_prorroga:
+        return 1
     return 1 if fecha.month <= 6 else 2
 
 
@@ -73,12 +82,19 @@ def _campos_diesel(valores_medidos: dict) -> dict:
 
 
 def generar_proyeccion_certificado(
-    verificacion: Verificacion, resultado_prueba: ResultadoPrueba | None
+    verificacion: Verificacion,
+    resultado_prueba: ResultadoPrueba | None,
+    *,
+    fecha_final_prorroga: datetime.date | None = None,
 ) -> dict:
     """`resultado_prueba` es `None` cuando el rechazo viene de inspección
     visual (nunca pasó por Prueba) — el contrato (sección 4) no define un
     payload de sobreimpresión para ese camino; se genera con `method`/
-    `fields` vacíos, documentado como hueco del contrato, no inventado."""
+    `fields` vacíos, documentado como hueco del contrato, no inventado.
+
+    `fecha_final_prorroga`: ver `calcular_semestre` — la resuelve el
+    llamador (`app.services.semestre.obtener_prorroga_activa`), esta
+    función no consulta la base de datos por su cuenta."""
 
     metodo = None
     layout_version = None
@@ -116,7 +132,9 @@ def generar_proyeccion_certificado(
         else None,
         "test_result_id": test_result_id,
         "method": metodo.value if metodo else None,
-        "semestre": calcular_semestre(datetime.datetime.now(datetime.timezone.utc).date()),
+        "semestre": calcular_semestre(
+            datetime.datetime.now(datetime.timezone.utc).date(), fecha_final_prorroga
+        ),
         "fields": fields,
         "evaluation_result": evaluation_result,
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),

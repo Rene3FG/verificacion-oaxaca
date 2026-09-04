@@ -35,6 +35,7 @@ from app.services.certificado import (
 from app.services.folio_inventario import SinFolioDisponible, asignar_siguiente_folio
 from app.services.impresora import imprimir as imprimir_en_impresora
 from app.services.proyeccion_certificado import LayoutSinMapeo, generar_proyeccion_certificado
+from app.services.semestre import obtener_prorroga_activa
 from app.services.sync import registrar_evento_con_sync
 
 router = APIRouter(prefix="/api/impresion", tags=["impresion"])
@@ -152,8 +153,13 @@ async def _generar_y_fijar_proyeccion(
     independiente de si el envío físico tiene éxito o falla."""
 
     resultado_prueba = await _ultimo_resultado_prueba(db, verificacion.id)
+    prorroga = await obtener_prorroga_activa(db)
     try:
-        proyeccion = generar_proyeccion_certificado(verificacion, resultado_prueba)
+        proyeccion = generar_proyeccion_certificado(
+            verificacion,
+            resultado_prueba,
+            fecha_final_prorroga=prorroga.fecha_final if prorroga else None,
+        )
     except LayoutSinMapeo as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -324,8 +330,13 @@ async def vista_previa_certificado(
     # que la vista previa muestre el mismo layout (sección 4) que
     # producirá la impresión real.
     resultado_prueba = await _ultimo_resultado_prueba(db, verificacion.id)
+    prorroga = await obtener_prorroga_activa(db)
     try:
-        proyeccion = generar_proyeccion_certificado(verificacion, resultado_prueba)
+        proyeccion = generar_proyeccion_certificado(
+            verificacion,
+            resultado_prueba,
+            fecha_final_prorroga=prorroga.fecha_final if prorroga else None,
+        )
     except LayoutSinMapeo as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

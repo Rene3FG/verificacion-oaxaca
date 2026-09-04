@@ -1653,3 +1653,74 @@ error, sin UI dedicada). No probado contra Chrome en esta sesión.
    configurarlo por línea, mensaje de bloqueo dedicado en `PruebaView.vue`
    en vez de error plano) y prueba visual en Chrome de todo lo de esta
    sesión — sin hacer.
+
+## Semestre y prórroga — punto 5 del handoff (2026-09-04, tercera sesión)
+
+Implementa el pendiente de la sección 5 (Figma 2026-08-24): la regla base
+de semestre por fecha ya existía desde el 2026-08-31
+(`calcular_semestre`); faltaba la "prórroga global del 1er periodo" —
+Supervisor define una fecha final hasta la cual se imprime Semestre 1
+para todos los vehículos, sin importar el mes real. No se contempla
+prórroga del 2º periodo (confirmado explícitamente en el texto del
+handoff, no es un hueco).
+
+- **`ProrrogaSemestre`** (`app/models/prorroga_semestre.py`, tabla nueva,
+  migración `d51e439f9236`): cada configuración de prórroga es su propia
+  fila (append-only, nunca se actualiza una existente) — el requisito
+  explícito de auditar "motivo, fecha final, usuario y fecha/hora" encaja
+  mejor como historial que como un registro mutable único. Sin columna
+  `activa`: el estado se deriva siempre comparando `fecha_final` contra
+  hoy (`app.services.semestre.obtener_prorroga_activa`); configurar una
+  fila nueva con `fecha_final` en el pasado es la forma de desactivar la
+  prórroga vigente antes de tiempo.
+- **`orden` (IDENTITY)**, no `created_at`, es el desempate real de "la más
+  reciente" — mismo patrón que `Folio.orden`. Se encontró al escribir las
+  pruebas: `now()` en Postgres es estable dentro de una misma transacción
+  (`transaction_timestamp()`), así que dos `POST
+  /api/supervision/semestre/prorroga` seguidos en el mismo test (o en la
+  misma request real) comparten `created_at` exacto — con solo
+  `created_at DESC`, la prueba que confirma "una prórroga nueva con fecha
+  pasada desactiva la anterior" fallaba de forma intermitente según el
+  orden físico de filas, no según cuál se insertó después. Corregido antes
+  de que llegara a producción.
+- **`calcular_semestre`** (`app/services/proyeccion_certificado.py`) gana
+  el parámetro opcional `fecha_final_prorroga` — se mantiene una función
+  pura, sin acceso a base de datos; el llamador resuelve la prórroga
+  vigente por su cuenta. `generar_proyeccion_certificado` la acepta y
+  reenvía igual (mismo criterio). Los dos call sites en
+  `app/api/routers/impresion.py` (`_generar_y_fijar_proyeccion` y
+  `vista_previa_certificado`) llaman a `obtener_prorroga_activa(db)` antes
+  de generar la proyección.
+- **`GET /api/supervision/semestre`** (`requiere_supervisor`): expone
+  `semestre_actual`, `prorroga_activa`, `fecha_final_prorroga`,
+  `motivo_prorroga` — todo derivado, nada se guarda como estado aparte.
+  **`POST /api/supervision/semestre/prorroga`** (`requiere_supervisor`,
+  `fecha_final` + `motivo` obligatorio): crea la fila nueva y devuelve el
+  mismo shape ya recalculado. Sin endpoint de "editar" una prórroga
+  existente — coherente con el modelo append-only.
+- **Decisión sin confirmar explícitamente, documentada aquí**: el handoff
+  dice "hasta ese día se imprime Semestre 1 **para todos los vehículos**"
+  sin mencionar centro — se implementó como configuración **global**
+  (una sola prórroga vigente para todo el sistema, no por centro), lectura
+  más literal del texto. Si el negocio la quiere por centro, requiere
+  agregar `center_id` a `ProrrogaSemestre` y a los endpoints.
+- **7 pruebas nuevas** (`tests/test_proyeccion_certificado.py`: prórroga
+  activa fuerza Semestre 1 incluso en el 2º periodo por calendario, y que
+  vuelve a Semestre 2 después de la fecha final;
+  `tests/test_supervision.py`: 403 sin supervisor, semestre base sin
+  prórroga, 422 sin motivo, alta de prórroga activa vía HTTP con
+  verificación cruzada en el GET, y que una fecha pasada desactiva la
+  anterior). **197 pruebas, todas pasan** (190→197). `python -c "from
+  app.main import app"` confirma que la app monta sus 52 rutas sin error.
+
+**Alcance backend-only**: no hay pantalla de Supervisor para la
+configuración de Semestre y prórroga todavía (la sección 5 del handoff sí
+define una, "Administración / Supervisión — Configuración de Semestre y
+prórroga"). No probado contra Chrome en esta sesión.
+
+**Pendiente real:**
+1. NOx y Factor Lambda en gasolina dinámico, rango CO+CO2, ambigüedad del
+   folio en el snapshot, diseño visual — sin cambios.
+2. Frontend de `capacidad_dinamometro_kg` y de Semestre/prórroga (ambos
+   backend-only todavía), y prueba visual en Chrome de las dos sesiones
+   de hoy — sin hacer.

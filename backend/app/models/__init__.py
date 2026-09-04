@@ -11,6 +11,7 @@ from app.models.integration_log import IntegrationLog
 from app.models.limite_emision import LimiteEmision
 from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
+from app.models.prorroga_semestre import ProrrogaSemestre
 from app.models.resultado_obd_sbd import ResultadoObdSbd
 from app.models.resultado_prueba import ResultadoPrueba
 from app.models.siox_consulta import SioxConsulta
@@ -34,6 +35,7 @@ __all__ = [
     "LimiteEmision",
     "PrintAttempt",
     "PrintJob",
+    "ProrrogaSemestre",
     "ResultadoObdSbd",
     "ResultadoPrueba",
     "SioxConsulta",

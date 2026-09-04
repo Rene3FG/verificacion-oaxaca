@@ -1,3 +1,5 @@
+import datetime
+
 from app.models.enums import EstadoVerificacion, StationType
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa, crear_sesion_supervisor
 
@@ -161,3 +163,88 @@ async def test_buscar_expedientes_placa_vacia_responde_422(client, db_session):
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp.status_code == 422
+
+
+async def test_consultar_semestre_sin_supervisor_responde_403(client, db_session):
+    estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA)
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/supervision/semestre", headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert resp.status_code == 403
+
+
+async def test_consultar_semestre_sin_prorroga_usa_regla_base(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session)
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/supervision/semestre", headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["prorroga_activa"] is False
+    assert body["fecha_final_prorroga"] is None
+    hoy = datetime.date.today()
+    assert body["semestre_actual"] == (1 if hoy.month <= 6 else 2)
+
+
+async def test_configurar_prorroga_sin_motivo_responde_422(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/supervision/semestre/prorroga",
+        json={"fecha_final": str(datetime.date.today()), "motivo": "   "},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 422
+
+
+async def test_configurar_prorroga_activa_fuerza_semestre_1(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session)
+    await db_session.commit()
+
+    fecha_final = datetime.date.today() + datetime.timedelta(days=30)
+    resp = await client.post(
+        "/api/supervision/semestre/prorroga",
+        json={"fecha_final": str(fecha_final), "motivo": "Extensión autorizada por el centro"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["prorroga_activa"] is True
+    assert body["semestre_actual"] == 1
+    assert body["fecha_final_prorroga"] == str(fecha_final)
+
+    consulta = await client.get(
+        "/api/supervision/semestre", headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert consulta.json()["prorroga_activa"] is True
+
+
+async def test_configurar_prorroga_con_fecha_pasada_la_desactiva(client, db_session):
+    """Configurar una prórroga nueva con `fecha_final` en el pasado es la
+    forma de desactivar la anterior antes de tiempo (sin columna `activa`
+    separada, ver docstring de `ProrrogaSemestre`)."""
+
+    sesion = await crear_sesion_supervisor(db_session)
+    await db_session.commit()
+
+    fecha_futura = datetime.date.today() + datetime.timedelta(days=30)
+    await client.post(
+        "/api/supervision/semestre/prorroga",
+        json={"fecha_final": str(fecha_futura), "motivo": "Extensión inicial"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    fecha_pasada = datetime.date.today() - datetime.timedelta(days=1)
+    resp = await client.post(
+        "/api/supervision/semestre/prorroga",
+        json={"fecha_final": str(fecha_pasada), "motivo": "Cancelación anticipada"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["prorroga_activa"] is False

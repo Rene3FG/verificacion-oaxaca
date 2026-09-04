@@ -1,6 +1,8 @@
+import datetime
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -8,9 +10,12 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import SessionContext, get_db, requiere_supervisor
 from app.models.enums import EstadoVerificacion
 from app.models.event_log import EventLog
+from app.models.prorroga_semestre import ProrrogaSemestre
 from app.models.verificacion import Verificacion
 from app.schemas.event_log import EventLogRead
 from app.schemas.verificacion import ExpedienteCompleto, ExpedienteRead
+from app.services.proyeccion_certificado import calcular_semestre
+from app.services.semestre import obtener_prorroga_activa
 
 router = APIRouter(prefix="/api/supervision", tags=["supervision"])
 
@@ -107,3 +112,71 @@ async def bitacora_expediente(
         .order_by(EventLog.created_at)
     )
     return list(result.scalars().all())
+
+
+class SemestreRead(BaseModel):
+    semestre_actual: int
+    prorroga_activa: bool
+    fecha_final_prorroga: datetime.date | None
+    motivo_prorroga: str | None
+
+
+@router.get("/semestre", response_model=SemestreRead)
+async def consultar_semestre(
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> SemestreRead:
+    """Pantalla 'Administración / Supervisión — Configuración de Semestre
+    y prórroga' (sección 5 del handoff): `semestre_certificado` ("cálculo
+    automático por fecha de verificación") y `prorroga_primer_periodo`
+    ("Activa/Inactiva") — ambos se derivan aquí, no se guardan como
+    estado aparte."""
+
+    prorroga = await obtener_prorroga_activa(db)
+    hoy = datetime.datetime.now(datetime.timezone.utc).date()
+    return SemestreRead(
+        semestre_actual=calcular_semestre(hoy, prorroga.fecha_final if prorroga else None),
+        prorroga_activa=prorroga is not None,
+        fecha_final_prorroga=prorroga.fecha_final if prorroga else None,
+        motivo_prorroga=prorroga.motivo if prorroga else None,
+    )
+
+
+class ProrrogaInput(BaseModel):
+    fecha_final: datetime.date
+    motivo: str
+
+
+@router.post("/semestre/prorroga", response_model=SemestreRead)
+async def configurar_prorroga(
+    payload: ProrrogaInput,
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> SemestreRead:
+    """Solo un Supervisor autorizado puede definir la prórroga (sección 5:
+    "debe auditarse motivo, fecha final, usuario y fecha/hora") — cada
+    llamada crea una fila nueva (append-only, ver docstring de
+    `ProrrogaSemestre`); no hay endpoint de "editar" una prórroga
+    existente. Configurar `fecha_final` en el pasado es la forma de
+    desactivar la prórroga vigente antes de tiempo."""
+
+    if not payload.motivo.strip():
+        raise HTTPException(status_code=422, detail="El motivo es obligatorio.")
+
+    db.add(
+        ProrrogaSemestre(
+            fecha_final=payload.fecha_final,
+            motivo=payload.motivo.strip(),
+            usuario_id=session.user_id,
+        )
+    )
+    await db.commit()
+
+    prorroga = await obtener_prorroga_activa(db)
+    hoy = datetime.datetime.now(datetime.timezone.utc).date()
+    return SemestreRead(
+        semestre_actual=calcular_semestre(hoy, prorroga.fecha_final if prorroga else None),
+        prorroga_activa=prorroga is not None,
+        fecha_final_prorroga=prorroga.fecha_final if prorroga else None,
+        motivo_prorroga=prorroga.motivo if prorroga else None,
+    )

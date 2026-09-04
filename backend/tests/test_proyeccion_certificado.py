@@ -76,3 +76,15 @@ def test_calcular_semestre():
     assert calcular_semestre(datetime.date(2026, 6, 30)) == 1
     assert calcular_semestre(datetime.date(2026, 7, 1)) == 2
     assert calcular_semestre(datetime.date(2026, 12, 31)) == 2
+
+
+def test_calcular_semestre_con_prorroga_activa_fuerza_semestre_1():
+    """Sección 5: "hasta ese día se imprime Semestre 1 para todos los
+    vehículos" — incluso ya entrado el 2º periodo por calendario."""
+
+    assert calcular_semestre(datetime.date(2026, 8, 15), datetime.date(2026, 8, 31)) == 1
+    assert calcular_semestre(datetime.date(2026, 8, 31), datetime.date(2026, 8, 31)) == 1
+
+
+def test_calcular_semestre_despues_de_la_prorroga_vuelve_a_semestre_2():
+    assert calcular_semestre(datetime.date(2026, 9, 1), datetime.date(2026, 8, 31)) == 2
