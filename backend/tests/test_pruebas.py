@@ -17,9 +17,13 @@ LECTURA_GASOLINA_EXCEDIDA = {"hc_ppm": 999, "co_pct": 0.3, "co2_pct": 10.0, "o2_
 LIMITES_GASOLINA_DEFAULT = {"hc_ppm": 200, "co_pct": 1.0, "co2_pct": 16.0, "o2_pct": 2.0}
 
 
-async def _sesion_prueba(db_session, *, line_id: int = 1):
+async def _sesion_prueba(db_session, *, line_id: int = 1, capacidad_dinamometro_kg=None):
     estacion = await crear_estacion(
-        db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=line_id
+        db_session,
+        station_type=StationType.PRUEBA,
+        center_id="OAX-01",
+        line_id=line_id,
+        capacidad_dinamometro_kg=capacidad_dinamometro_kg,
     )
     return await crear_sesion_activa(db_session, estacion=estacion)
 
@@ -686,6 +690,107 @@ async def test_cambio_dinamica_a_estatica_queda_auditado(client, db_session):
     assert evento.usuario_id == sesion.user_id
     assert evento.detalle_json["motivo"] == "Prueba dinamometrica no disponible"
     assert evento.created_at is not None
+
+
+async def test_configurar_gasolina_excede_capacidad_dinamometro_propone_estatica(
+    client, db_session
+):
+    """Sección 9/10 del handoff: si el peso bruto del vehículo excede la
+    capacidad del dinamómetro de la línea, el default deja de ser DINAMICA
+    — es una imposibilidad física del equipo, no una preferencia."""
+
+    sesion = await _sesion_prueba(db_session, capacidad_dinamometro_kg=3000)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.LISTO_PARA_PRUEBA,
+        combustible_validado="GASOLINA",
+        peso_bruto_vehicular_kg=3500,
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/configurar/{expediente.id}?tipo_prueba=ESTATICA",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["estado_expediente"] == EstadoVerificacion.PRUEBA_CONFIGURADA.value
+
+    await db_session.refresh(expediente)
+    assert expediente.tipo_prueba_final == TipoPrueba.ESTATICA
+
+
+async def test_configurar_gasolina_excede_capacidad_dinamometro_bloquea_forzar_dinamica(
+    client, db_session
+):
+    """Ni con cambio_manual+motivo se puede forzar DINAMICA cuando el
+    dinamómetro de la línea no soporta el peso del vehículo — a diferencia
+    del cambio "por preferencia" DINAMICA->ESTATICA, este es un límite
+    físico del equipo, no una elección de negocio auditable."""
+
+    sesion = await _sesion_prueba(db_session, capacidad_dinamometro_kg=3000)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.LISTO_PARA_PRUEBA,
+        combustible_validado="GASOLINA",
+        peso_bruto_vehicular_kg=3500,
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/configurar/{expediente.id}"
+        "?tipo_prueba=DINAMICA&cambio_manual=true&motivo=Insistir",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 409
+    assert "capacidad del dinamómetro" in resp.json()["detail"]
+
+
+async def test_configurar_gasolina_peso_dentro_de_capacidad_sigue_dinamica(client, db_session):
+    sesion = await _sesion_prueba(db_session, capacidad_dinamometro_kg=3000)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.LISTO_PARA_PRUEBA,
+        combustible_validado="GASOLINA",
+        peso_bruto_vehicular_kg=2000,
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/configurar/{expediente.id}?tipo_prueba=DINAMICA",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+
+    await db_session.refresh(expediente)
+    assert expediente.tipo_prueba_final == TipoPrueba.DINAMICA
+
+
+async def test_configurar_gasolina_sin_capacidad_configurada_ignora_peso(client, db_session):
+    """Sin `capacidad_dinamometro_kg` en la estación, este eje nunca se
+    evalúa — nunca se asume una capacidad para poder compararla, mismo
+    criterio que año-modelo/peso bruto en `evaluacion_prueba`."""
+
+    sesion = await _sesion_prueba(db_session)  # capacidad_dinamometro_kg=None
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.LISTO_PARA_PRUEBA,
+        combustible_validado="GASOLINA",
+        peso_bruto_vehicular_kg=999999,
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/configurar/{expediente.id}?tipo_prueba=DINAMICA",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+
+    await db_session.refresh(expediente)
+    assert expediente.tipo_prueba_final == TipoPrueba.DINAMICA
 
 
 async def test_iniciar_prueba_sin_inspeccion_visual_aprobada_responde_409(client, db_session):

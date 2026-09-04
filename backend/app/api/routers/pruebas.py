@@ -30,6 +30,7 @@ from app.models.limite_emision import LimiteEmision
 from app.models.resultado_prueba import ResultadoPrueba
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
+from app.models.workstation import Workstation
 from app.schemas.prueba import (
     MetodoSinMapeo,
     NormalizedPayloadDiesel,
@@ -94,7 +95,23 @@ async def configurar_prueba(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Regla de negocio #5/#9: gasolina -> dinámica por default, cambiable a
-    estática con auditoría; diésel -> opacidad, sin cambio permitido."""
+    estática con auditoría; diésel -> opacidad, sin cambio permitido.
+
+    Sección 9/10 del handoff (revisión Figma 2026-08-24): el tipo de
+    prueba de gasolina en realidad depende de "combustible, PBV, capacidad
+    del dinamómetro y condición técnica del vehículo", no solo de
+    combustible. Se incorpora aquí el eje de peso/capacidad
+    (`capacidad_dinamometro_kg`, por estación — ver `Workstation`):
+    si el peso bruto del vehículo excede la capacidad del dinamómetro de
+    ESTA línea, la prueba dinámica es una imposibilidad física del equipo,
+    no una preferencia de negocio, así que el default pasa a ESTATICA y
+    forzar DINAMICA se bloquea sin excepción (a diferencia del cambio
+    ESTATICA→DINAMICA "por preferencia", que sigue sin estar permitido, y
+    del cambio DINAMICA→ESTATICA "por preferencia", que sigue exigiendo
+    motivo). Sin peso capturado o sin capacidad configurada en la
+    estación, se ignora este eje (nunca se asume un peso o una capacidad
+    para poder compararlos) y el comportamiento es exactamente el de
+    antes."""
 
     verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
 
@@ -108,7 +125,22 @@ async def configurar_prueba(
         )
 
     es_gasolina = (verificacion.combustible_validado or "").upper() == "GASOLINA"
-    tipo_default = TipoPrueba.DINAMICA if es_gasolina else TipoPrueba.OPACIDAD
+
+    excede_capacidad_dinamometro = False
+    if es_gasolina:
+        vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
+        estacion = await db.get(Workstation, session.workstation_id)
+        peso_kg = vehiculo.peso_bruto_vehicular_kg if vehiculo is not None else None
+        capacidad_kg = estacion.capacidad_dinamometro_kg if estacion is not None else None
+        if peso_kg is not None and capacidad_kg is not None:
+            excede_capacidad_dinamometro = peso_kg > capacidad_kg
+
+    if not es_gasolina:
+        tipo_default = TipoPrueba.OPACIDAD
+    elif excede_capacidad_dinamometro:
+        tipo_default = TipoPrueba.ESTATICA
+    else:
+        tipo_default = TipoPrueba.DINAMICA
 
     if tipo_prueba != tipo_default:
         if not es_gasolina:
@@ -117,6 +149,15 @@ async def configurar_prueba(
                 detail=(
                     "Un vehículo que no es a gasolina solo admite prueba de "
                     "OPACIDAD; no se permite cambiar el tipo de prueba."
+                ),
+            )
+        if excede_capacidad_dinamometro and tipo_prueba == TipoPrueba.DINAMICA:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"El peso bruto del vehículo ({peso_kg} kg) excede la "
+                    f"capacidad del dinamómetro de esta línea ({capacidad_kg} "
+                    "kg); no se puede realizar la prueba dinámica aquí."
                 ),
             )
         if tipo_prueba != TipoPrueba.ESTATICA:
@@ -141,7 +182,11 @@ async def configurar_prueba(
         usuario_id=session.user_id,
         modulo="prueba",
         evento="prueba_configurada",
-        detalle={"tipo_prueba": tipo_prueba, "cambio_manual": cambio_manual},
+        detalle={
+            "tipo_prueba": tipo_prueba,
+            "cambio_manual": cambio_manual,
+            "excede_capacidad_dinamometro": excede_capacidad_dinamometro,
+        },
     )
 
     if cambio_manual:

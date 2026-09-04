@@ -1551,3 +1551,105 @@ esa sesión.
    diseño visual — sin cambios.
 2. Prueba visual en navegador (Chrome) — sigue sin hacerse en ninguna
    sesión reciente.
+
+## Primera prueba visual completa en Chrome (2026-09-04)
+
+Cierra el punto 2 pendiente de arriba, acumulado desde hace varias
+sesiones. Con backend (`uvicorn`) y tres instancias de `vite` (una por
+estación — `VITE_DEVICE_IDENTIFIER` fija la estación al arrancar, no se
+puede cambiar desde la UI) corriendo contra Postgres real, se recorrió el
+flujo completo por primera vez con la extensión de Chrome conectada:
+
+- **Captura**: expediente nuevo → SIOX real (`Sin datos en SIOX`, esperado
+  para una placa ficticia, historial de consultas correcto) → captura
+  manual → datos de vehículo, propietario/domicilio, PBV/tracción →
+  confirmar/normalizar. Sin errores.
+- **Prueba**: inspección visual con los 8 puntos reales (camino aprobado y
+  camino rechazado con causal correcta) → OBD no aplica (por
+  `tipo_vehiculo` de prueba, no por bug) → prueba dinámica de gasolina con
+  el formulario RALENTÍ/CRUCERO de la sesión 2026-09-03 (primera vez que
+  se ejercita contra el backend real) → resultado automático calculado
+  contra NOM-041 real.
+- **Supervisor**: Monitor y alta de lotes de folios por rango, probados
+  por primera vez en navegador.
+- **Impresión**: cálculo de tipo de certificado (manual y automático
+  RECHAZO), folio, **vista previa en PDF verificada con contenido real**
+  para gasolina (tabla RALENTÍ/CRUCERO) y diésel (coeficiente K) — primera
+  confirmación visual del layout de la sesión 2026-08-31/09-03 —,
+  imprimir, cerrar expediente. También se confirmó en vivo el 409 real
+  (con el mensaje exacto de campos faltantes) al intentar imprimir un
+  expediente sin domicilio/tarjeta/PBV capturados.
+
+**Hallazgo de entorno, no de la app**: en esta sesión de automatización,
+el clic del tool de Chrome solo llega de verdad a la pestaña que tiene el
+foco real del navegador (la primera abierta en el grupo) — en pestañas
+adicionales (necesarias para simular varias estaciones a la vez) los
+clics por coordenada no disparaban nada, incluso con coordenadas
+correctas leídas por `getBoundingClientRect`. Se resolvió despachando
+`MouseEvent`/`Event('input')` por JavaScript en esas pestañas — no es un
+bug de la aplicación.
+
+**Limpieza post-sesión**: la actividad manual (SIOX, folios, sync) generó
+filas reales que rompieron 28 pruebas de golpe (`test_reimpresion.py` por
+folios de prueba chocando con los rangos que usan sus fixtures,
+`test_sync.py` por conteos globales de `sync_outbox` inflados) — mismo
+patrón ya documentado varias veces en este archivo. Se borró por completo
+el expediente de prueba creado en la sesión, se restauró `PXR-228-C` a su
+estado previo de `seed_demo`, y se vació `sync_outbox` (confirmado con el
+usuario antes de un `DELETE` sin `WHERE`). **182 pruebas, todas pasan**
+de nuevo tras la limpieza.
+
+## `capacidad_dinamometro_kg` — punto 10 del handoff (2026-09-04, sesión posterior)
+
+Implementa el parámetro pendiente de la sección 10 (Figma 2026-08-24): la
+sección 9 del mismo documento aclara que el tipo de prueba de gasolina en
+realidad depende de "combustible, PBV, capacidad del dinamómetro y
+condición técnica del vehículo", no solo de combustible — hasta ahora
+`configurar_prueba` solo miraba combustible.
+
+- **Decisión de diseño**: a diferencia de `obd_modelo_minimo` (un valor
+  único en `cat_parametros_sistema`), la tabla del handoff dice
+  "capacidad_dinamometro_kg — por equipo/línea (sin valor único)" — vive
+  como columna nueva en `Workstation.capacidad_dinamometro_kg` (`Float`,
+  nullable, migración `d1451a3c9689`), no en el catálogo de parámetros
+  globales.
+- **`configurar_prueba`** (`app/api/routers/pruebas.py`): para gasolina,
+  se lee `vehiculo.peso_bruto_vehicular_kg` y
+  `estacion_actual.capacidad_dinamometro_kg` (la estación de la sesión que
+  llama, vía `session.workstation_id`). Si el peso excede la capacidad, el
+  default deja de ser DINAMICA y pasa a ESTATICA — es una imposibilidad
+  física del equipo, no una preferencia de negocio, así que **forzar
+  DINAMICA en ese caso se bloquea sin excepción** (409, sin
+  `cambio_manual` que valga), a diferencia del cambio "por preferencia"
+  DINAMICA→ESTATICA, que sigue exigiendo `cambio_manual=true` + motivo
+  auditado (regla #9, sin cambios). Sin peso capturado o sin capacidad
+  configurada en la estación, este eje se ignora por completo (nunca se
+  asume un valor para poder compararlo) y el comportamiento es idéntico al
+  de antes — mismo criterio que año-modelo/peso bruto en
+  `evaluacion_prueba.py`.
+- **`PATCH /api/estaciones/{id}/capacidad-dinamometro`** (nuevo,
+  `requiere_supervisor`, mismo criterio de "Supervisor como aproximación
+  temporal al Superadmin" que folios/límites de emisión): 422 si la
+  estación no es de tipo PRUEBA o si el valor no es positivo; `null`
+  limpia la configuración. `WorkstationRead` expone el campo.
+- **8 pruebas nuevas** (`tests/test_pruebas.py`: excede capacidad → default
+  ESTATICA, forzar DINAMICA bloqueado incluso con motivo, peso dentro de
+  capacidad sigue DINAMICA, sin capacidad configurada ignora el peso;
+  `tests/test_estaciones.py`, nuevo: 403 sin supervisor, 422 en estación
+  que no es PRUEBA, 422 con valor no positivo, alta y limpieza con
+  `null`). **190 pruebas, todas pasan** (182→190). `python -c "from
+  app.main import app"` confirma que la app monta sus 50 rutas sin error.
+
+**Alcance backend-only** (mismo patrón que otras sesiones de esta lista):
+no hay pantalla de Supervisor para configurar `capacidad_dinamometro_kg`
+por línea todavía, ni el frontend de `PruebaView.vue` refleja el nuevo
+motivo de bloqueo (el 409 le llegaría al operador como texto plano de
+error, sin UI dedicada). No probado contra Chrome en esta sesión.
+
+**Pendiente real:**
+1. NOx y Factor Lambda en gasolina dinámico, rango CO+CO2, ambigüedad del
+   folio en el snapshot, semestre/prórroga, diseño visual — sin cambios.
+2. Frontend de `capacidad_dinamometro_kg` (pantalla de Supervisor para
+   configurarlo por línea, mensaje de bloqueo dedicado en `PruebaView.vue`
+   en vez de error plano) y prueba visual en Chrome de todo lo de esta
+   sesión — sin hacer.

@@ -6,9 +6,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import SessionContext, get_db, requiere_supervisor
 from app.models.access_event import AccessEvent
-from app.models.enums import AccessEventResultado
+from app.models.enums import AccessEventResultado, StationType
 from app.models.usuario import CatUsuario
 from app.models.workstation import StationSession, UserStationPermission, Workstation
 from app.schemas.estacion import StationSessionRead, WorkstationRead
@@ -162,3 +162,42 @@ async def cerrar_sesion(session_id: uuid.UUID, db: AsyncSession = Depends(get_db
     sesion.status = "cerrada"
     await db.commit()
     return {"status": "cerrada"}
+
+
+class CapacidadDinamometroInput(BaseModel):
+    capacidad_dinamometro_kg: float | None
+
+
+@router.patch("/{workstation_id}/capacidad-dinamometro", response_model=WorkstationRead)
+async def actualizar_capacidad_dinamometro(
+    workstation_id: uuid.UUID,
+    payload: CapacidadDinamometroInput,
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> Workstation:
+    """Sección 10 del handoff: 'capacidad_dinamometro_kg', por equipo/línea,
+    sin valor único global — a diferencia de `obd_modelo_minimo` (que sí es
+    un parámetro global en `cat_parametros_sistema`), este vive en la
+    propia `Workstation`. Exclusivo de Supervisor, mismo criterio que
+    `POST /api/pruebas/limites-emision` y `POST /api/folios/lotes` (el rol
+    de plataforma/Superadmin que el handoff describe para catálogos no
+    existe todavía). `null` limpia la configuración — vuelve a
+    `configurar_prueba` a ignorar el peso del vehículo, como si nunca se
+    hubiera configurado."""
+
+    estacion = await db.get(Workstation, workstation_id)
+    if estacion is None:
+        raise HTTPException(status_code=404, detail="Estación no encontrada")
+    if estacion.station_type != StationType.PRUEBA:
+        raise HTTPException(
+            status_code=422,
+            detail="La capacidad del dinamómetro solo aplica a estaciones de tipo PRUEBA.",
+        )
+    if payload.capacidad_dinamometro_kg is not None and payload.capacidad_dinamometro_kg <= 0:
+        raise HTTPException(
+            status_code=422, detail="capacidad_dinamometro_kg debe ser mayor que 0."
+        )
+    estacion.capacidad_dinamometro_kg = payload.capacidad_dinamometro_kg
+    await db.commit()
+    await db.refresh(estacion)
+    return estacion

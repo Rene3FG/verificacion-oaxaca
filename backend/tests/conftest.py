@@ -61,6 +61,7 @@ async def crear_estacion(
     line_id: int | None = 1,
     is_centralized: bool = False,
     allowed_line_ids: list[int] | None = None,
+    capacidad_dinamometro_kg: float | None = None,
 ) -> Workstation:
     estacion = Workstation(
         name=f"{station_type.value}-{uuid.uuid4().hex[:8]}",
@@ -70,6 +71,7 @@ async def crear_estacion(
         is_centralized=is_centralized,
         allowed_line_ids=allowed_line_ids,
         is_active=True,
+        capacidad_dinamometro_kg=capacidad_dinamometro_kg,
     )
     db_session.add(estacion)
     await db_session.flush()

@@ -17,6 +17,7 @@ class WorkstationRead(BaseModel):
     is_centralized: bool
     allowed_line_ids: list[int] | None
     is_active: bool
+    capacidad_dinamometro_kg: float | None
 
 
 class StationSessionRead(BaseModel):

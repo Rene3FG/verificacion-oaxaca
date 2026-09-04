@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from sqlalchemy import ARRAY, Boolean, Enum, ForeignKey, Integer, String
+from sqlalchemy import ARRAY, Boolean, Enum, Float, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,13 @@ class Workstation(Base, UUIDPKMixin, TimestampMixin):
     allowed_line_ids: Mapped[list[int] | None] = mapped_column(ARRAY(Integer))
     device_identifier: Mapped[str | None] = mapped_column(String(120))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Sección 10 del handoff (revisión Figma 2026-08-24): "Capacidad máxima
+    # del dinamómetro, configurable por equipo/línea" — sin valor único
+    # global (a diferencia de obd_modelo_minimo), por eso vive aquí y no en
+    # cat_parametros_sistema. Solo tiene sentido en estaciones PRUEBA;
+    # NULL = sin configurar (no participa en la determinación del tipo de
+    # prueba, ver app.api.routers.pruebas.configurar_prueba).
+    capacidad_dinamometro_kg: Mapped[float | None] = mapped_column(Float)
 
 
 class StationSession(Base, UUIDPKMixin, TimestampMixin):
