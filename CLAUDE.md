@@ -1718,9 +1718,76 @@ configuración de Semestre y prórroga todavía (la sección 5 del handoff sí
 define una, "Administración / Supervisión — Configuración de Semestre y
 prórroga"). No probado contra Chrome en esta sesión.
 
-**Pendiente real:**
+**Pendiente real (al momento de escribir esta sección):**
 1. NOx y Factor Lambda en gasolina dinámico, rango CO+CO2, ambigüedad del
    folio en el snapshot, diseño visual — sin cambios.
 2. Frontend de `capacidad_dinamometro_kg` y de Semestre/prórroga (ambos
    backend-only todavía), y prueba visual en Chrome de las dos sesiones
-   de hoy — sin hacer.
+   de hoy — sin hacer. **Resuelto en la sesión siguiente, ver más abajo.**
+
+## Frontend de `capacidad_dinamometro_kg` y Semestre/prórroga (2026-09-04, cuarta sesión)
+
+Cierra el punto 2 pendiente de arriba. Commit `a320f88` sobre
+`etapa1-y-siox`, pusheado. **199 pruebas** (197→199, todas backend —
+ningún test nuevo de frontend, se verificó en vivo contra Chrome).
+
+- Dos pestañas nuevas en `SupervisorView.vue`: **"Equipos"** (capacidad
+  del dinamómetro editable por línea, vía el `PATCH
+  /api/estaciones/{id}/capacidad-dinamometro` de la sesión anterior) y
+  **"Semestre"** (estado actual — semestre vigente, si hay prórroga
+  activa — más formulario para configurar una prórroga nueva, vía los
+  endpoints `GET`/`POST /api/supervision/semestre(/prorroga)`).
+- **Dependencia nueva que hizo falta**: `GET /api/estaciones` (nuevo,
+  `requiere_supervisor`, filtrable por `centro_id`/`station_type`) para
+  que el frontend pudiera conocer el UUID de cada línea sin que el
+  supervisor tuviera que capturarlo a mano — antes no existía ningún
+  endpoint de solo lectura para listar `Workstation`.
+- **Probado en vivo contra el backend real (Chrome)**, no solo por
+  build: alta y limpieza de capacidad del dinamómetro por línea,
+  activación y desactivación de una prórroga de semestre. Sin datos de
+  prueba que limpiar después (a diferencia de otras sesiones de
+  automatización de este proyecto) porque las operaciones son
+  configuración de Supervisor, no expedientes.
+- `python -c "from app.main import app"` confirma que la app sigue
+  montando todas sus rutas sin error tras el nuevo `GET /api/estaciones`.
+
+**Pendiente real:**
+1. NOx y Factor Lambda en gasolina dinámico, rango CO+CO2 (bloqueado:
+   falta el PDF de NOM-041 en el entorno, se compartió en una sesión
+   anterior pero no quedó guardado en disco) — sin cambios.
+2. Ambigüedad del folio en el snapshot (`certificate_projection_json`
+   vs. `Verificacion.folio_externo`/`Folio`) — pendiente de confirmar
+   con el equipo de diseño, sin cambios.
+3. Diseño visual (sección 13, tokens/guinda institucional) — Sebastián
+   sigue iterando la UI de Impresión por su lado en
+   `frontend-impresion-central`, sin tocar desde este lado.
+
+## Sincronizar `PruebaView.vue` de `frontend-impresion-central` (2026-09-07)
+
+`frontend-impresion-central` es la rama de Sebastián, con foco exclusivo
+en Impresión — pero su `PruebaView.vue` nunca se había tocado desde que
+se separó de `etapa1-y-siox` (confirmado con `git log` de ambas ramas:
+ningún commit de `frontend-impresion-central` toca ese archivo desde el
+punto de divergencia `3ef9e9b`), así que seguía con el checklist
+hardcodeado y el shape viejo de `valores_medidos_json` de antes del
+`Certificate Result Projection Contract v1` (2026-08-31). Sebastián lo
+detectó el 2026-09-04 al verificar en vivo: marcar el checklist con ese
+frontend daba 422 real porque el backend ya espera el contrato nuevo.
+
+- Reemplazo directo por la versión vigente de `etapa1-y-siox` (no un
+  merge de lógica — no había nada propio que preservar en ese archivo).
+  Hecho en un worktree aislado (`git worktree add`), `npx vite build`
+  limpio antes de commitear.
+- Commit `10a2eb3` sobre `frontend-impresion-central`, pusheado. **El
+  push inicial fue rechazado** (`fetch first`): Sebastián había subido 2
+  commits nuevos a esa misma rama mientras se trabajaba en esto
+  (`4f6ad84`, `971a5a9`, ninguno tocaba `PruebaView.vue`) — se resolvió
+  con `git fetch` + `git rebase` + push, sin conflicto real. Dos
+  sesiones de Claude distintas pueden estar activas en el mismo repo al
+  mismo tiempo; un rechazo de push a una rama compartida no es
+  necesariamente un error propio.
+- `backend/` no se tocó — cambio 100% frontend.
+
+**Pendiente real: sin cambios** respecto a la sesión anterior (NOx/
+Lambda bloqueado por el PDF de NOM-041, ambigüedad del folio pendiente
+de diseño, sección 13 en manos de Sebastián).
