@@ -1791,3 +1791,31 @@ frontend daba 422 real porque el backend ya espera el contrato nuevo.
 **Pendiente real: sin cambios** respecto a la sesión anterior (NOx/
 Lambda bloqueado por el PDF de NOM-041, ambigüedad del folio pendiente
 de diseño, sección 13 en manos de Sebastián).
+
+## Re-auditoría: `CapturaView.vue` y `SupervisorView.vue` también desfasados (2026-09-07, misma sesión)
+
+Siguiendo la costumbre de este proyecto de re-auditar tras un fix (no
+asumir que `PruebaView.vue` era el único archivo desfasado), se comparó
+**todo** `frontend/src/views/` entre `etapa1-y-siox` y
+`frontend-impresion-central`. Mismo patrón exacto: ninguno de los dos
+tenía commits propios en `frontend-impresion-central` desde el punto de
+divergencia (`3ef9e9b`).
+
+- `CapturaView.vue`: le faltaban los campos de propietario/domicilio,
+  tarjeta de circulación, PBV y Tracción (sección 7, `d9706c7`).
+- `SupervisorView.vue`: le faltaban las pestañas de Reimpresión (folio
+  dañado/corrección de tipo), Límites de emisión, Equipos
+  (`capacidad_dinamometro_kg`) y Semestre/prórroga, más el split de
+  `CERRADO` en `CERRADO_APROBADO`/`CERRADO_RECHAZADO`.
+- `ImpresionView.vue` **se dejó intacto a propósito**: a diferencia de
+  los otros dos, sí tiene commits propios en ambas ramas desde la
+  divergencia (el rediseño de Sebastián por un lado, `fe9a055` de
+  reimpresión por el otro) — es divergencia real ya coordinada a mano
+  entre ambos (ver commit `971a5a9` de Sebastián), no staleness.
+  Sincronizarlo a ciegas pisaría trabajo real de alguien.
+- Mismo procedimiento: worktree aislado, reemplazo directo por la
+  versión vigente de `etapa1-y-siox`, `npx vite build` limpio, commit
+  `56a85a1` sobre `frontend-impresion-central`, pusheado sin conflicto
+  (nadie más pusheó a esa rama entre medio esta vez).
+
+**Pendiente real: sin cambios.**
