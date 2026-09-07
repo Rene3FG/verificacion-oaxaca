@@ -20,18 +20,16 @@ const ESTADOS_PRUEBA = [
   "PRUEBA_EN_PROCESO",
 ];
 
-// Checklist propuesto a falta del documento de diseño del proyecto (no está
-// en el repo, mismo caso que las reglas de impresión en app/services/certificado.py
-// — ver CLAUDE.md). A confirmar/corregir con el equipo de Prueba.
-const CHECKLIST_ITEMS = [
-  { key: "luces_delanteras", label: "Luces delanteras" },
-  { key: "luces_traseras", label: "Luces traseras y direccionales" },
-  { key: "limpiaparabrisas_claxon", label: "Limpiaparabrisas y claxon" },
-  { key: "espejos", label: "Espejos laterales" },
-  { key: "llantas", label: "Llantas sin desgaste excesivo" },
-  { key: "fugas", label: "Sin fugas visibles de aceite o combustible" },
-  { key: "escape", label: "Sistema de escape sin fugas ni modificaciones" },
-  { key: "placas", label: "Placas legibles y vigentes" },
+// Checklist real de inspección visual (sección 8 de la revisión del Figma
+// 2026-08-24): los 8 puntos y sus etiquetas viven en el backend
+// (GET /api/inspeccion/checklist) — aquí solo se renderizan. Cada punto se
+// captura como BUENO / MALO / NO_APLICA; el resultado lo determina el
+// backend (cualquier MALO rechaza), no el operador.
+const checklistItems = ref([]);
+const OPCIONES_ITEM = [
+  { value: "BUENO", label: "Bueno" },
+  { value: "MALO", label: "Malo" },
+  { value: "NO_APLICA", label: "No aplica" },
 ];
 
 const expedientesEnCurso = ref([]);
@@ -45,8 +43,28 @@ const aviso = ref(null);
 
 // --- Corregir datos del vehículo (decisión de producto 2026-08-14: si
 // Inspección Visual detecta un error, Prueba debe poder corregirlo sin
-// devolver el expediente a Captura). Mismos campos que CapturaView.vue.
-const CAMPOS_VEHICULO = ["niv", "marca", "linea", "modelo", "tipo_vehiculo"];
+// devolver el expediente a Captura). Mismos campos que CapturaView.vue,
+// incluidos los de propietario/domicilio/PBV/Tracción (sección 7 del
+// handoff): Impresión bloquea con 409 si faltan al imprimir, y Prueba es
+// la última estación que puede corregirlos por PATCH.
+const CAMPOS_VEHICULO = [
+  "niv",
+  "marca",
+  "linea",
+  "modelo",
+  "tipo_vehiculo",
+  "pbv",
+  "peso_bruto_vehicular_kg",
+  "traccion",
+  "razon_social",
+  "tarjeta_circulacion",
+  "propietario_estado",
+  "propietario_municipio",
+  "propietario_codigo_postal",
+  "propietario_colonia",
+  "propietario_calle",
+  "propietario_numero_exterior",
+];
 const vehiculoForm = reactive(Object.fromEntries(CAMPOS_VEHICULO.map((c) => [c, null])));
 const guardandoVehiculo = ref(false);
 const editandoVehiculo = ref(false);
@@ -71,22 +89,41 @@ async function guardarVehiculo() {
 }
 
 // --- Inspección visual ---
-const checklistForm = reactive(
-  Object.fromEntries(CHECKLIST_ITEMS.map((item) => [item.key, true]))
-);
-const causalesRechazo = ref("");
+// Cada punto arranca sin respuesta (null): el operador debe pronunciarse
+// sobre los 8 antes de poder registrar.
+const checklistForm = reactive({});
+const observacionesInspeccion = ref("");
 const registrandoInspeccion = ref(false);
 
-const itemsRechazados = computed(() =>
-  CHECKLIST_ITEMS.filter((item) => !checklistForm[item.key])
+const itemsMalos = computed(() =>
+  checklistItems.value.filter((item) => checklistForm[item.clave] === "MALO")
 );
-const resultadoInspeccion = computed(() =>
-  itemsRechazados.value.length === 0 ? "APROBADA" : "RECHAZADA"
+const checklistCompleto = computed(
+  () =>
+    checklistItems.value.length > 0 &&
+    checklistItems.value.every((item) => checklistForm[item.clave] != null)
 );
+// Espejo informativo de la regla del backend (cualquier MALO rechaza) —
+// la decisión real la toma el servidor al registrar.
+const resultadoInspeccion = computed(() => {
+  if (!checklistCompleto.value) return null;
+  return itemsMalos.value.length === 0 ? "APROBADA" : "RECHAZADA";
+});
 
 function reiniciarChecklist() {
-  for (const item of CHECKLIST_ITEMS) checklistForm[item.key] = true;
-  causalesRechazo.value = "";
+  for (const item of checklistItems.value) checklistForm[item.clave] = null;
+  observacionesInspeccion.value = "";
+}
+
+async function cargarCatalogoChecklist() {
+  try {
+    const { data } = await api.get("/inspeccion/checklist");
+    checklistItems.value = data;
+    reiniciarChecklist();
+  } catch (err) {
+    error.value =
+      err.response?.data?.detail || "No se pudo cargar el checklist de inspección visual.";
+  }
 }
 
 // --- OBD/SBD ---
@@ -107,20 +144,75 @@ const tipoPruebaElegido = computed(() =>
 const configurando = ref(false);
 const iniciando = ref(false);
 const guardandoResultado = ref(false);
-const resultadoPrueba = ref("APROBADO");
-const valoresMedidos = ref([{ clave: "", valor: "" }]);
 
-function agregarValorMedido() {
-  valoresMedidos.value.push({ clave: "", valor: "" });
+// 'Certificate Result Projection Contract v1' (sección 4, 2026-08-31):
+// reemplaza el editor libre de pares clave/valor. El shape depende del
+// método técnico (no es lo mismo que tipo_prueba_final — ver
+// app/schemas/prueba.py::METODO_POR_TIPO_PRUEBA en el backend); el
+// resultado ya no lo elige el operador, lo calcula el servidor.
+const METODO_POR_TIPO_PRUEBA = {
+  DINAMICA: "GAS_DYNAMIC",
+  ESTATICA: "GAS_STATIC",
+  OPACIDAD: "DIESEL_OPACITY",
+};
+const metodoPrueba = computed(() => METODO_POR_TIPO_PRUEBA[expediente.value?.tipo_prueba_final] ?? null);
+const esMetodoGasolina = computed(
+  () => metodoPrueba.value === "GAS_DYNAMIC" || metodoPrueba.value === "GAS_STATIC"
+);
+
+function faseVacia() {
+  return { hc_ppm: null, co_pct: null, co2_pct: null, o2_pct: null, nox_ppm: null, speed_kph: null };
 }
-function quitarValorMedido(i) {
-  valoresMedidos.value.splice(i, 1);
+const lecturaGasolina = reactive({ ralenti: faseVacia(), crucero: faseVacia() });
+const lecturaDiesel = reactive({
+  coefficient_absorption_final_k_m1: null,
+  opacity_pct: null,
+  engine_temp_c: null,
+  rpm_idle: null,
+  rpm_governed_max: null,
+  rpm_peak: null,
+});
+
+function faseCompleta(fase) {
+  return ["hc_ppm", "co_pct", "co2_pct", "o2_pct"].every((c) => fase[c] !== null && fase[c] !== "");
 }
+const lecturaCompleta = computed(() =>
+  esMetodoGasolina.value
+    ? faseCompleta(lecturaGasolina.ralenti) && faseCompleta(lecturaGasolina.crucero)
+    : lecturaDiesel.coefficient_absorption_final_k_m1 !== null &&
+      lecturaDiesel.coefficient_absorption_final_k_m1 !== ""
+);
+
+function limpiarFase(fase) {
+  const out = { hc_ppm: fase.hc_ppm, co_pct: fase.co_pct, co2_pct: fase.co2_pct, o2_pct: fase.o2_pct };
+  if (fase.nox_ppm !== null && fase.nox_ppm !== "") out.nox_ppm = fase.nox_ppm;
+  if (fase.speed_kph !== null && fase.speed_kph !== "") out.speed_kph = fase.speed_kph;
+  return out;
+}
+function construirNormalizedPayload() {
+  if (esMetodoGasolina.value) {
+    return { ralenti: limpiarFase(lecturaGasolina.ralenti), crucero: limpiarFase(lecturaGasolina.crucero) };
+  }
+  const out = { coefficient_absorption_final_k_m1: lecturaDiesel.coefficient_absorption_final_k_m1 };
+  for (const campo of ["opacity_pct", "engine_temp_c", "rpm_idle", "rpm_governed_max", "rpm_peak"]) {
+    if (lecturaDiesel[campo] !== null && lecturaDiesel[campo] !== "") out[campo] = lecturaDiesel[campo];
+  }
+  return out;
+}
+
 function reiniciarPrueba() {
   cambioAEstatica.value = false;
   motivoCambio.value = "";
-  resultadoPrueba.value = "APROBADO";
-  valoresMedidos.value = [{ clave: "", valor: "" }];
+  Object.assign(lecturaGasolina.ralenti, faseVacia());
+  Object.assign(lecturaGasolina.crucero, faseVacia());
+  Object.assign(lecturaDiesel, {
+    coefficient_absorption_final_k_m1: null,
+    opacity_pct: null,
+    engine_temp_c: null,
+    rpm_idle: null,
+    rpm_governed_max: null,
+    rpm_peak: null,
+  });
 }
 
 async function cargarExpedientesEnCurso() {
@@ -172,15 +264,11 @@ async function registrarInspeccion() {
   registrandoInspeccion.value = true;
   error.value = null;
   try {
-    await api.post(`/inspeccion/${expediente.value.id}`, {
-      resultado: resultadoInspeccion.value,
-      checklist_json: { ...checklistForm },
-      causales_rechazo:
-        resultadoInspeccion.value === "RECHAZADA"
-          ? { detalle: causalesRechazo.value, items: itemsRechazados.value.map((i) => i.key) }
-          : null,
+    const { data } = await api.post(`/inspeccion/${expediente.value.id}`, {
+      checklist: { ...checklistForm },
+      observaciones: observacionesInspeccion.value.trim() || null,
     });
-    if (resultadoInspeccion.value === "RECHAZADA") {
+    if (data.resultado === "RECHAZADA") {
       aviso.value = "Inspección rechazada. El expediente se envió a Impresión Central.";
       cerrarExpediente();
     } else {
@@ -276,23 +364,31 @@ async function guardarResultadoPrueba() {
   guardandoResultado.value = true;
   error.value = null;
   try {
-    const valores = Object.fromEntries(
-      valoresMedidos.value.filter((v) => v.clave.trim()).map((v) => [v.clave.trim(), v.valor])
-    );
-    await api.post(`/pruebas/resultado/${expediente.value.id}`, {
-      resultado: resultadoPrueba.value,
-      valores_medidos_json: valores,
+    const { data } = await api.post(`/pruebas/resultado/${expediente.value.id}`, {
+      normalized_payload: construirNormalizedPayload(),
     });
-    aviso.value = "Resultado de prueba guardado. Expediente enviado a Impresión Central.";
+    aviso.value =
+      data.estado_expediente === "PENDIENTE_DE_IMPRESION_RECHAZO"
+        ? "Prueba rechazada (fuera de límites). Expediente enviado a Impresión Central."
+        : "Prueba aprobada. Expediente enviado a Impresión Central.";
     cerrarExpediente();
   } catch (err) {
-    error.value = err.response?.data?.detail || "No se pudo guardar el resultado de la prueba.";
+    const detail = err.response?.data?.detail;
+    error.value =
+      typeof detail === "string"
+        ? detail
+        : detail
+          ? JSON.stringify(detail)
+          : "No se pudo guardar el resultado de la prueba.";
   } finally {
     guardandoResultado.value = false;
   }
 }
 
-onMounted(cargarExpedientesEnCurso);
+onMounted(() => {
+  cargarExpedientesEnCurso();
+  cargarCatalogoChecklist();
+});
 </script>
 
 <template>
@@ -368,6 +464,22 @@ onMounted(cargarExpedientesEnCurso);
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.linea" label="Línea/versión" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="6"><v-text-field v-model.number="vehiculoForm.modelo" label="Modelo" type="number" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.tipo_vehiculo" label="Tipo de vehículo" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.pbv" label="Peso bruto vehicular (PBV)" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model.number="vehiculoForm.peso_bruto_vehicular_kg" label="Peso bruto vehicular (kg)" type="number" variant="outlined" density="compact" hint="Numérico, para evaluar opacidad (NOM-045)" persistent-hint /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.traccion" label="Tracción" variant="outlined" density="compact" /></v-col>
+          </v-row>
+          <p class="text-caption text-medium-emphasis mb-1 mt-2">
+            Propietario y domicilio (obligatorios para imprimir el certificado)
+          </p>
+          <v-row dense>
+            <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.razon_social" label="Razón social" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.tarjeta_circulacion" label="Tarjeta de circulación" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="4"><v-text-field v-model="vehiculoForm.propietario_estado" label="Estado" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="4"><v-text-field v-model="vehiculoForm.propietario_municipio" label="Municipio" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="4"><v-text-field v-model="vehiculoForm.propietario_colonia" label="Colonia" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="5"><v-text-field v-model="vehiculoForm.propietario_calle" label="Calle" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="3"><v-text-field v-model="vehiculoForm.propietario_numero_exterior" label="No. exterior" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="4"><v-text-field v-model="vehiculoForm.propietario_codigo_postal" label="Código postal" variant="outlined" density="compact" /></v-col>
           </v-row>
           <v-btn color="primary" :loading="guardandoVehiculo" @click="guardarVehiculo">
             Guardar corrección
@@ -375,33 +487,58 @@ onMounted(cargarExpedientesEnCurso);
         </v-card-text>
       </v-card>
 
-      <!-- Inspección visual -->
+      <!-- Inspección visual: 8 puntos reales del diseño, cada uno
+           Bueno/Malo/No aplica. El resultado lo determina el backend
+           (cualquier MALO rechaza); aquí solo se anticipa. -->
       <v-card v-if="expediente.estado === 'INSPECCION_VISUAL_PENDIENTE'" class="mb-4" variant="outlined">
         <v-card-title>Inspección visual</v-card-title>
         <v-card-text>
-          <v-checkbox
-            v-for="item in CHECKLIST_ITEMS"
-            :key="item.key"
-            v-model="checklistForm[item.key]"
-            :label="item.label"
-            density="compact"
-            hide-details
-            color="primary"
-          />
+          <div
+            v-for="item in checklistItems"
+            :key="item.clave"
+            class="d-flex align-center justify-space-between flex-wrap ga-2 py-2 border-b"
+          >
+            <span class="text-body-2" style="max-width: 55%">{{ item.etiqueta }}</span>
+            <v-btn-toggle
+              v-model="checklistForm[item.clave]"
+              density="compact"
+              divided
+              variant="outlined"
+              color="primary"
+            >
+              <v-btn
+                v-for="opcion in OPCIONES_ITEM"
+                :key="opcion.value"
+                :value="opcion.value"
+                size="small"
+                :color="opcion.value === 'MALO' ? 'error' : undefined"
+              >
+                {{ opcion.label }}
+              </v-btn>
+            </v-btn-toggle>
+          </div>
 
           <v-alert
+            v-if="resultadoInspeccion"
             :type="resultadoInspeccion === 'APROBADA' ? 'success' : 'warning'"
             variant="tonal"
             density="compact"
             class="my-3"
           >
-            Resultado: {{ resultadoInspeccion === "APROBADA" ? "Aprobada" : "Rechazada" }}
+            <template v-if="resultadoInspeccion === 'APROBADA'">Resultado: Aprobada</template>
+            <template v-else>
+              Resultado: Rechazada —
+              {{ itemsMalos.map((item) => item.etiqueta).join("; ") }}
+            </template>
+          </v-alert>
+          <v-alert v-else type="info" variant="tonal" density="compact" class="my-3">
+            Marca los {{ checklistItems.length }} puntos para poder registrar la inspección.
           </v-alert>
 
           <v-textarea
             v-if="resultadoInspeccion === 'RECHAZADA'"
-            v-model="causalesRechazo"
-            label="Detalle del rechazo (obligatorio)"
+            v-model="observacionesInspeccion"
+            label="Observaciones (opcional — los puntos en Malo ya son la causal)"
             variant="outlined"
             density="comfortable"
             rows="2"
@@ -410,7 +547,7 @@ onMounted(cargarExpedientesEnCurso);
           <v-btn
             color="primary"
             :loading="registrandoInspeccion"
-            :disabled="resultadoInspeccion === 'RECHAZADA' && !causalesRechazo.trim()"
+            :disabled="!checklistCompleto"
             @click="registrarInspeccion"
           >
             Registrar inspección
@@ -512,42 +649,64 @@ onMounted(cargarExpedientesEnCurso);
               Tipo de prueba: <strong>{{ expediente.tipo_prueba_final }}</strong>
             </p>
 
-            <p class="text-subtitle-2 mb-2">Valores medidos</p>
-            <div
-              v-for="(fila, i) in valoresMedidos"
-              :key="i"
-              class="d-flex ga-2 mb-2 align-center"
-            >
-              <v-text-field
-                v-model="fila.clave"
-                label="Parámetro"
-                variant="outlined"
-                density="compact"
-                hide-details
-              />
-              <v-text-field
-                v-model="fila.valor"
-                label="Valor"
-                variant="outlined"
-                density="compact"
-                hide-details
-              />
-              <v-btn icon="mdi-delete" variant="text" size="small" @click="quitarValorMedido(i)" />
-            </div>
-            <v-btn variant="text" prepend-icon="mdi-plus" class="mb-4" @click="agregarValorMedido">
-              Agregar valor
-            </v-btn>
+            <v-alert v-if="!metodoPrueba" type="warning" variant="tonal" density="compact" class="mb-3">
+              Este tipo de prueba no tiene un método de proyección de certificado aprobado; no se
+              puede guardar el resultado.
+            </v-alert>
 
-            <v-select
-              v-model="resultadoPrueba"
-              :items="['APROBADO', 'RECHAZADO', 'ERROR']"
-              label="Resultado de la prueba"
-              variant="outlined"
-              density="comfortable"
-              style="max-width: 320px"
-              class="mb-2"
-            />
-            <v-btn color="primary" :loading="guardandoResultado" @click="guardarResultadoPrueba">
+            <template v-else-if="esMetodoGasolina">
+              <p class="text-caption text-medium-emphasis mb-2">
+                HC/CO/CO2/O2 son obligatorios en ambas fases; NOx y velocidad solo si el equipo
+                los reporta.
+              </p>
+
+              <p class="text-subtitle-2 mb-2">Ralentí</p>
+              <v-row dense class="mb-2">
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.hc_ppm" label="HC (ppm)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.co_pct" label="CO (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.co2_pct" label="CO2 (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.o2_pct" label="O2 (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.nox_ppm" label="NOx (ppm, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.speed_kph" label="Velocidad (km/h, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+              </v-row>
+
+              <p class="text-subtitle-2 mb-2">Crucero</p>
+              <v-row dense class="mb-2">
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.hc_ppm" label="HC (ppm)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.co_pct" label="CO (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.co2_pct" label="CO2 (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.o2_pct" label="O2 (%)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.nox_ppm" label="NOx (ppm, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.speed_kph" label="Velocidad (km/h, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+              </v-row>
+            </template>
+
+            <template v-else>
+              <p class="text-caption text-medium-emphasis mb-2">
+                El coeficiente de absorción final K es obligatorio; el resto queda como evidencia
+                técnica, no se sobreimprime en el certificado.
+              </p>
+              <v-row dense class="mb-2">
+                <v-col cols="12" sm="6"><v-text-field v-model.number="lecturaDiesel.coefficient_absorption_final_k_m1" label="Coeficiente de absorción final K (m⁻¹)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaDiesel.opacity_pct" label="Opacidad (%, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaDiesel.engine_temp_c" label="Temp. motor (°C, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaDiesel.rpm_idle" label="RPM ralentí (opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaDiesel.rpm_governed_max" label="RPM gobernado máx. (opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaDiesel.rpm_peak" label="RPM pico (opcional)" type="number" variant="outlined" density="compact" /></v-col>
+              </v-row>
+            </template>
+
+            <v-alert v-if="metodoPrueba" type="info" variant="tonal" density="compact" class="my-3">
+              El resultado (Aprobada/Rechazada) lo calcula el servidor comparando estas lecturas
+              contra los límites de emisión configurados.
+            </v-alert>
+
+            <v-btn
+              color="primary"
+              :loading="guardandoResultado"
+              :disabled="!metodoPrueba || !lecturaCompleta"
+              @click="guardarResultadoPrueba"
+            >
               Guardar resultado
             </v-btn>
           </template>
