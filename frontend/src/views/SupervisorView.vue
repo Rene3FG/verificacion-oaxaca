@@ -33,7 +33,7 @@ function colorEstado(estado) {
   if (estado?.includes("RECHAZAD") || estado?.includes("ERROR") || estado?.includes("FALLIDA")) {
     return estadoColors.rechazado;
   }
-  if (estado?.includes("APROBAD") || estado === "CERRADO" || estado === "IMPRESO") {
+  if (estado?.includes("APROBAD") || estado === "IMPRESO") {
     return estadoColors.aprobado;
   }
   if (estado?.includes("PROCESO") || estado?.includes("SOLICITADO")) {
@@ -221,11 +221,304 @@ async function sincronizarAhora() {
   }
 }
 
+// --- Folios (inventario local, revisión Figma 2026-08-24) ---
+const TIPOS_CERTIFICADO = ["PARTICULAR", "DOBLE_CERO", "INTENSIVO", "RECHAZO"];
+const inventarioFolios = ref([]);
+const cargandoInventario = ref(false);
+const loteForm = reactive({ tipo_certificado: "PARTICULAR", folio_inicio: "", folio_fin: "" });
+const registrandoLote = ref(false);
+
+async function cargarInventarioFolios() {
+  cargandoInventario.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.get("/folios/inventario");
+    inventarioFolios.value = data;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo cargar el inventario de folios.";
+  } finally {
+    cargandoInventario.value = false;
+  }
+}
+
+async function registrarLoteFolios() {
+  registrandoLote.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post("/folios/lotes", null, { params: { ...loteForm } });
+    aviso.value = `${data.cantidad} folio(s) ${data.tipo_certificado} registrados.`;
+    loteForm.folio_inicio = "";
+    loteForm.folio_fin = "";
+    await cargarInventarioFolios();
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo registrar el lote de folios.";
+  } finally {
+    registrandoLote.value = false;
+  }
+}
+
+// --- Límites de emisión (Certificate Result Projection Contract v1) ---
+const METODOS_PRUEBA = ["GAS_STATIC", "GAS_DYNAMIC", "DIESEL_OPACITY"];
+const FASES_LECTURA = ["RALENTI", "CRUCERO"];
+const PARAMETROS_POR_METODO = {
+  GAS_STATIC: ["hc_ppm", "co_pct", "o2_pct"],
+  GAS_DYNAMIC: ["hc_ppm", "co_pct", "o2_pct"],
+  DIESEL_OPACITY: ["coefficient_absorption_final_k_m1"],
+};
+const limitesEmision = ref([]);
+const cargandoLimites = ref(false);
+const limiteAbierto = ref(false);
+const limiteForm = reactive({
+  metodo: "GAS_DYNAMIC",
+  fase: "RALENTI",
+  parametro: "hc_ppm",
+  valor_maximo: null,
+  anio_modelo_desde: null,
+  anio_modelo_hasta: null,
+  peso_bruto_desde_kg: null,
+  peso_bruto_hasta_kg: null,
+});
+const guardandoLimite = ref(false);
+
+const limiteEsDiesel = computed(() => limiteForm.metodo === "DIESEL_OPACITY");
+const parametrosDisponibles = computed(() => PARAMETROS_POR_METODO[limiteForm.metodo] ?? []);
+
+function rangoTexto(desde, hasta) {
+  if (desde == null && hasta == null) return "Sin acotar";
+  return `${desde ?? "—"} – ${hasta ?? "—"}`;
+}
+
+async function cargarLimitesEmision() {
+  cargandoLimites.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.get("/pruebas/limites-emision");
+    limitesEmision.value = data;
+  } catch (err) {
+    error.value =
+      err.response?.data?.detail || "No se pudo cargar el catálogo de límites de emisión.";
+  } finally {
+    cargandoLimites.value = false;
+  }
+}
+
+function onMetodoLimiteChange(valor) {
+  limiteForm.metodo = valor;
+  limiteForm.fase = valor === "DIESEL_OPACITY" ? null : "RALENTI";
+  limiteForm.parametro = PARAMETROS_POR_METODO[valor][0];
+  limiteForm.anio_modelo_desde = null;
+  limiteForm.anio_modelo_hasta = null;
+  limiteForm.peso_bruto_desde_kg = null;
+  limiteForm.peso_bruto_hasta_kg = null;
+}
+
+function abrirNuevoLimite() {
+  onMetodoLimiteChange("GAS_DYNAMIC");
+  limiteForm.valor_maximo = null;
+  limiteAbierto.value = true;
+}
+
+async function guardarLimite() {
+  guardandoLimite.value = true;
+  error.value = null;
+  try {
+    await api.post("/pruebas/limites-emision", { ...limiteForm });
+    aviso.value = "Límite de emisión guardado.";
+    limiteAbierto.value = false;
+    await cargarLimitesEmision();
+  } catch (err) {
+    const detail = err.response?.data?.detail;
+    error.value =
+      typeof detail === "string"
+        ? detail
+        : detail
+          ? JSON.stringify(detail)
+          : "No se pudo guardar el límite de emisión.";
+  } finally {
+    guardandoLimite.value = false;
+  }
+}
+
+// --- Equipos: capacidad_dinamometro_kg por línea (sección 10 del handoff) ---
+const estacionesPrueba = ref([]);
+const cargandoEstaciones = ref(false);
+const guardandoCapacidad = reactive({});
+
+async function cargarEstacionesPrueba() {
+  cargandoEstaciones.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.get("/estaciones", {
+      params: { center_id: session.estacion?.center_id, station_type: "prueba" },
+    });
+    estacionesPrueba.value = data.map((e) => ({ ...e, _valor: e.capacidad_dinamometro_kg }));
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo cargar el listado de estaciones.";
+  } finally {
+    cargandoEstaciones.value = false;
+  }
+}
+
+async function guardarCapacidad(estacion) {
+  guardandoCapacidad[estacion.id] = true;
+  error.value = null;
+  try {
+    const { data } = await api.patch(`/estaciones/${estacion.id}/capacidad-dinamometro`, {
+      capacidad_dinamometro_kg: estacion._valor === "" ? null : estacion._valor,
+    });
+    estacion.capacidad_dinamometro_kg = data.capacidad_dinamometro_kg;
+    estacion._valor = data.capacidad_dinamometro_kg;
+    aviso.value = `Capacidad de línea ${estacion.line_id ?? "—"} actualizada.`;
+  } catch (err) {
+    error.value =
+      err.response?.data?.detail || "No se pudo actualizar la capacidad del dinamómetro.";
+  } finally {
+    guardandoCapacidad[estacion.id] = false;
+  }
+}
+
+// --- Semestre y prórroga (sección 5 del handoff) ---
+const semestreInfo = ref(null);
+const cargandoSemestre = ref(false);
+const prorrogaForm = reactive({ fecha_final: null, motivo: "" });
+const guardandoProrroga = ref(false);
+
+async function cargarSemestre() {
+  cargandoSemestre.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.get("/supervision/semestre");
+    semestreInfo.value = data;
+  } catch (err) {
+    error.value =
+      err.response?.data?.detail || "No se pudo cargar la configuración de semestre.";
+  } finally {
+    cargandoSemestre.value = false;
+  }
+}
+
+async function guardarProrroga() {
+  guardandoProrroga.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post("/supervision/semestre/prorroga", { ...prorrogaForm });
+    semestreInfo.value = data;
+    aviso.value = "Prórroga configurada.";
+    prorrogaForm.fecha_final = null;
+    prorrogaForm.motivo = "";
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo configurar la prórroga.";
+  } finally {
+    guardandoProrroga.value = false;
+  }
+}
+
+// --- Reimpresión (sección 3 del handoff, 2026-09-03) ---
+// IMPRESO/CERRADO_* no aparecen en el monitor (ESTADOS_TERMINALES) ni en
+// la cola de Impresión (ya no son "piso") — se busca por placa vía
+// GET /supervision/expedientes/buscar, el punto de entrada nuevo que
+// hacía falta para llegar a un expediente en esos estados.
+const ESTADOS_CON_CERTIFICADO_IMPRESO = ["IMPRESO", "CERRADO_APROBADO", "CERRADO_RECHAZADO"];
+const TIPOS_CERTIFICADO_APROBADO = ["PARTICULAR", "DOBLE_CERO", "INTENSIVO"];
+
+const busquedaPlaca = ref("");
+const buscandoExpediente = ref(false);
+const resultadosBusqueda = ref([]);
+const expedienteReimpresion = ref(null);
+const motivoReimpresion = ref("");
+const reimprimiendoPorDano = ref(false);
+const nuevoTipoCorreccion = ref(null);
+const corrigiendoTipoPost = ref(false);
+
+const puedeReimprimir = computed(
+  () =>
+    expedienteReimpresion.value &&
+    ESTADOS_CON_CERTIFICADO_IMPRESO.includes(expedienteReimpresion.value.estado)
+);
+// RECHAZO se infiere solo — nunca admite corrección manual, ni como tipo
+// nuevo ni como tipo previo a corregir (ver backend).
+const puedeCorregirTipo = computed(
+  () => puedeReimprimir.value && expedienteReimpresion.value.certificado_tipo !== "RECHAZO"
+);
+
+async function buscarExpediente() {
+  if (!busquedaPlaca.value.trim()) return;
+  buscandoExpediente.value = true;
+  error.value = null;
+  resultadosBusqueda.value = [];
+  try {
+    const { data } = await api.get("/supervision/expedientes/buscar", {
+      params: { placa: busquedaPlaca.value.trim() },
+    });
+    resultadosBusqueda.value = data;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo buscar el expediente.";
+  } finally {
+    buscandoExpediente.value = false;
+  }
+}
+
+function abrirExpedienteReimpresion(exp) {
+  expedienteReimpresion.value = exp;
+  motivoReimpresion.value = "";
+  nuevoTipoCorreccion.value = null;
+}
+
+function cerrarExpedienteReimpresion() {
+  expedienteReimpresion.value = null;
+}
+
+async function reimprimirPorDano() {
+  reimprimiendoPorDano.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post(
+      `/impresion/folio/reimprimir-por-dano/${expedienteReimpresion.value.id}`,
+      { motivo: motivoReimpresion.value }
+    );
+    aviso.value = data.impreso
+      ? `Reimpreso con folio ${data.folio}.`
+      : `Folio ${data.folio} canjeado, pero la impresora no respondió — reintentar.`;
+    expedienteReimpresion.value.estado = data.estado_expediente;
+    motivoReimpresion.value = "";
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo reimprimir por daño.";
+  } finally {
+    reimprimiendoPorDano.value = false;
+  }
+}
+
+async function corregirTipoPostImpresion() {
+  corrigiendoTipoPost.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post(
+      `/impresion/tipo-certificado-post-impresion/${expedienteReimpresion.value.id}`,
+      null,
+      { params: { nuevo_tipo: nuevoTipoCorreccion.value } }
+    );
+    aviso.value = data.impreso
+      ? `Tipo corregido a ${data.certificado_tipo}, folio nuevo ${data.folio}.`
+      : `Tipo corregido a ${data.certificado_tipo}, folio ${data.folio} canjeado, pero la impresora no respondió — reintentar.`;
+    expedienteReimpresion.value.certificado_tipo = data.certificado_tipo;
+    expedienteReimpresion.value.estado = data.estado_expediente;
+    nuevoTipoCorreccion.value = null;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo corregir el tipo de certificado.";
+  } finally {
+    corrigiendoTipoPost.value = false;
+  }
+}
+
 onMounted(() => {
   cargarMonitor();
   cargarUsuarios();
   cargarPermisos();
   cargarEstadoSync();
+  cargarInventarioFolios();
+  cargarLimitesEmision();
+  cargarEstacionesPrueba();
+  cargarSemestre();
 });
 </script>
 
@@ -246,6 +539,11 @@ onMounted(() => {
       <v-tab value="monitor">Monitor</v-tab>
       <v-tab value="permisos">Permisos</v-tab>
       <v-tab value="sincronizacion">Sincronización</v-tab>
+      <v-tab value="folios">Folios</v-tab>
+      <v-tab value="limites">Límites de emisión</v-tab>
+      <v-tab value="equipos">Equipos</v-tab>
+      <v-tab value="semestre">Semestre</v-tab>
+      <v-tab value="reimpresion">Reimpresión</v-tab>
     </v-tabs>
 
     <v-window v-model="tab">
@@ -433,6 +731,359 @@ onMounted(() => {
           </v-card-text>
         </v-card>
       </v-window-item>
+
+      <v-window-item value="folios">
+        <v-card class="mb-4" variant="outlined">
+          <v-card-title class="d-flex align-center ga-2">
+            Inventario local de folios
+            <v-spacer />
+            <v-btn
+              variant="text"
+              icon="mdi-refresh"
+              :loading="cargandoInventario"
+              @click="cargarInventarioFolios"
+            />
+          </v-card-title>
+          <v-card-text>
+            <v-progress-linear v-if="cargandoInventario" indeterminate class="mb-4" />
+            <v-table v-else density="compact">
+              <thead>
+                <tr>
+                  <th>Tipo</th>
+                  <th>Disponibles</th>
+                  <th>Asignados</th>
+                  <th>Impresos</th>
+                  <th>Dañados</th>
+                  <th>Invalidados</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="fila in inventarioFolios" :key="fila.tipo_certificado">
+                  <td>{{ fila.tipo_certificado }}</td>
+                  <td>{{ fila.disponibles }}</td>
+                  <td>{{ fila.asignados }}</td>
+                  <td>{{ fila.impresos }}</td>
+                  <td>{{ fila.danados }}</td>
+                  <td>{{ fila.invalidados }}</td>
+                </tr>
+              </tbody>
+            </v-table>
+          </v-card-text>
+        </v-card>
+
+        <v-card variant="outlined">
+          <v-card-title>Registrar lote por rango</v-card-title>
+          <v-card-text>
+            <v-select
+              v-model="loteForm.tipo_certificado"
+              :items="TIPOS_CERTIFICADO"
+              label="Tipo de certificado"
+              variant="outlined"
+              density="comfortable"
+            />
+            <v-text-field
+              v-model="loteForm.folio_inicio"
+              label="Folio inicial (ej. OAX-000001)"
+              variant="outlined"
+              density="comfortable"
+            />
+            <v-text-field
+              v-model="loteForm.folio_fin"
+              label="Folio final (ej. OAX-000500)"
+              variant="outlined"
+              density="comfortable"
+            />
+            <v-btn
+              color="primary"
+              :loading="registrandoLote"
+              :disabled="!loteForm.folio_inicio || !loteForm.folio_fin"
+              @click="registrarLoteFolios"
+            >
+              Registrar lote
+            </v-btn>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+
+      <v-window-item value="limites">
+        <v-card variant="outlined">
+          <v-card-title class="d-flex align-center ga-2">
+            Límites de emisión (NOM-041/NOM-045)
+            <v-spacer />
+            <v-btn
+              variant="text"
+              icon="mdi-refresh"
+              :loading="cargandoLimites"
+              @click="cargarLimitesEmision"
+            />
+            <v-btn color="primary" prepend-icon="mdi-plus" @click="abrirNuevoLimite">
+              Nuevo límite
+            </v-btn>
+          </v-card-title>
+          <v-card-text>
+            <v-progress-linear v-if="cargandoLimites" indeterminate class="mb-4" />
+            <p v-else-if="limitesEmision.length === 0" class="text-medium-emphasis">
+              Sin límites cargados. NOM-041 (gasolina) debería estar precargada por
+              <code>seed_limites_nom041.py</code>; NOM-045 (diésel) sigue pendiente de la tabla
+              oficial.
+            </p>
+            <v-table v-else density="compact">
+              <thead>
+                <tr>
+                  <th>Método</th>
+                  <th>Fase</th>
+                  <th>Parámetro</th>
+                  <th>Máximo</th>
+                  <th>Año-modelo</th>
+                  <th>Peso bruto (kg)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(fila, i) in limitesEmision" :key="i">
+                  <td>{{ fila.metodo }}</td>
+                  <td>{{ fila.fase ?? "—" }}</td>
+                  <td>{{ fila.parametro }}</td>
+                  <td>{{ fila.valor_maximo }}</td>
+                  <td>{{ rangoTexto(fila.anio_modelo_desde, fila.anio_modelo_hasta) }}</td>
+                  <td>{{ rangoTexto(fila.peso_bruto_desde_kg, fila.peso_bruto_hasta_kg) }}</td>
+                </tr>
+              </tbody>
+            </v-table>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+
+      <v-window-item value="equipos">
+        <v-card variant="outlined">
+          <v-card-title class="d-flex align-center ga-2">
+            Capacidad del dinamómetro por línea
+            <v-spacer />
+            <v-btn
+              variant="text"
+              icon="mdi-refresh"
+              :loading="cargandoEstaciones"
+              @click="cargarEstacionesPrueba"
+            />
+          </v-card-title>
+          <v-card-subtitle class="text-wrap">
+            Sección 10 del handoff: si el peso bruto del vehículo excede la capacidad
+            configurada aquí, la prueba de gasolina en esa línea deja de proponer dinámica
+            por default y no se puede forzar (límite físico del equipo).
+          </v-card-subtitle>
+          <v-card-text>
+            <v-progress-linear v-if="cargandoEstaciones" indeterminate class="mb-4" />
+            <p v-else-if="estacionesPrueba.length === 0" class="text-medium-emphasis">
+              Sin estaciones de Prueba en este centro.
+            </p>
+            <v-table v-else density="compact">
+              <thead>
+                <tr>
+                  <th>Línea</th>
+                  <th>Estación</th>
+                  <th>Capacidad (kg)</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="estacion in estacionesPrueba" :key="estacion.id">
+                  <td>{{ estacion.line_id ?? "—" }}</td>
+                  <td>{{ estacion.name }}</td>
+                  <td style="max-width: 160px">
+                    <v-text-field
+                      v-model.number="estacion._valor"
+                      type="number"
+                      variant="outlined"
+                      density="compact"
+                      hide-details
+                      placeholder="Sin configurar"
+                    />
+                  </td>
+                  <td>
+                    <v-btn
+                      size="small"
+                      variant="text"
+                      :loading="guardandoCapacidad[estacion.id]"
+                      @click="guardarCapacidad(estacion)"
+                    >
+                      Guardar
+                    </v-btn>
+                  </td>
+                </tr>
+              </tbody>
+            </v-table>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+
+      <v-window-item value="semestre">
+        <v-card class="mb-4" variant="outlined">
+          <v-card-title class="d-flex align-center ga-2">
+            Semestre y prórroga
+            <v-spacer />
+            <v-btn
+              variant="text"
+              icon="mdi-refresh"
+              :loading="cargandoSemestre"
+              @click="cargarSemestre"
+            />
+          </v-card-title>
+          <v-card-text>
+            <v-progress-linear v-if="cargandoSemestre" indeterminate class="mb-4" />
+            <template v-else-if="semestreInfo">
+              <p class="mb-2">
+                <strong>Semestre actual:</strong> {{ semestreInfo.semestre_actual }}°
+              </p>
+              <p class="mb-2">
+                <strong>Prórroga:</strong>
+                <v-chip
+                  size="small"
+                  :color="semestreInfo.prorroga_activa ? 'success' : undefined"
+                  class="ml-1"
+                >
+                  {{ semestreInfo.prorroga_activa ? "Activa" : "Inactiva" }}
+                </v-chip>
+              </p>
+              <p v-if="semestreInfo.prorroga_activa" class="text-caption text-medium-emphasis">
+                Hasta {{ semestreInfo.fecha_final_prorroga }} — {{ semestreInfo.motivo_prorroga }}
+              </p>
+            </template>
+          </v-card-text>
+        </v-card>
+
+        <v-card variant="outlined">
+          <v-card-title>Configurar prórroga del 1er periodo</v-card-title>
+          <v-card-subtitle class="text-wrap">
+            Hasta la fecha final, se imprime Semestre 1 para todos los vehículos sin importar
+            el mes. No se contempla prórroga del 2º periodo. Una fecha final en el pasado
+            desactiva la prórroga vigente antes de tiempo.
+          </v-card-subtitle>
+          <v-card-text>
+            <v-text-field
+              v-model="prorrogaForm.fecha_final"
+              label="Fecha final"
+              type="date"
+              variant="outlined"
+              density="comfortable"
+            />
+            <v-textarea
+              v-model="prorrogaForm.motivo"
+              label="Motivo (obligatorio)"
+              variant="outlined"
+              density="comfortable"
+              rows="2"
+            />
+            <v-btn
+              color="primary"
+              :loading="guardandoProrroga"
+              :disabled="!prorrogaForm.fecha_final || !prorrogaForm.motivo.trim()"
+              @click="guardarProrroga"
+            >
+              Guardar
+            </v-btn>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+
+      <v-window-item value="reimpresion">
+        <v-card class="mb-4" variant="outlined">
+          <v-card-title>Buscar expediente</v-card-title>
+          <v-card-subtitle class="text-wrap">
+            Folio dañado/reimpresión por daño y corrección de tipo solo aplican con
+            certificado ya impreso o cerrado — busca por placa, esos expedientes ya no
+            aparecen en el Monitor ni en la cola de Impresión.
+          </v-card-subtitle>
+          <v-card-text>
+            <div class="d-flex ga-2 mb-3">
+              <v-text-field
+                v-model="busquedaPlaca"
+                label="Placa (o parte de ella)"
+                variant="outlined"
+                density="comfortable"
+                hide-details
+                @keyup.enter="buscarExpediente"
+              />
+              <v-btn color="primary" :loading="buscandoExpediente" @click="buscarExpediente">
+                Buscar
+              </v-btn>
+            </div>
+            <p v-if="resultadosBusqueda.length === 0" class="text-medium-emphasis">
+              Sin resultados todavía.
+            </p>
+            <v-list v-else density="compact">
+              <v-list-item
+                v-for="exp in resultadosBusqueda"
+                :key="exp.id"
+                :title="`Placa ${exp.placa}`"
+                :subtitle="`${exp.estado} · certificado: ${exp.certificado_tipo ?? 'sin determinar'} · folio: ${exp.folio_externo ?? 'sin asignar'}`"
+                @click="abrirExpedienteReimpresion(exp)"
+              />
+            </v-list>
+          </v-card-text>
+        </v-card>
+
+        <v-card v-if="expedienteReimpresion" variant="outlined">
+          <v-card-title class="d-flex align-center ga-2">
+            Placa {{ expedienteReimpresion.placa }}
+            <v-spacer />
+            <v-btn variant="text" size="small" @click="cerrarExpedienteReimpresion">Cerrar</v-btn>
+          </v-card-title>
+          <v-card-subtitle>
+            Estado: {{ expedienteReimpresion.estado }} · Certificado:
+            {{ expedienteReimpresion.certificado_tipo ?? "sin determinar" }} · Folio:
+            {{ expedienteReimpresion.folio_externo ?? "sin asignar" }}
+          </v-card-subtitle>
+          <v-card-text>
+            <v-alert v-if="!puedeReimprimir" type="info" variant="tonal" density="compact">
+              Este expediente no tiene un certificado impreso o cerrado — estas dos
+              operaciones no aplican en su estado actual.
+            </v-alert>
+            <template v-else>
+              <p class="text-subtitle-2 mb-2">Reimpresión por certificado físico dañado</p>
+              <v-textarea
+                v-model="motivoReimpresion"
+                label="Motivo (obligatorio)"
+                variant="outlined"
+                density="comfortable"
+                rows="2"
+              />
+              <v-btn
+                color="warning"
+                :loading="reimprimiendoPorDano"
+                :disabled="!motivoReimpresion.trim()"
+                @click="reimprimirPorDano"
+              >
+                Reimprimir por daño
+              </v-btn>
+
+              <v-divider class="my-4" />
+
+              <p class="text-subtitle-2 mb-2">Corrección de tipo después de imprimir</p>
+              <p v-if="!puedeCorregirTipo" class="text-caption text-medium-emphasis mb-2">
+                RECHAZO no admite corrección manual de tipo — se infiere solo.
+              </p>
+              <template v-else>
+                <v-select
+                  v-model="nuevoTipoCorreccion"
+                  :items="TIPOS_CERTIFICADO_APROBADO"
+                  label="Tipo correcto"
+                  variant="outlined"
+                  density="comfortable"
+                  style="max-width: 320px"
+                  class="mb-2"
+                />
+                <v-btn
+                  color="primary"
+                  :loading="corrigiendoTipoPost"
+                  :disabled="!nuevoTipoCorreccion"
+                  @click="corregirTipoPostImpresion"
+                >
+                  Corregir tipo y reimprimir
+                </v-btn>
+              </template>
+            </template>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
     </v-window>
 
     <v-dialog v-model="bitacoraAbierta" max-width="640">
@@ -549,6 +1200,90 @@ onMounted(() => {
             @click="crearPermiso"
           >
             Crear
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="limiteAbierto" max-width="480">
+      <v-card>
+        <v-card-title>Nuevo límite de emisión</v-card-title>
+        <v-card-text>
+          <v-select
+            :model-value="limiteForm.metodo"
+            :items="METODOS_PRUEBA"
+            label="Método"
+            variant="outlined"
+            density="comfortable"
+            @update:model-value="onMetodoLimiteChange"
+          />
+          <v-select
+            v-if="!limiteEsDiesel"
+            v-model="limiteForm.fase"
+            :items="FASES_LECTURA"
+            label="Fase"
+            variant="outlined"
+            density="comfortable"
+          />
+          <v-select
+            v-model="limiteForm.parametro"
+            :items="parametrosDisponibles"
+            label="Parámetro"
+            variant="outlined"
+            density="comfortable"
+          />
+          <v-text-field
+            v-model.number="limiteForm.valor_maximo"
+            label="Valor máximo"
+            type="number"
+            variant="outlined"
+            density="comfortable"
+          />
+          <v-text-field
+            v-model.number="limiteForm.anio_modelo_desde"
+            label="Año-modelo desde (vacío = sin acotar)"
+            type="number"
+            variant="outlined"
+            density="comfortable"
+          />
+          <v-text-field
+            v-model.number="limiteForm.anio_modelo_hasta"
+            label="Año-modelo hasta (vacío = sin acotar)"
+            type="number"
+            variant="outlined"
+            density="comfortable"
+          />
+          <!-- NOM-045 (diésel) estratifica por año-modelo Y peso bruto a la
+               vez (corrección 2026-09-03, ver CLAUDE.md) — solo diésel
+               admite estos dos campos adicionales; gasolina (NOM-041) no
+               estratifica por peso. -->
+          <template v-if="limiteEsDiesel">
+            <v-text-field
+              v-model.number="limiteForm.peso_bruto_desde_kg"
+              label="Peso bruto desde, kg (vacío = sin acotar)"
+              type="number"
+              variant="outlined"
+              density="comfortable"
+            />
+            <v-text-field
+              v-model.number="limiteForm.peso_bruto_hasta_kg"
+              label="Peso bruto hasta, kg (vacío = sin acotar)"
+              type="number"
+              variant="outlined"
+              density="comfortable"
+            />
+          </template>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="limiteAbierto = false">Cancelar</v-btn>
+          <v-btn
+            color="primary"
+            :loading="guardandoLimite"
+            :disabled="!limiteForm.parametro || limiteForm.valor_maximo === null"
+            @click="guardarLimite"
+          >
+            Guardar
           </v-btn>
         </v-card-actions>
       </v-card>
