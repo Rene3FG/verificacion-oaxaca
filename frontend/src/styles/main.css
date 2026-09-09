@@ -45,3 +45,67 @@
   font-size: 12px !important;
   line-height: 16px !important;
 }
+
+/* Spacing, radius y elevación institucionales — Figma "01 — Foundations"
+   (sección 13, confirmados el 09-09). Se exponen como custom properties
+   + utilidades nuevas (no existía uso previo de `.rounded-*`/`elevation`
+   en el proyecto, verificado antes de tocar esto) — no se fuerzan sobre
+   componentes de Vuetify que ya tienen su propio criterio de elevación
+   (v-card variant="flat"/"outlined", v-btn variant="text", etc.), porque
+   Foundations no especifica qué combinación de props usa cada uno; usar
+   estas clases es decisión de cada vista, no un override global. */
+:root {
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-48: 48px;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-full: 36px;
+
+  --elevation-0-border: 1px solid #e5e7eb;
+  --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --elevation-2: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --elevation-3: 0 6px 18px rgba(0, 0, 0, 0.14);
+}
+
+.rounded-sm {
+  border-radius: var(--radius-sm) !important;
+}
+.rounded,
+.rounded-md {
+  border-radius: var(--radius-md) !important;
+}
+.rounded-lg {
+  border-radius: var(--radius-lg) !important;
+}
+.rounded-xl {
+  border-radius: var(--radius-xl) !important;
+}
+.rounded-2xl {
+  border-radius: var(--radius-2xl) !important;
+}
+.rounded-full {
+  border-radius: var(--radius-full) !important;
+}
+
+.elevation-institucional-0 {
+  box-shadow: none !important;
+  border: var(--elevation-0-border);
+}
+.elevation-institucional-1 {
+  box-shadow: var(--elevation-1) !important;
+}
+.elevation-institucional-2 {
+  box-shadow: var(--elevation-2) !important;
+}
+.elevation-institucional-3 {
+  box-shadow: var(--elevation-3) !important;
+}
