@@ -48,12 +48,17 @@
 
 /* Spacing, radius y elevación institucionales — Figma "01 — Foundations"
    (sección 13, confirmados el 09-09). Se exponen como custom properties
-   + utilidades nuevas (no existía uso previo de `.rounded-*`/`elevation`
-   en el proyecto, verificado antes de tocar esto) — no se fuerzan sobre
-   componentes de Vuetify que ya tienen su propio criterio de elevación
-   (v-card variant="flat"/"outlined", v-btn variant="text", etc.), porque
-   Foundations no especifica qué combinación de props usa cada uno; usar
-   estas clases es decisión de cada vista, no un override global. */
+   + utilidades con prefijo `-institucional-` (mismo criterio que
+   `elevation-institucional-*`) — Vuetify genera sus propias clases
+   `.rounded`/`.rounded-sm`/`.rounded-lg`/`.rounded-xl` a partir del prop
+   `rounded` de sus componentes; usar esos nombres aquí las pisaría con
+   `!important` en cualquier vista que use ese prop más adelante, aunque
+   hoy ningún `.vue` del proyecto lo use todavía (verificado por grep).
+   No se fuerzan sobre componentes de Vuetify que ya tienen su propio
+   criterio de elevación (v-card variant="flat"/"outlined", v-btn
+   variant="text", etc.), porque Foundations no especifica qué combinación
+   de props usa cada uno; usar estas clases es decisión de cada vista, no
+   un override global. */
 :root {
   --space-4: 4px;
   --space-8: 8px;
@@ -76,23 +81,22 @@
   --elevation-3: 0 6px 18px rgba(0, 0, 0, 0.14);
 }
 
-.rounded-sm {
+.rounded-institucional-sm {
   border-radius: var(--radius-sm) !important;
 }
-.rounded,
-.rounded-md {
+.rounded-institucional-md {
   border-radius: var(--radius-md) !important;
 }
-.rounded-lg {
+.rounded-institucional-lg {
   border-radius: var(--radius-lg) !important;
 }
-.rounded-xl {
+.rounded-institucional-xl {
   border-radius: var(--radius-xl) !important;
 }
-.rounded-2xl {
+.rounded-institucional-2xl {
   border-radius: var(--radius-2xl) !important;
 }
-.rounded-full {
+.rounded-institucional-full {
   border-radius: var(--radius-full) !important;
 }
 
