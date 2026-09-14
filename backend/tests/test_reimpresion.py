@@ -4,6 +4,8 @@ antes/después de imprimir, reimpresión por daño físico después de
 imprimir. Ver CLAUDE.md, "Split de CERRADO..." y el PDF de la revisión
 para el texto íntegro de las reglas."""
 
+import uuid
+
 from sqlalchemy import select
 
 from app.models.enums import (
@@ -18,6 +20,7 @@ from app.models.folio import Folio
 from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
 from app.models.resultado_prueba import ResultadoPrueba
+from app.services.integridad import calcular_hash_resultado_prueba
 from tests.conftest import (
     crear_estacion,
     crear_expediente,
@@ -98,23 +101,42 @@ async def _con_resultado_prueba_gasolina(db_session, expediente):
 
     expediente.tipo_prueba_final = TipoPrueba.DINAMICA
     db_session.add(expediente)
+
+    resultado_id = uuid.uuid4()
+    valores_medidos = {
+        "ralenti": {
+            "hc_ppm": 50, "co_pct": 0.3, "co2_pct": 10.0, "o2_pct": 1.0,
+            "nox_ppm": None, "speed_kph": None,
+        },
+        "crucero": {
+            "hc_ppm": 40, "co_pct": 0.2, "co2_pct": 11.0, "o2_pct": 1.2,
+            "nox_ppm": None, "speed_kph": None,
+        },
+    }
+    hash_integridad = calcular_hash_resultado_prueba(
+        resultado_id=resultado_id,
+        verificacion_id=expediente.id,
+        tipo_prueba=TipoPrueba.DINAMICA.value,
+        combustible="GASOLINA",
+        resultado=ResultadoPruebaEnum.APROBADO.value,
+        valores_medidos_json=valores_medidos,
+        limites_aplicados_json={},
+        equipo_id=None,
+        linea_id=expediente.linea_id,
+        operador_id=None,
+        started_at=None,
+        finished_at=None,
+    )
     resultado = ResultadoPrueba(
+        id=resultado_id,
         verificacion_id=expediente.id,
         tipo_prueba=TipoPrueba.DINAMICA,
         combustible="GASOLINA",
         resultado=ResultadoPruebaEnum.APROBADO,
-        valores_medidos_json={
-            "ralenti": {
-                "hc_ppm": 50, "co_pct": 0.3, "co2_pct": 10.0, "o2_pct": 1.0,
-                "nox_ppm": None, "speed_kph": None,
-            },
-            "crucero": {
-                "hc_ppm": 40, "co_pct": 0.2, "co2_pct": 11.0, "o2_pct": 1.2,
-                "nox_ppm": None, "speed_kph": None,
-            },
-        },
+        valores_medidos_json=valores_medidos,
         limites_aplicados_json={},
         linea_id=expediente.linea_id,
+        hash_integridad=hash_integridad,
     )
     db_session.add(resultado)
     await db_session.commit()

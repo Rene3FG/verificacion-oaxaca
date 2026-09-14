@@ -29,3 +29,11 @@ class ResultadoPrueba(Base, UUIDPKMixin, TimestampMixin):
     operador_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     started_at: Mapped[datetime.datetime | None] = mapped_column()
     finished_at: Mapped[datetime.datetime | None] = mapped_column()
+
+    # HU-102 (subtarea 3, Etapa 12): hash de integridad del resultado
+    # capturado offline. Se calcula una sola vez al crear la fila (ver
+    # app.services.integridad.calcular_hash_resultado_prueba) sobre los
+    # campos técnicos inmutables; permite al central detectar si el
+    # payload sincronizado fue alterado en tránsito o en el servidor
+    # local antes de sincronizar.
+    hash_integridad: Mapped[str] = mapped_column(String(64), nullable=False)

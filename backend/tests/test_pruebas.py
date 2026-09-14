@@ -5,10 +5,14 @@ from app.models.enums import (
     FaseLectura,
     MetodoPrueba,
     StationType,
+    SyncStatus,
     TipoPrueba,
 )
 from app.models.event_log import EventLog
 from app.models.limite_emision import LimiteEmision
+from app.models.resultado_prueba import ResultadoPrueba
+from app.models.sync_outbox import SyncOutbox
+from app.services.integridad import calcular_hash_resultado_prueba
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa, crear_sesion_supervisor
 
 LECTURA_GASOLINA_OK = {"hc_ppm": 50, "co_pct": 0.3, "co2_pct": 10.0, "o2_pct": 1.0}
@@ -96,6 +100,120 @@ async def test_guardar_resultado_con_combustible_validado_ok(client, db_session)
 
     assert resp.status_code == 200
     assert resp.json()["estado_expediente"] == EstadoVerificacion.PENDIENTE_IMPRESION.value
+
+
+async def test_guardar_resultado_calcula_hash_de_integridad(client, db_session):
+    """HU-102 (subtarea 3, Etapa 12): el resultado guardado offline lleva un
+    hash de integridad, recalculable de forma independiente sobre los
+    mismos campos técnicos, para que el central detecte alteración."""
+
+    sesion = await _sesion_prueba(db_session)
+    await _cargar_limites_gasolina(db_session, MetodoPrueba.GAS_DYNAMIC)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="GASOLINA",
+    )
+    expediente.tipo_prueba_final = TipoPrueba.DINAMICA
+    db_session.add(expediente)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/resultado/{expediente.id}",
+        json={"normalized_payload": _payload_gasolina()},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+
+    resultado = (
+        await db_session.execute(
+            select(ResultadoPrueba).where(ResultadoPrueba.verificacion_id == expediente.id)
+        )
+    ).scalar_one()
+
+    assert resultado.hash_integridad is not None
+    assert len(resultado.hash_integridad) == 64  # hexdigest de sha256
+
+    hash_recalculado = calcular_hash_resultado_prueba(
+        resultado_id=resultado.id,
+        verificacion_id=resultado.verificacion_id,
+        tipo_prueba=resultado.tipo_prueba.value,
+        combustible=resultado.combustible,
+        resultado=resultado.resultado.value,
+        valores_medidos_json=resultado.valores_medidos_json,
+        limites_aplicados_json=resultado.limites_aplicados_json,
+        equipo_id=resultado.equipo_id,
+        linea_id=resultado.linea_id,
+        operador_id=resultado.operador_id,
+        started_at=resultado.started_at.isoformat(),
+        finished_at=resultado.finished_at.isoformat(),
+    )
+    assert hash_recalculado == resultado.hash_integridad
+
+    # Alterar cualquier campo técnico debe cambiar el hash — si no, el hash
+    # no sirve para detectar alteración.
+    hash_con_otro_valor = calcular_hash_resultado_prueba(
+        resultado_id=resultado.id,
+        verificacion_id=resultado.verificacion_id,
+        tipo_prueba=resultado.tipo_prueba.value,
+        combustible=resultado.combustible,
+        resultado="RECHAZADO",
+        valores_medidos_json=resultado.valores_medidos_json,
+        limites_aplicados_json=resultado.limites_aplicados_json,
+        equipo_id=resultado.equipo_id,
+        linea_id=resultado.linea_id,
+        operador_id=resultado.operador_id,
+        started_at=resultado.started_at.isoformat(),
+        finished_at=resultado.finished_at.isoformat(),
+    )
+    assert hash_con_otro_valor != resultado.hash_integridad
+
+
+async def test_guardar_resultado_encola_sync_outbox_con_lecturas(client, db_session):
+    """HU-102 (subtarea 4): antes de esto, el snapshot de Verificacion que
+    se sincroniza no incluye valores_medidos_json/limites_aplicados_json —
+    el central nunca recibiría las lecturas técnicas, solo el veredicto.
+    guardar_resultado_prueba debe encolar el resultado completo aparte."""
+
+    sesion = await _sesion_prueba(db_session)
+    await _cargar_limites_gasolina(db_session, MetodoPrueba.GAS_DYNAMIC)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="GASOLINA",
+    )
+    expediente.tipo_prueba_final = TipoPrueba.DINAMICA
+    db_session.add(expediente)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/resultado/{expediente.id}",
+        json={"normalized_payload": _payload_gasolina()},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+
+    resultado = (
+        await db_session.execute(
+            select(ResultadoPrueba).where(ResultadoPrueba.verificacion_id == expediente.id)
+        )
+    ).scalar_one()
+
+    outbox_row = (
+        await db_session.execute(
+            select(SyncOutbox).where(
+                SyncOutbox.entity_type == "resultado_prueba",
+                SyncOutbox.entity_uuid == resultado.id,
+            )
+        )
+    ).scalar_one()
+
+    assert outbox_row.operation == "insert"
+    assert outbox_row.payload["hash_integridad"] == resultado.hash_integridad
+    assert outbox_row.payload["valores_medidos_json"] == resultado.valores_medidos_json
+    assert outbox_row.sync_status == SyncStatus.PENDING
 
 
 async def test_guardar_resultado_rechazado_va_a_cola_de_rechazo(client, db_session):

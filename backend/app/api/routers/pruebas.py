@@ -40,6 +40,8 @@ from app.schemas.prueba import (
 from app.schemas.verificacion import ExpedienteCompleto
 from app.services import state_machine
 from app.services.evaluacion_prueba import LimitesNoConfigurados, evaluar_diesel, evaluar_gasolina
+from app.services.integridad import calcular_hash_resultado_prueba
+from app.services.sync import encolar_sync
 
 router = APIRouter(prefix="/api/pruebas", tags=["pruebas"])
 
@@ -331,20 +333,72 @@ async def guardar_resultado_prueba(
     except LimitesNoConfigurados as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    db.add(
-        ResultadoPrueba(
-            verificacion_id=verificacion.id,
-            tipo_prueba=verificacion.tipo_prueba_final,
-            combustible=verificacion.combustible_validado,
-            resultado=resultado,
-            valores_medidos_json=payload_validado.model_dump(),
-            limites_aplicados_json=limits_applied,
-            equipo_id=payload.equipo_id,
-            linea_id=verificacion.linea_id,
-            operador_id=session.user_id,
-            started_at=datetime.datetime.now(datetime.timezone.utc),
-            finished_at=datetime.datetime.now(datetime.timezone.utc),
-        )
+    # HU-102 (Etapa 12): el id se genera aquí en vez de dejarlo al default
+    # de UUIDPKMixin porque hace falta ANTES del INSERT para atar el hash
+    # de integridad a una fila concreta (ver app.services.integridad).
+    resultado_id = uuid.uuid4()
+    inicio = datetime.datetime.now(datetime.timezone.utc)
+    fin = datetime.datetime.now(datetime.timezone.utc)
+    valores_medidos = payload_validado.model_dump()
+
+    hash_integridad = calcular_hash_resultado_prueba(
+        resultado_id=resultado_id,
+        verificacion_id=verificacion.id,
+        tipo_prueba=verificacion.tipo_prueba_final.value,
+        combustible=verificacion.combustible_validado,
+        resultado=resultado.value if resultado else None,
+        valores_medidos_json=valores_medidos,
+        limites_aplicados_json=limits_applied,
+        equipo_id=payload.equipo_id,
+        linea_id=verificacion.linea_id,
+        operador_id=session.user_id,
+        started_at=inicio.isoformat(),
+        finished_at=fin.isoformat(),
+    )
+
+    resultado_prueba = ResultadoPrueba(
+        id=resultado_id,
+        verificacion_id=verificacion.id,
+        tipo_prueba=verificacion.tipo_prueba_final,
+        combustible=verificacion.combustible_validado,
+        resultado=resultado,
+        valores_medidos_json=valores_medidos,
+        limites_aplicados_json=limits_applied,
+        equipo_id=payload.equipo_id,
+        linea_id=verificacion.linea_id,
+        operador_id=session.user_id,
+        started_at=inicio,
+        finished_at=fin,
+        hash_integridad=hash_integridad,
+    )
+    db.add(resultado_prueba)
+    await db.flush()
+
+    # HU-102 (subtarea 4): antes de esto, el resultado de prueba solo vivía
+    # en Postgres local — el snapshot de Verificacion que sí se encola (ver
+    # state_machine.transition más abajo) no incluye valores_medidos_json ni
+    # limites_aplicados_json, así que el central nunca habría recibido las
+    # lecturas técnicas, solo el veredicto final.
+    await encolar_sync(
+        db,
+        entity_type="resultado_prueba",
+        entity_uuid=resultado_prueba.id,
+        operation="insert",
+        payload={
+            "id": str(resultado_prueba.id),
+            "verificacion_id": str(verificacion.id),
+            "tipo_prueba": verificacion.tipo_prueba_final.value,
+            "combustible": verificacion.combustible_validado,
+            "resultado": resultado.value if resultado else None,
+            "valores_medidos_json": valores_medidos,
+            "limites_aplicados_json": limits_applied,
+            "equipo_id": str(payload.equipo_id) if payload.equipo_id else None,
+            "linea_id": verificacion.linea_id,
+            "operador_id": str(session.user_id) if session.user_id else None,
+            "started_at": inicio.isoformat(),
+            "finished_at": fin.isoformat(),
+            "hash_integridad": hash_integridad,
+        },
     )
 
     verificacion.resultado_final = (

@@ -1819,3 +1819,73 @@ divergencia (`3ef9e9b`).
   (nadie más pusheó a esa rama entre medio esta vez).
 
 **Pendiente real: sin cambios.**
+
+## HU-089: bloquear dos pruebas activas del mismo vehículo en la misma línea (2026-09-14)
+
+Subtarea 2 de HU-089 (Etapa 10), única pieza sin construir de esa historia
+— la inmutabilidad de prueba en proceso/finalizada y el flujo autorizado de
+reemplazo ya existían (máquina de estados + reimpresión/corrección con
+motivo, ver secciones de arriba). Commit `972aacc` sobre `etapa1-y-siox`,
+pusheado. 201 pruebas (199 → 201).
+
+- `pruebas.configurar_prueba` responde 409 si ya existe otro expediente con
+  la misma placa y línea en `PRUEBA_CONFIGURADA` o `PRUEBA_EN_PROCESO`.
+  Basta con guardar en este único punto de entrada: si el segundo
+  expediente nunca llega a `PRUEBA_CONFIGURADA`, tampoco puede llegar a
+  `PRUEBA_EN_PROCESO` (que exige ese estado de origen).
+- **Hallazgo real al implementarlo**: `vehiculo_id` no identifica al mismo
+  vehículo físico entre expedientes distintos — `POST /api/expedientes`
+  crea una fila `Vehiculo` nueva en cada llamada, incluso para la misma
+  placa (no hay deduplicación por placa en `expedientes.crear_expediente`).
+  La comparación real tuvo que hacerse por `Verificacion.placa`
+  (case-insensitive, `ilike` sin comodines), que si es el campo persistido
+  con la identidad del vehículo real.
+- Alcance deliberado: la regla es por vehículo **y línea** (texto literal
+  de la subtarea) — la misma placa en dos líneas distintas no se bloquea.
+
+## HU-102: hash de integridad del resultado de prueba (2026-09-14)
+
+Subtareas 3 y 4 de HU-102 (Etapa 12) — las únicas dos sin construir; las
+subtareas 1 y 2 (consultar expedientes locales sin internet, guardar
+resultado con id/hora/equipo/usuario) ya estaban cubiertas por la
+arquitectura existente (Postgres local, `UUIDPKMixin`, columnas de
+`ResultadoPrueba`). Commit sobre `etapa1-y-siox`, pendiente de push.
+203 pruebas (201 → 203).
+
+- `app/services/integridad.py` (nuevo): `calcular_hash_resultado_prueba`
+  — SHA-256 sobre una serialización canónica (JSON con claves ordenadas)
+  de los campos técnicos inmutables del resultado (lecturas, límites
+  aplicados, resultado, equipo, línea, operador, timestamps, atado al
+  `id` de la fila). El central puede recalcularlo sobre el payload
+  recibido y compararlo contra `hash_integridad` para detectar alteración
+  en tránsito — no protege contra un servidor local comprometido que
+  recalcule el hash también, solo corrupción/alteración accidental.
+- `ResultadoPrueba.hash_integridad` (columna nueva, `NOT NULL`,
+  migración `e2e5135e78d4`): el `id` de la fila ahora se genera
+  explícitamente en Python (`uuid.uuid4()`) ANTES del insert, en vez de
+  dejarlo al default de `UUIDPKMixin`, porque el hash necesita atarse a
+  un id concreto antes del `INSERT`. Migración con backfill: agrega la
+  columna nullable, calcula el hash de las filas existentes (la única de
+  `seed_demo.py` en dev) con la misma función de producción, y luego
+  fuerza `NOT NULL` — crearla directo como `NOT NULL` habría fallado
+  contra cualquier resultado ya guardado.
+- **Hallazgo real, subtarea 4**: antes de esto, el resultado de prueba
+  (lecturas técnicas completas) nunca se encolaba para el central — el
+  snapshot de `Verificacion` que sí se sincroniza
+  (`sync._serializar_verificacion`) no incluye
+  `valores_medidos_json`/`limites_aplicados_json`, y el evento
+  `resultado_prueba_guardado` en `event_log` solo guarda
+  `{"resultado": ..., "causales": ...}`, no las lecturas. El central
+  habría recibido el veredicto final pero nunca los datos técnicos que lo
+  sustentan. `guardar_resultado_prueba` ahora llama `encolar_sync(...,
+  entity_type="resultado_prueba", ...)` con el payload completo,
+  incluido `hash_integridad`.
+- Otros dos sitios que construían `ResultadoPrueba` directo (bypass del
+  endpoint, para pruebas y para `seed_demo.py`) tuvieron que actualizarse
+  para calcular su propio hash — `hash_integridad` es `NOT NULL`, así que
+  cualquier INSERT sin él falla ahora en cualquier camino, no solo en el
+  endpoint real.
+- Pendiente real: no hay endpoint ni proceso que lea `entity_type =
+  "resultado_prueba"` del lado del central porque el central mismo sigue
+  sin definirse (`enviar_uno_a_central` sigue siendo un stub) — el dato ya
+  queda encolado correctamente, falta el destino.

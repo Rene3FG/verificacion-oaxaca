@@ -28,6 +28,7 @@ from app.models.resultado_obd_sbd import ResultadoObdSbd
 from app.models.resultado_prueba import ResultadoPrueba
 from app.models.siox_consulta import EstadoSioxConsulta, SioxConsulta
 from app.models.vehiculo import Vehiculo
+from app.services.integridad import calcular_hash_resultado_prueba
 from app.models.verificacion import Verificacion
 from app.seed import TEST_USER2_ID, TEST_USER_ID
 from app.services.inspeccion_visual import CHECKLIST_INSPECCION_VISUAL
@@ -203,20 +204,39 @@ async def seed_demo() -> None:
             db.add(
                 ResultadoObdSbd(verificacion_id=verificacion.id, aplica=False)
             )
+            resultado_id = uuid.uuid4()
+            inicio, fin = _ahora(), _ahora()
+            valores_medidos = {"coefficient_absorption_final_k_m1": 0.35}
+            limites_aplicados = {"coefficient_absorption_final_k_m1": 0.5}
             db.add(
                 ResultadoPrueba(
+                    id=resultado_id,
                     verificacion_id=verificacion.id,
                     tipo_prueba=TipoPrueba.OPACIDAD,
                     combustible="diesel",
                     resultado=ResultadoPruebaEnum.APROBADO,
                     # Sección 4 del handoff ("Certificate Result Projection
                     # Contract v1"): único campo diésel que se sobreimprime.
-                    valores_medidos_json={"coefficient_absorption_final_k_m1": 0.35},
-                    limites_aplicados_json={"coefficient_absorption_final_k_m1": 0.5},
+                    valores_medidos_json=valores_medidos,
+                    limites_aplicados_json=limites_aplicados,
                     linea_id=1,
                     operador_id=TEST_USER_ID,
-                    started_at=_ahora(),
-                    finished_at=_ahora(),
+                    started_at=inicio,
+                    finished_at=fin,
+                    hash_integridad=calcular_hash_resultado_prueba(
+                        resultado_id=resultado_id,
+                        verificacion_id=verificacion.id,
+                        tipo_prueba=TipoPrueba.OPACIDAD.value,
+                        combustible="diesel",
+                        resultado=ResultadoPruebaEnum.APROBADO.value,
+                        valores_medidos_json=valores_medidos,
+                        limites_aplicados_json=limites_aplicados,
+                        equipo_id=None,
+                        linea_id=1,
+                        operador_id=TEST_USER_ID,
+                        started_at=inicio.isoformat(),
+                        finished_at=fin.isoformat(),
+                    ),
                 )
             )
             creados.append(placa)
