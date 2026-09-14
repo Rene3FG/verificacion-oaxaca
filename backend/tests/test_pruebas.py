@@ -650,6 +650,89 @@ async def test_configurar_diesel_propone_opacidad_y_no_admite_cambio(client, db_
     assert resp_cambio.status_code == 409
 
 
+async def test_configurar_bloquea_segunda_prueba_activa_misma_placa_y_linea(client, db_session):
+    """HU-089 (subtarea 2): un vehículo no puede tener dos pruebas activas a
+    la vez en la misma línea. `crear_expediente` crea un Vehiculo nuevo por
+    llamada (ni siquiera comparte vehiculo_id), así que la regla real solo
+    puede compararse por placa — se fuerza la misma placa a propósito."""
+
+    sesion = await _sesion_prueba(db_session)
+    placa = "TST0001"
+
+    expediente_1 = await crear_expediente(
+        db_session,
+        linea_id=1,
+        placa=placa,
+        estado=EstadoVerificacion.LISTO_PARA_PRUEBA,
+        combustible_validado="DIESEL",
+    )
+    await db_session.commit()
+
+    resp_1 = await client.post(
+        f"/api/pruebas/configurar/{expediente_1.id}?tipo_prueba=OPACIDAD",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp_1.status_code == 200
+
+    expediente_2 = await crear_expediente(
+        db_session,
+        linea_id=1,
+        placa=placa,
+        estado=EstadoVerificacion.LISTO_PARA_PRUEBA,
+        combustible_validado="DIESEL",
+    )
+    await db_session.commit()
+
+    resp_2 = await client.post(
+        f"/api/pruebas/configurar/{expediente_2.id}?tipo_prueba=OPACIDAD",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp_2.status_code == 409
+    assert "prueba activa" in resp_2.json()["detail"]
+
+    await db_session.refresh(expediente_2)
+    assert expediente_2.estado == EstadoVerificacion.LISTO_PARA_PRUEBA
+
+
+async def test_configurar_misma_placa_en_otra_linea_no_se_bloquea(client, db_session):
+    """La regla es por vehículo Y línea (HU-089) — la misma placa en una
+    línea distinta no debe considerarse conflicto."""
+
+    placa = "TST0002"
+
+    sesion_l1 = await _sesion_prueba(db_session, line_id=1)
+    expediente_l1 = await crear_expediente(
+        db_session,
+        linea_id=1,
+        placa=placa,
+        estado=EstadoVerificacion.LISTO_PARA_PRUEBA,
+        combustible_validado="DIESEL",
+    )
+    await db_session.commit()
+
+    resp_l1 = await client.post(
+        f"/api/pruebas/configurar/{expediente_l1.id}?tipo_prueba=OPACIDAD",
+        headers={"X-Session-Id": str(sesion_l1.id)},
+    )
+    assert resp_l1.status_code == 200
+
+    sesion_l2 = await _sesion_prueba(db_session, line_id=2)
+    expediente_l2 = await crear_expediente(
+        db_session,
+        linea_id=2,
+        placa=placa,
+        estado=EstadoVerificacion.LISTO_PARA_PRUEBA,
+        combustible_validado="DIESEL",
+    )
+    await db_session.commit()
+
+    resp_l2 = await client.post(
+        f"/api/pruebas/configurar/{expediente_l2.id}?tipo_prueba=OPACIDAD",
+        headers={"X-Session-Id": str(sesion_l2.id)},
+    )
+    assert resp_l2.status_code == 200
+
+
 async def test_cambio_dinamica_a_estatica_queda_auditado(client, db_session):
     """Regla #9: el cambio de DINAMICA a ESTATICA solo se permite con
     cambio_manual=true y motivo, y queda auditado con usuario, motivo y

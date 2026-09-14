@@ -124,6 +124,35 @@ async def configurar_prueba(
             ),
         )
 
+    # HU-089 (subtarea 2, Etapa 10): un mismo vehículo no puede tener dos
+    # pruebas activas a la vez en la misma línea. `vehiculo_id` no sirve para
+    # identificar "el mismo vehículo" entre expedientes distintos — cada
+    # POST /api/expedientes crea su propia fila Vehiculo incluso para la
+    # misma placa (ver expedientes.crear_expediente) — así que se compara por
+    # placa, que es el campo que de verdad identifica el vehículo físico.
+    otra_prueba_activa = await db.scalar(
+        select(Verificacion).where(
+            Verificacion.id != verificacion.id,
+            Verificacion.linea_id == verificacion.linea_id,
+            Verificacion.placa.ilike(verificacion.placa),
+            Verificacion.estado.in_(
+                [
+                    EstadoVerificacion.PRUEBA_CONFIGURADA,
+                    EstadoVerificacion.PRUEBA_EN_PROCESO,
+                ]
+            ),
+        )
+    )
+    if otra_prueba_activa is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"El vehículo con placa {verificacion.placa} ya tiene una "
+                f"prueba activa en esta línea (expediente {otra_prueba_activa.id}, "
+                f"estado {otra_prueba_activa.estado})."
+            ),
+        )
+
     es_gasolina = (verificacion.combustible_validado or "").upper() == "GASOLINA"
 
     excede_capacidad_dinamometro = False
