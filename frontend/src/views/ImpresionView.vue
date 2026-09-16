@@ -348,7 +348,7 @@ onMounted(cargarCola);
           recién al imprimir, ver 409 "Faltan datos obligatorios del
           certificado" en `calcularTipoCertificado`/`imprimir`), así que
           pueden venir vacíos si Captura todavía no los llenó. -->
-          <v-card class="mb-4" variant="outlined">
+          <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
             <v-card-title>Expediente completo</v-card-title>
             <v-card-subtitle class="text-wrap">
               Resultado y placas visibles para selección manual del tipo de certificado
@@ -422,7 +422,7 @@ onMounted(cargarCola);
             </v-card-text>
           </v-card>
 
-          <v-card class="mb-4" variant="outlined">
+          <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
             <v-card-title>Certificado</v-card-title>
             <v-card-text>
               <!-- Solo APROBADO requiere selección manual (Particular/Doble
@@ -456,7 +456,7 @@ onMounted(cargarCola);
           POST /folios/solicitar (solo folio/estado_expediente, ver
           backend/app/api/routers/folios.py) ni en ExpedienteCompleto, así
           que no se fabrican aquí; solo se muestra lo que sí es real. -->
-          <v-card class="mb-4" variant="outlined">
+          <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
             <v-card-title>Folio certificado</v-card-title>
             <v-card-text>
               <p class="mb-1">Folio: {{ expediente.folio_externo ?? "sin asignar" }}</p>
@@ -493,7 +493,7 @@ onMounted(cargarCola);
             </v-card-text>
           </v-card>
 
-          <v-card class="mb-4" variant="outlined">
+          <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
             <v-card-title>Vista previa</v-card-title>
             <v-card-subtitle class="text-wrap">Certificado y resultados</v-card-subtitle>
             <v-card-text>
@@ -513,7 +513,7 @@ onMounted(cargarCola);
         </v-col>
       </v-row>
 
-      <v-card class="mb-4" variant="outlined">
+      <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title>Impresión</v-card-title>
         <v-card-text>
           <!-- Hora Salida (regla 2 del frame "Cierre y reimpresión"): se
@@ -544,7 +544,7 @@ onMounted(cargarCola);
       placa) — acordado con René el 2026-09-03 para no duplicarlas aquí,
       ver nota en puedeMarcarFolioDanado arriba. -->
 
-      <v-card variant="outlined">
+      <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title>Cierre</v-card-title>
         <v-card-text>
           <p v-if="expediente.cerrado_at" class="text-caption text-medium-emphasis mb-2">

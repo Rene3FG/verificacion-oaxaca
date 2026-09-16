@@ -102,7 +102,7 @@
 
 .elevation-institucional-0 {
   box-shadow: none !important;
-  border: var(--elevation-0-border);
+  border: var(--elevation-0-border) !important;
 }
 .elevation-institucional-1 {
   box-shadow: var(--elevation-1) !important;
