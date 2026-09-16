@@ -1925,3 +1925,13 @@ ambos mostraban el nombre crudo de `EstadoVerificacion` (p. ej.
 **Pendiente real: sin cambios** respecto al plan del 2026-09-14 (los cinco
 bloqueadores A-E siguen sin resolver, agenda de 4 semanas vigente, PR #1
 sin confirmar).
+
+**Misma sesión, re-auditoría inmediata**: siguiendo la costumbre de este
+proyecto de re-auditar tras un fix, se buscó el mismo patrón (`exp.estado`
+crudo) en el resto de `frontend/src/views/`. Encontrado en las colas de
+`CapturaView.vue` y `PruebaView.vue` (subtítulo de cada fila de la lista de
+"Expedientes en curso") — corregido igual, con `textoEstado()`.
+`ImpresionView.vue` **no se tocó** (fuera del reparto de esta semana): se
+verificó que ya usa `ExpedienteHeader` para su chip y no tiene una lista
+propia con `estado` crudo, así que se beneficia del fix sin necesidad de
+editarlo.

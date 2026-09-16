@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { api } from "../api/client";
 import ExpedienteHeader from "../components/ExpedienteHeader.vue";
 import { useSessionStore } from "../stores/session";
+import { textoEstado } from "../utils/estado";
 
 const session = useSessionStore();
 
@@ -419,7 +420,7 @@ onMounted(() => {
               v-for="exp in expedientesEnCurso"
               :key="exp.id"
               :title="`Placa ${exp.placa}`"
-              :subtitle="exp.estado"
+              :subtitle="textoEstado(exp.estado)"
               @click="abrirExpediente(exp.id)"
             />
           </v-list>
