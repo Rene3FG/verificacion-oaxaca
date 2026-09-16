@@ -1,8 +1,8 @@
 <script setup>
 import { computed } from "vue";
-import { estadoColors } from "../plugins/vuetify";
 import { useSessionStore } from "../stores/session";
 import { formatearFecha } from "../utils/format";
+import { colorEstado, iconoEstado, textoEstado } from "../utils/estado";
 
 const props = defineProps({
   expediente: { type: Object, required: true },
@@ -15,21 +15,6 @@ const modeloAuto = computed(() => {
   if (!v) return null;
   return [v.marca, v.linea].filter(Boolean).join(" ") || null;
 });
-
-// Mapeo simplificado estado -> color semántico; ver guidelines de diseño
-// (sección "Estados visuales del expediente") para el catálogo completo.
-function colorEstado(estado) {
-  if (estado?.includes("RECHAZAD") || estado?.includes("ERROR") || estado?.includes("FALLIDA")) {
-    return estadoColors.rechazado;
-  }
-  if (estado?.includes("APROBAD") || estado === "IMPRESO") {
-    return estadoColors.aprobado;
-  }
-  if (estado?.includes("PROCESO") || estado?.includes("SOLICITADO")) {
-    return estadoColors.proceso;
-  }
-  return estadoColors.pendiente;
-}
 </script>
 
 <template>
@@ -38,8 +23,8 @@ function colorEstado(estado) {
       <div class="d-flex align-center flex-wrap ga-3 mb-3">
         <span class="text-h6">Expediente #{{ props.expediente.id?.slice(0, 8) }}</span>
         <v-spacer />
-        <v-chip :color="colorEstado(props.expediente.estado)" variant="flat">
-          {{ props.expediente.estado }}
+        <v-chip :color="colorEstado(props.expediente.estado)" :prepend-icon="iconoEstado(props.expediente.estado)" variant="flat">
+          {{ textoEstado(props.expediente.estado) }}
         </v-chip>
       </div>
 

@@ -1,8 +1,8 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
 import { api } from "../api/client";
-import { estadoColors } from "../plugins/vuetify";
 import { useSessionStore } from "../stores/session";
+import { colorEstado, iconoEstado, textoEstado } from "../utils/estado";
 
 const session = useSessionStore();
 
@@ -27,19 +27,6 @@ async function cargarMonitor() {
   } finally {
     cargandoMonitor.value = false;
   }
-}
-
-function colorEstado(estado) {
-  if (estado?.includes("RECHAZAD") || estado?.includes("ERROR") || estado?.includes("FALLIDA")) {
-    return estadoColors.rechazado;
-  }
-  if (estado?.includes("APROBAD") || estado === "IMPRESO") {
-    return estadoColors.aprobado;
-  }
-  if (estado?.includes("PROCESO") || estado?.includes("SOLICITADO")) {
-    return estadoColors.proceso;
-  }
-  return estadoColors.pendiente;
 }
 
 // --- Bitácora (HU-117) ---
@@ -579,8 +566,13 @@ onMounted(() => {
                   <td>{{ exp.linea_id }}</td>
                   <td>{{ exp.placa }}</td>
                   <td>
-                    <v-chip :color="colorEstado(exp.estado)" size="small" variant="flat">
-                      {{ exp.estado }}
+                    <v-chip
+                      :color="colorEstado(exp.estado)"
+                      :prepend-icon="iconoEstado(exp.estado)"
+                      size="small"
+                      variant="flat"
+                    >
+                      {{ textoEstado(exp.estado) }}
                     </v-chip>
                   </td>
                   <td>{{ new Date(exp.updated_at).toLocaleString() }}</td>
@@ -1014,7 +1006,7 @@ onMounted(() => {
                 v-for="exp in resultadosBusqueda"
                 :key="exp.id"
                 :title="`Placa ${exp.placa}`"
-                :subtitle="`${exp.estado} · certificado: ${exp.certificado_tipo ?? 'sin determinar'} · folio: ${exp.folio_externo ?? 'sin asignar'}`"
+                :subtitle="`${textoEstado(exp.estado)} · certificado: ${exp.certificado_tipo ?? 'sin determinar'} · folio: ${exp.folio_externo ?? 'sin asignar'}`"
                 @click="abrirExpedienteReimpresion(exp)"
               />
             </v-list>
@@ -1028,7 +1020,7 @@ onMounted(() => {
             <v-btn variant="text" size="small" @click="cerrarExpedienteReimpresion">Cerrar</v-btn>
           </v-card-title>
           <v-card-subtitle>
-            Estado: {{ expedienteReimpresion.estado }} · Certificado:
+            Estado: {{ textoEstado(expedienteReimpresion.estado) }} · Certificado:
             {{ expedienteReimpresion.certificado_tipo ?? "sin determinar" }} · Folio:
             {{ expedienteReimpresion.folio_externo ?? "sin asignar" }}
           </v-card-subtitle>
@@ -1103,7 +1095,8 @@ onMounted(() => {
               </div>
               <div>{{ evento.evento }}</div>
               <div v-if="evento.estado_anterior || evento.estado_nuevo" class="text-caption">
-                {{ evento.estado_anterior ?? "—" }} → {{ evento.estado_nuevo ?? "—" }}
+                {{ evento.estado_anterior ? textoEstado(evento.estado_anterior) : "—" }} →
+                {{ evento.estado_nuevo ? textoEstado(evento.estado_nuevo) : "—" }}
               </div>
             </v-timeline-item>
           </v-timeline>

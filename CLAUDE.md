@@ -1889,3 +1889,39 @@ arquitectura existente (Postgres local, `UUIDPKMixin`, columnas de
   "resultado_prueba"` del lado del central porque el central mismo sigue
   sin definirse (`enviar_uno_a_central` sigue siendo un stub) — el dato ya
   queda encolado correctamente, falta el destino.
+
+## HU-098–100: texto normalizado + ícono por estado, sin duplicar `colorEstado` (2026-09-15)
+
+Cierra el pendiente que la auditoría de Sebastián dejó marcado el
+2026-09-14 en el plan de trabajo (`~/Descargas/Plan_Verificentros_Oaxaca_
+2026-09-14.pdf`): `estadoColors` (`vuetify.js:36`) ya centralizaba el
+color, pero `SupervisorView.vue:32` duplicaba su propia copia de
+`colorEstado` en vez de reusar el patrón de `ExpedienteHeader.vue`, y
+ambos mostraban el nombre crudo de `EstadoVerificacion` (p. ej.
+`PENDIENTE_IMPRESION`) en vez de texto legible + ícono.
+
+- **`frontend/src/utils/estado.js`** (nuevo): único lugar con el mapeo
+  completo de los 26 valores de `EstadoVerificacion` a `{texto, icono}`
+  en español, más `colorEstado` (movida aquí, misma lógica de siempre) —
+  `ExpedienteHeader.vue` y `SupervisorView.vue` importan las tres
+  funciones en vez de tener su propia copia o mostrar el enum crudo.
+- **`ExpedienteHeader.vue`** (compartido por Captura/Prueba/Impresión): el
+  chip de estado ahora usa `prepend-icon` + `textoEstado()` en vez del
+  string crudo.
+- **`SupervisorView.vue`**: chip del Monitor, subtítulo/detalle de la
+  pestaña Reimpresión, y la línea `estado_anterior → estado_nuevo` de la
+  Bitácora — los cuatro puntos donde se mostraba el estado — ahora usan el
+  util compartido.
+- **Alcance deliberado**: no se tocó `ImpresionView.vue` (semana 1 de la
+  agenda de 4 semanas es exclusiva de Sebastián para esa vista) ni ningún
+  otro punto de la auditoría de diseño (sección 13, mapeo de tokens de
+  spacing/radius/elevación) — esto es solo el punto HU-098-100, ya
+  identificado como no bloqueado por ningún bloqueador crítico.
+- 203 pruebas backend siguen pasando (sin cambios backend). Build de
+  frontend (`npx vite build`) limpio. **Sin extensión de Chrome conectada
+  en esta sesión** — no se pudo verificar visualmente en navegador, mismo
+  gap que se repite en varias sesiones de este archivo.
+
+**Pendiente real: sin cambios** respecto al plan del 2026-09-14 (los cinco
+bloqueadores A-E siguen sin resolver, agenda de 4 semanas vigente, PR #1
+sin confirmar).
