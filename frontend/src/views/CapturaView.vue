@@ -284,7 +284,7 @@ onMounted(cargarExpedientesEnCurso);
         {{ error }}
       </v-alert>
 
-      <v-card class="mb-4" variant="outlined">
+      <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title>Nuevo expediente</v-card-title>
         <v-card-text class="d-flex ga-3 align-center flex-wrap">
           <v-text-field
@@ -302,7 +302,7 @@ onMounted(cargarExpedientesEnCurso);
         </v-card-text>
       </v-card>
 
-      <v-card variant="outlined">
+      <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title>Expedientes en curso en esta línea</v-card-title>
         <v-card-text>
           <v-progress-circular v-if="cargandoLista" indeterminate />
@@ -344,7 +344,7 @@ onMounted(cargarExpedientesEnCurso);
 
       <v-progress-linear v-if="cargandoExpediente" indeterminate class="mb-4" />
 
-      <v-card class="mb-4" variant="outlined">
+      <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title class="d-flex align-center ga-2">
           Consulta SIOX
           <v-chip :color="SIOX_ESTADO_COLOR[estadoSiox]" variant="flat" size="small">
@@ -418,7 +418,7 @@ onMounted(cargarExpedientesEnCurso);
         </v-card-text>
       </v-card>
 
-      <v-card class="mb-4" variant="outlined">
+      <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title class="d-flex align-center ga-2">
           Datos del vehículo
           <v-chip size="small" variant="tonal">
@@ -536,7 +536,7 @@ onMounted(cargarExpedientesEnCurso);
         </v-card-text>
       </v-card>
 
-      <v-card class="mb-4" variant="outlined">
+      <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title>Propietario y domicilio</v-card-title>
         <v-card-text>
           <v-row dense>
@@ -633,7 +633,7 @@ onMounted(cargarExpedientesEnCurso);
         </v-card-text>
       </v-card>
 
-      <v-card variant="outlined">
+      <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-text class="d-flex align-center ga-3 flex-wrap">
           <v-btn
             color="primary"

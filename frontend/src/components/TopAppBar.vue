@@ -31,9 +31,9 @@ onMounted(() => {
 onBeforeUnmount(detenerPolling);
 
 function colorConexion(conexion, enError) {
-  if (conexion === "en_linea") return "green";
-  if (conexion === "sincronizando") return "amber";
-  if (conexion === "pendientes") return enError > 0 ? "red" : "grey";
+  if (conexion === "en_linea") return "success";
+  if (conexion === "sincronizando") return "warning";
+  if (conexion === "pendientes") return enError > 0 ? "error" : "grey";
   return "grey";
 }
 
@@ -52,7 +52,7 @@ function textoConexion(conexion, estadoSync) {
   <v-app-bar color="primary" density="comfortable">
     <v-app-bar-title>Sistema de Verificación Vehicular</v-app-bar-title>
 
-    <v-chip v-if="session.estacion" class="mr-2" variant="flat" color="white">
+    <v-chip v-if="session.estacion" class="mr-2 rounded-institucional-full" variant="flat" color="white">
       {{ session.estacion.station_type }} · {{ session.estacion.center_id }}
       <template v-if="session.estacion.line_id">
         · Línea {{ session.estacion.line_id }}
@@ -60,7 +60,7 @@ function textoConexion(conexion, estadoSync) {
     </v-chip>
 
     <v-chip
-      class="mr-2"
+      class="mr-2 rounded-institucional-full"
       variant="flat"
       :color="colorConexion(session.conexion, session.estadoSync?.en_error)"
     >

@@ -1935,3 +1935,86 @@ crudo) en el resto de `frontend/src/views/`. Encontrado en las colas de
 verificó que ya usa `ExpedienteHeader` para su chip y no tiene una lista
 propia con `estado` crudo, así que se beneficia del fix sin necesidad de
 editarlo.
+
+## Diseño institucional: Login/TopAppBar/Captura/Prueba/Supervisor (2026-09-17)
+
+Adelanta la tarea de semana 3 de la agenda de 4 semanas (diseño de René en
+Login/TopAppBar/Captura/Prueba/Supervisor), calendarizada para empezar el
+2026-09-25 — decisión explícita del usuario de arrancarla antes, al cerrar
+Sebastián semana 1 (QA de Impresión, `frontend-impresion-central@c43c9a3`,
+sin bloqueos) un día antes de su plazo.
+
+El sistema de diseño (paleta guinda, tipografía Inter, spacing/radius/
+elevación institucionales) solo existía en `frontend-impresion-central`
+(`plugins/vuetify.js`, `styles/main.css`, fuentes en `main.js`) — no
+existía en absoluto en esta rama. Se portó tal cual (mismo valor de cada
+token, sin reextraer del Figma) en vez de reconstruirlo, para que ambas
+ramas converjan al mismo sistema cuando se unifiquen.
+
+- **Infraestructura portada**: `guinda`/`estadoColors` y el theme
+  `verificentrosOaxaca` en `plugins/vuetify.js` (antes: theme "light" sin
+  personalizar); `styles/main.css` (nuevo, tipografía + custom properties
+  de spacing/radius/elevación + utilidades `rounded-institucional-*`/
+  `elevation-institucional-*`); fuentes Inter autohospedadas
+  (`@fontsource/inter`) en `main.js` — no CDN de Google Fonts, porque el
+  sistema debe operar sin internet (Etapa 12). `estado.js` ya calculaba
+  colores vía `estadoColors` (HU-098-100, 2026-09-15) así que no hizo
+  falta tocarlo: los chips de estado heredan los tonos semánticos nuevos
+  (success/warning/error/info) sin cambios de código.
+- **Patrón mecánico aplicado a cada card de flujo** (idéntico al usado por
+  Sebastián en Impresión el 2026-09-15): `variant="outlined"` →
+  `variant="flat"` + clases `rounded-institucional-lg
+  elevation-institucional-0` (radio 12px, borde en vez de sombra). Aplicado
+  a todas las cards de `LoginView.vue`, `CapturaView.vue`, `PruebaView.vue`
+  y `SupervisorView.vue` (las 8 pestañas: Monitor, Permisos, Sincronización,
+  Folios, Límites, Equipos, Semestre, Reimpresión). Los 4 diálogos modales
+  de `SupervisorView.vue` (Bitácora, Reasignar línea, Nuevo permiso, Nuevo
+  límite) solo ganan el radio (`rounded-institucional-lg`), no el borde
+  plano — un modal flotante necesita su propia elevación para distinguirse
+  del fondo, mismo criterio que ya documenta el comentario de
+  `elevation-institucional-0` en `main.css` sobre no forzar el token donde
+  el componente ya tiene su propio criterio de elevación.
+- **`ExpedienteHeader.vue`** (compartido por Captura/Prueba/Impresión) se
+  actualizó igual y quedó **byte-a-byte idéntico** a la versión ya aplicada
+  en `frontend-impresion-central` — mismo diff exacto (card + chip de
+  estado con `rounded-institucional-full`), para no generar un conflicto
+  de merge futuro entre ramas sobre este archivo compartido.
+- **`ImpresionView.vue` no se tocó** — es la vista donde Sebastián y René
+  ya tienen commits propios divergentes desde antes (ver "Re-auditoría"
+  del 2026-09-07); aplicarle el diseño desde esta rama pisaría o
+  duplicaría el trabajo ya hecho en `frontend-impresion-central@c43c9a3`.
+  Cuando se unifiquen las ramas, `ImpresionView.vue` de Sebastián ya trae
+  el diseño aplicado — no hace falta repetirlo aquí.
+- **`TopAppBar.vue`**: `color="primary"` ya heredaba el theme por defecto,
+  así que la barra ya se ve guinda solo con el theme nuevo, sin tocar la
+  plantilla. `colorConexion` se corrigió de colores Material crudos
+  (`green`/`amber`/`red`) a los tokens semánticos del theme
+  (`success`/`warning`/`error`) para que el chip de sincronización siga el
+  mismo criterio que `estadoColors`. Los chips del app bar ganan
+  `rounded-institucional-full`.
+- **Corrección de un error de mi propio script de reemplazo**: la primera
+  pasada (regex sobre `class="X" variant="outlined"`) también agarró dos
+  `v-btn` de `CapturaView.vue` ("Guardar cambios" en las cards de Vehículo
+  y Propietario/domicilio) que no son cards — revertidos a su
+  `variant="outlined"` original antes de construir, ya que Foundations no
+  define un tratamiento de botones distinto del que Vuetify trae por
+  default (mismo criterio que el comentario de `main.css`: las utilidades
+  `-institucional-` son para cards, no un override global de componentes).
+- **203 pruebas de backend siguen pasando** (sin cambios de backend en
+  esta sesión). `npx vite build` limpio. **Sin extensión de Chrome
+  conectada en esta sesión** — no se pudo verificar visualmente en
+  navegador, mismo gap que se repite en varias sesiones de este archivo;
+  la extensión conectada del 2026-09-04 sigue siendo la única prueba
+  visual completa que se ha hecho de este frontend.
+
+**Pendiente real:**
+1. Prueba visual en Chrome de todo lo de esta sesión — sin hacer.
+2. Falta pasar el mapeo completo de spacing (`--space-*`) a los
+   componentes (paddings/gaps de las cards); esta sesión solo cubrió
+   radius y elevación, que era lo más visible/mecánico.
+3. NOx y Factor Lambda en gasolina dinámico, rango CO+CO2, ambigüedad del
+   folio en el snapshot — sin cambios, siguen en la lista de siempre.
+4. Semana 2 de la agenda (Sebastián audita visualmente Acceso/Captura/
+   Prueba/Supervisor, solo lectura) sigue vigente pese a que el diseño se
+   adelantó — su auditoría ahora encontrará el diseño ya aplicado, no
+   pendiente.

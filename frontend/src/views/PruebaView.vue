@@ -404,7 +404,7 @@ onMounted(() => {
         {{ error }}
       </v-alert>
 
-      <v-card variant="outlined">
+      <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title class="d-flex align-center ga-2">
           Expedientes en curso en esta línea
           <v-spacer />
@@ -451,7 +451,7 @@ onMounted(() => {
       <!-- Corregir datos del vehículo: si Inspección Visual (o cualquier
            paso de Prueba) detecta un error en los datos, se corrige aquí
            sin devolver el expediente a Captura. -->
-      <v-card class="mb-4" variant="outlined">
+      <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title class="d-flex align-center ga-2" style="cursor: pointer" @click="editandoVehiculo = !editandoVehiculo">
           Datos del vehículo
           <span class="text-body-2 text-medium-emphasis">(fuente: {{ expediente.vehiculo?.fuente_datos }})</span>
@@ -491,7 +491,7 @@ onMounted(() => {
       <!-- Inspección visual: 8 puntos reales del diseño, cada uno
            Bueno/Malo/No aplica. El resultado lo determina el backend
            (cualquier MALO rechaza); aquí solo se anticipa. -->
-      <v-card v-if="expediente.estado === 'INSPECCION_VISUAL_PENDIENTE'" class="mb-4" variant="outlined">
+      <v-card v-if="expediente.estado === 'INSPECCION_VISUAL_PENDIENTE'" class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title>Inspección visual</v-card-title>
         <v-card-text>
           <div
@@ -559,8 +559,7 @@ onMounted(() => {
       <!-- OBD/SBD -->
       <v-card
         v-else-if="['INSPECCION_VISUAL_APROBADA', 'OBD_PENDIENTE', 'OBD_SOLICITADO', 'OBD_RECIBIDO'].includes(expediente.estado)"
-        class="mb-4"
-        variant="outlined"
+        class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat"
       >
         <v-card-title>OBD / SBD</v-card-title>
         <v-card-text>
@@ -600,8 +599,7 @@ onMounted(() => {
       <!-- Prueba dinámica/estática/opacidad -->
       <v-card
         v-else-if="['LISTO_PARA_PRUEBA', 'PRUEBA_CONFIGURADA', 'PRUEBA_EN_PROCESO'].includes(expediente.estado)"
-        class="mb-4"
-        variant="outlined"
+        class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat"
       >
         <v-card-title>Prueba</v-card-title>
         <v-card-text>

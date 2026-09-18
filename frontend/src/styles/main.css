@@ -1,0 +1,115 @@
+/* Tipografía institucional — Figma "01 — Foundations" (sección 13 del
+   handoff, 2026-09-07). Vuetify aplica su propia font-family por defecto;
+   se sobreescribe aquí en vez de en cada componente. */
+.v-application {
+  font-family: "Inter", sans-serif !important;
+}
+
+.text-h1,
+.v-application .text-h1 {
+  font-size: 32px !important;
+  line-height: 40px !important;
+  font-weight: 600 !important;
+}
+
+.text-h2,
+.v-application .text-h2 {
+  font-size: 24px !important;
+  line-height: 32px !important;
+  font-weight: 600 !important;
+}
+
+.text-h3,
+.v-application .text-h3 {
+  font-size: 20px !important;
+  line-height: 28px !important;
+  font-weight: 600 !important;
+}
+
+.text-body-1,
+.v-application .text-body-1 {
+  font-size: 16px !important;
+  line-height: 24px !important;
+  font-weight: 500 !important;
+}
+
+.text-body-2,
+.v-application .text-body-2 {
+  font-size: 14px !important;
+  line-height: 20px !important;
+  font-weight: 500 !important;
+}
+
+.text-caption,
+.v-application .text-caption {
+  font-size: 12px !important;
+  line-height: 16px !important;
+}
+
+/* Spacing, radius y elevación institucionales — Figma "01 — Foundations"
+   (sección 13, confirmados el 09-09). Se exponen como custom properties
+   + utilidades con prefijo `-institucional-` (mismo criterio que
+   `elevation-institucional-*`) — Vuetify genera sus propias clases
+   `.rounded`/`.rounded-sm`/`.rounded-lg`/`.rounded-xl` a partir del prop
+   `rounded` de sus componentes; usar esos nombres aquí las pisaría con
+   `!important` en cualquier vista que use ese prop más adelante, aunque
+   hoy ningún `.vue` del proyecto lo use todavía (verificado por grep).
+   No se fuerzan sobre componentes de Vuetify que ya tienen su propio
+   criterio de elevación (v-card variant="flat"/"outlined", v-btn
+   variant="text", etc.), porque Foundations no especifica qué combinación
+   de props usa cada uno; usar estas clases es decisión de cada vista, no
+   un override global. */
+:root {
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-48: 48px;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-full: 36px;
+
+  --elevation-0-border: 1px solid #e5e7eb;
+  --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --elevation-2: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --elevation-3: 0 6px 18px rgba(0, 0, 0, 0.14);
+}
+
+.rounded-institucional-sm {
+  border-radius: var(--radius-sm) !important;
+}
+.rounded-institucional-md {
+  border-radius: var(--radius-md) !important;
+}
+.rounded-institucional-lg {
+  border-radius: var(--radius-lg) !important;
+}
+.rounded-institucional-xl {
+  border-radius: var(--radius-xl) !important;
+}
+.rounded-institucional-2xl {
+  border-radius: var(--radius-2xl) !important;
+}
+.rounded-institucional-full {
+  border-radius: var(--radius-full) !important;
+}
+
+.elevation-institucional-0 {
+  box-shadow: none !important;
+  border: var(--elevation-0-border) !important;
+}
+.elevation-institucional-1 {
+  box-shadow: var(--elevation-1) !important;
+}
+.elevation-institucional-2 {
+  box-shadow: var(--elevation-2) !important;
+}
+.elevation-institucional-3 {
+  box-shadow: var(--elevation-3) !important;
+}

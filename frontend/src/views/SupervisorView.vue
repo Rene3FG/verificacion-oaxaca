@@ -535,7 +535,7 @@ onMounted(() => {
 
     <v-window v-model="tab">
       <v-window-item value="monitor">
-        <v-card variant="outlined">
+        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title class="d-flex align-center ga-2">
             Expedientes en curso
             <v-spacer />
@@ -592,7 +592,7 @@ onMounted(() => {
       </v-window-item>
 
       <v-window-item value="permisos">
-        <v-card variant="outlined">
+        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title class="d-flex align-center ga-2">
             Permisos por estación
             <v-spacer />
@@ -659,7 +659,7 @@ onMounted(() => {
       </v-window-item>
 
       <v-window-item value="sincronizacion">
-        <v-card variant="outlined">
+        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title class="d-flex align-center ga-2">
             Sincronización con el central
             <v-spacer />
@@ -725,7 +725,7 @@ onMounted(() => {
       </v-window-item>
 
       <v-window-item value="folios">
-        <v-card class="mb-4" variant="outlined">
+        <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title class="d-flex align-center ga-2">
             Inventario local de folios
             <v-spacer />
@@ -763,7 +763,7 @@ onMounted(() => {
           </v-card-text>
         </v-card>
 
-        <v-card variant="outlined">
+        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title>Registrar lote por rango</v-card-title>
           <v-card-text>
             <v-select
@@ -798,7 +798,7 @@ onMounted(() => {
       </v-window-item>
 
       <v-window-item value="limites">
-        <v-card variant="outlined">
+        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title class="d-flex align-center ga-2">
             Límites de emisión (NOM-041/NOM-045)
             <v-spacer />
@@ -846,7 +846,7 @@ onMounted(() => {
       </v-window-item>
 
       <v-window-item value="equipos">
-        <v-card variant="outlined">
+        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title class="d-flex align-center ga-2">
             Capacidad del dinamómetro por línea
             <v-spacer />
@@ -908,7 +908,7 @@ onMounted(() => {
       </v-window-item>
 
       <v-window-item value="semestre">
-        <v-card class="mb-4" variant="outlined">
+        <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title class="d-flex align-center ga-2">
             Semestre y prórroga
             <v-spacer />
@@ -942,7 +942,7 @@ onMounted(() => {
           </v-card-text>
         </v-card>
 
-        <v-card variant="outlined">
+        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title>Configurar prórroga del 1er periodo</v-card-title>
           <v-card-subtitle class="text-wrap">
             Hasta la fecha final, se imprime Semestre 1 para todos los vehículos sin importar
@@ -977,7 +977,7 @@ onMounted(() => {
       </v-window-item>
 
       <v-window-item value="reimpresion">
-        <v-card class="mb-4" variant="outlined">
+        <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title>Buscar expediente</v-card-title>
           <v-card-subtitle class="text-wrap">
             Folio dañado/reimpresión por daño y corrección de tipo solo aplican con
@@ -1013,7 +1013,7 @@ onMounted(() => {
           </v-card-text>
         </v-card>
 
-        <v-card v-if="expedienteReimpresion" variant="outlined">
+        <v-card v-if="expedienteReimpresion" class="rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title class="d-flex align-center ga-2">
             Placa {{ expedienteReimpresion.placa }}
             <v-spacer />
@@ -1079,7 +1079,7 @@ onMounted(() => {
     </v-window>
 
     <v-dialog v-model="bitacoraAbierta" max-width="640">
-      <v-card>
+      <v-card class="rounded-institucional-lg">
         <v-card-title>
           Bitácora · Placa {{ bitacoraExpediente?.placa }}
         </v-card-title>
@@ -1109,7 +1109,7 @@ onMounted(() => {
     </v-dialog>
 
     <v-dialog v-model="reasignarAbierto" max-width="480">
-      <v-card>
+      <v-card class="rounded-institucional-lg">
         <v-card-title>
           Reasignar línea · Placa {{ reasignarExpediente?.placa }}
         </v-card-title>
@@ -1148,7 +1148,7 @@ onMounted(() => {
     </v-dialog>
 
     <v-dialog v-model="permisoAbierto" max-width="480">
-      <v-card>
+      <v-card class="rounded-institucional-lg">
         <v-card-title>Nuevo permiso</v-card-title>
         <v-card-text>
           <v-select
@@ -1199,7 +1199,7 @@ onMounted(() => {
     </v-dialog>
 
     <v-dialog v-model="limiteAbierto" max-width="480">
-      <v-card>
+      <v-card class="rounded-institucional-lg">
         <v-card-title>Nuevo límite de emisión</v-card-title>
         <v-card-text>
           <v-select

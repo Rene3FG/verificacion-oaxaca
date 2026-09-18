@@ -30,7 +30,7 @@ async function entrar() {
 
 <template>
   <v-container class="fill-height" max-width="480">
-    <v-card class="w-100" variant="elevated">
+    <v-card class="w-100 rounded-institucional-lg elevation-institucional-0" variant="flat">
       <v-card-title>Sistema de Verificación Vehicular</v-card-title>
       <v-card-text>
         <v-alert v-if="session.error" type="error" class="mb-4">

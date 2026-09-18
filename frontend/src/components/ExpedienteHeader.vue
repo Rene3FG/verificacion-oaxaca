@@ -18,12 +18,17 @@ const modeloAuto = computed(() => {
 </script>
 
 <template>
-  <v-card class="mb-4" variant="outlined">
+  <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
     <v-card-text>
       <div class="d-flex align-center flex-wrap ga-3 mb-3">
         <span class="text-h6">Expediente #{{ props.expediente.id?.slice(0, 8) }}</span>
         <v-spacer />
-        <v-chip :color="colorEstado(props.expediente.estado)" :prepend-icon="iconoEstado(props.expediente.estado)" variant="flat">
+        <v-chip
+          :color="colorEstado(props.expediente.estado)"
+          :prepend-icon="iconoEstado(props.expediente.estado)"
+          class="rounded-institucional-full"
+          variant="flat"
+        >
           {{ textoEstado(props.expediente.estado) }}
         </v-chip>
       </div>
