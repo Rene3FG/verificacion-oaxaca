@@ -24,6 +24,7 @@ async def test_reasignar_linea_sin_supervisor_responde_403(client, db_session):
 
 async def test_reasignar_linea_exitosa(client, db_session):
     sesion = await crear_sesion_supervisor(db_session, center_id="OAX-01")
+    await crear_estacion(db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=2)
     expediente = await crear_expediente(
         db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.LISTO_PARA_PRUEBA
     )
@@ -117,3 +118,34 @@ async def test_reasignar_linea_de_otro_centro_responde_403(client, db_session):
     )
 
     assert resp.status_code == 403
+
+
+async def test_reasignar_a_linea_inexistente_responde_422(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session, center_id="OAX-01")
+    expediente = await crear_expediente(
+        db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.LISTO_PARA_PRUEBA
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/expedientes/{expediente.id}/reasignar-linea",
+        json={"nueva_linea_id": 99, "motivo": "prueba"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 422
+
+
+async def test_reasignar_con_prueba_en_proceso_responde_409(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session, center_id="OAX-01")
+    await crear_estacion(db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=2)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.PRUEBA_EN_PROCESO
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/expedientes/{expediente.id}/reasignar-linea",
+        json={"nueva_linea_id": 2, "motivo": "prueba"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 409

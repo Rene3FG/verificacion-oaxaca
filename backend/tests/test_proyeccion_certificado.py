@@ -88,3 +88,21 @@ def test_calcular_semestre_con_prorroga_activa_fuerza_semestre_1():
 
 def test_calcular_semestre_despues_de_la_prorroga_vuelve_a_semestre_2():
     assert calcular_semestre(datetime.date(2026, 9, 1), datetime.date(2026, 8, 31)) == 2
+
+
+def test_hoy_oaxaca_usa_hora_local_no_utc(monkeypatch):
+    """A las 00:30 UTC del 1 de julio ya son las 18:30 del 30 de junio en
+    Oaxaca: sigue siendo 1er semestre / la prórroga aún no vence."""
+
+    import datetime
+
+    from app.services import semestre
+
+    class _Reloj(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime.datetime(2026, 7, 1, 0, 30, tzinfo=datetime.timezone.utc)
+            return base.astimezone(tz) if tz else base
+
+    monkeypatch.setattr(semestre.datetime, "datetime", _Reloj)
+    assert semestre.hoy_oaxaca() == datetime.date(2026, 6, 30)

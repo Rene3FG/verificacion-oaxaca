@@ -15,7 +15,7 @@ from app.models.verificacion import Verificacion
 from app.schemas.event_log import EventLogRead
 from app.schemas.verificacion import ExpedienteCompleto, ExpedienteRead
 from app.services.proyeccion_certificado import calcular_semestre
-from app.services.semestre import obtener_prorroga_activa
+from app.services.semestre import hoy_oaxaca, obtener_prorroga_activa
 
 router = APIRouter(prefix="/api/supervision", tags=["supervision"])
 
@@ -133,7 +133,7 @@ async def consultar_semestre(
     estado aparte."""
 
     prorroga = await obtener_prorroga_activa(db)
-    hoy = datetime.datetime.now(datetime.timezone.utc).date()
+    hoy = hoy_oaxaca()
     return SemestreRead(
         semestre_actual=calcular_semestre(hoy, prorroga.fecha_final if prorroga else None),
         prorroga_activa=prorroga is not None,
@@ -173,7 +173,7 @@ async def configurar_prorroga(
     await db.commit()
 
     prorroga = await obtener_prorroga_activa(db)
-    hoy = datetime.datetime.now(datetime.timezone.utc).date()
+    hoy = hoy_oaxaca()
     return SemestreRead(
         semestre_actual=calcular_semestre(hoy, prorroga.fecha_final if prorroga else None),
         prorroga_activa=prorroga is not None,

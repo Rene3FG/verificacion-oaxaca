@@ -395,3 +395,27 @@ async def test_consultar_expediente_de_otra_linea_responde_403(client, db_sessio
     )
 
     assert resp.status_code == 403
+
+
+async def test_consultar_con_expediente_ya_normalizado_responde_409_sin_llamar_a_siox(
+    client, db_session, monkeypatch
+):
+    llamadas = []
+
+    async def _fake(placa: str):
+        llamadas.append(placa)
+        return SioxConsultaResultado(status="EXITOSA", raw="", normalized={"marca": "X"})
+
+    monkeypatch.setattr("app.api.routers.siox.consultar_placa", _fake)
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.DATOS_NORMALIZADOS
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/siox/consultar/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+
+    assert resp.status_code == 409
+    assert llamadas == []

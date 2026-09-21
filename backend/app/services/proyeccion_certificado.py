@@ -14,6 +14,7 @@ sigue viniendo de la misma fila de `ResultadoPrueba`, inmutable."""
 
 import datetime
 
+from app.services.semestre import hoy_oaxaca
 from app.models.enums import MetodoPrueba, TipoCertificado
 from app.models.resultado_prueba import ResultadoPrueba
 from app.models.verificacion import Verificacion
@@ -133,7 +134,7 @@ def generar_proyeccion_certificado(
         "test_result_id": test_result_id,
         "method": metodo.value if metodo else None,
         "semestre": calcular_semestre(
-            datetime.datetime.now(datetime.timezone.utc).date(), fecha_final_prorroga
+            hoy_oaxaca(), fecha_final_prorroga
         ),
         "fields": fields,
         "evaluation_result": evaluation_result,

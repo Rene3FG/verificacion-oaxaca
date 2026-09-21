@@ -2152,9 +2152,17 @@ uno a uno). Corregidos, con pruebas (219 en total):
 - Contraseñas >72 bytes: 422 al crear/restablecer, `verify_password` → False
   (401) en vez de 500.
 
-**Pendientes de esa revisión**: `consultar_siox` sin validar estado (puede
-pisar correcciones y dar 500); fecha UTC en semestre/prórroga (usar hora de
-Oaxaca); `reasignar_linea` acepta líneas inexistentes y estados en prueba;
-`ImpresionView.vue` no muestra el motivo real del error de vista previa (blob);
-rango de lotes sin tope; migración de folios sin migrar asignados;
-`/estaciones/logout` sin autenticación; `PATCH` de vehículo sin límite de estado.
+**Segunda tanda (2026-09-21, 223 pruebas):**
+- `consultar_siox` responde 409 (sin llamar a SIOX) si el expediente no está en
+  `CREADO`/`DATOS_SIOX_CONSULTADOS`.
+- Semestre/prórroga usan la fecha local de Oaxaca (`semestre.hoy_oaxaca`,
+  `America/Mexico_City`) en vez de UTC.
+- `reasignar_linea`: 422 si la línea no existe en el centro (líneas de las
+  estaciones activas), 409 con prueba configurada/en proceso.
+- `ImpresionView.vue` (Sebastián, autorizado): el error de vista previa ya
+  muestra el motivo real (el cuerpo del error llega como Blob), la pestaña se
+  abre dentro del clic (popup blocker) y se revoca la URL del objeto.
+
+**Pendientes de esa revisión**: rango de lotes sin tope; migración de folios sin
+migrar asignados; `/estaciones/logout` sin autenticación; `PATCH` de vehículo sin
+límite de estado; `procesar_pendientes` puede dejar filas atascadas en backoff.

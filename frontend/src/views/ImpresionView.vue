@@ -197,17 +197,41 @@ async function solicitarFolio() {
   }
 }
 
+// Con responseType "blob" el cuerpo de un error también llega como Blob: hay
+// que leerlo como texto/JSON para mostrar el motivo real (p. ej. 409 "Primero
+// debe calcularse el tipo de certificado") en vez de un mensaje genérico.
+async function detalleDeError(err, respaldo) {
+  let data = err.response?.data;
+  if (data instanceof Blob) {
+    try {
+      data = JSON.parse(await data.text());
+    } catch {
+      return respaldo;
+    }
+  }
+  const detail = data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail) && detail[0]?.msg) return detail[0].msg;
+  return respaldo;
+}
+
 async function verVistaPrevia() {
   cargandoVistaPrevia.value = true;
   error.value = null;
+  // Se abre la pestaña de inmediato (dentro del clic) y se le asigna el PDF
+  // al llegar: abrirla después del await la bloquea el popup blocker.
+  const ventana = window.open("", "_blank");
   try {
     const { data } = await api.get(`/impresion/vista-previa/${expediente.value.id}`, {
       responseType: "blob",
     });
     const url = URL.createObjectURL(new Blob([data], { type: "application/pdf" }));
-    window.open(url, "_blank");
+    if (ventana) ventana.location.href = url;
+    else window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   } catch (err) {
-    error.value = err.response?.data?.detail || "No se pudo generar la vista previa.";
+    ventana?.close();
+    error.value = await detalleDeError(err, "No se pudo generar la vista previa.");
   } finally {
     cargandoVistaPrevia.value = false;
   }

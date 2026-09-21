@@ -17,6 +17,7 @@ from app.api.deps import (
 from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
 from app.models.event_log import EventLog
 from app.models.vehiculo import Vehiculo
+from app.models.workstation import Workstation
 from app.models.verificacion import Verificacion
 from app.schemas.vehiculo import VehiculoRead, VehiculoUpdate
 from app.schemas.verificacion import ExpedienteCompleto, ExpedienteCreate, ExpedienteRead
@@ -181,6 +182,30 @@ async def reasignar_linea(
     if payload.nueva_linea_id == verificacion.linea_id:
         raise HTTPException(
             status_code=409, detail="El expediente ya está en esa línea."
+        )
+    if verificacion.estado in (
+        EstadoVerificacion.PRUEBA_CONFIGURADA,
+        EstadoVerificacion.PRUEBA_EN_PROCESO,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede reasignar con una prueba configurada o en proceso en su línea.",
+        )
+    lineas_del_centro = set(
+        (
+            await db.execute(
+                select(Workstation.line_id).where(
+                    Workstation.center_id == verificacion.centro_id,
+                    Workstation.is_active.is_(True),
+                    Workstation.line_id.is_not(None),
+                )
+            )
+        ).scalars()
+    )
+    if payload.nueva_linea_id not in lineas_del_centro:
+        raise HTTPException(
+            status_code=422,
+            detail=f"La línea {payload.nueva_linea_id} no existe en el centro {verificacion.centro_id}.",
         )
 
     linea_anterior = verificacion.linea_id

@@ -36,6 +36,11 @@ STATUS_MAP = {
 # en siox_consultas.response_normalized.
 VEHICULO_FIELDS = {"niv", "marca", "linea", "modelo", "tipo_vehiculo"}
 
+ESTADOS_CONSULTABLES_SIOX = {
+    EstadoVerificacion.CREADO,
+    EstadoVerificacion.DATOS_SIOX_CONSULTADOS,
+}
+
 
 @router.post("/consultar/{expediente_id}")
 async def consultar_siox(
@@ -47,6 +52,16 @@ async def consultar_siox(
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
+
+    # Solo se consulta con el expediente sin datos importados: un reintento
+    # sobre uno ya importado/normalizado/avanzado pisaría las correcciones
+    # del operador y luego fallaría la transición (500). Se rechaza antes de
+    # gastar la llamada externa.
+    if verificacion.estado not in ESTADOS_CONSULTABLES_SIOX:
+        raise HTTPException(
+            status_code=409,
+            detail=f"No se puede consultar SIOX con el expediente en estado {verificacion.estado}.",
+        )
 
     consultas_previas = (
         await db.execute(
