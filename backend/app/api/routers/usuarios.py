@@ -1,11 +1,13 @@
+import datetime
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionContext, get_db, requiere_supervisor
 from app.models.usuario import CatUsuario
+from app.models.workstation import StationSession
 from app.schemas.usuario import UsuarioCreate, UsuarioRead, UsuarioUpdate
 from app.services.auth import hash_password
 
@@ -75,6 +77,15 @@ async def actualizar_usuario(
     for campo, valor in cambios.items():
         if valor is not None:
             setattr(usuario, campo, valor)
+
+    if cambios.get("is_active") is False:
+        # Desactivar cierra sus sesiones abiertas (además de que
+        # get_current_session ya rechaza a usuarios inactivos).
+        await db.execute(
+            update(StationSession)
+            .where(StationSession.user_id == usuario.id, StationSession.status == "activa")
+            .values(status="cerrada", logout_at=datetime.datetime.now(datetime.timezone.utc))
+        )
 
     await db.commit()
     await db.refresh(usuario)

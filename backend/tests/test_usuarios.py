@@ -125,3 +125,53 @@ async def test_actualizar_usuario_inexistente_responde_404(client, db_session):
         json={"nombre_completo": "X"},
     )
     assert resp.status_code == 404
+
+
+async def test_usuario_desactivado_pierde_acceso_y_sus_sesiones_se_cierran(client, db_session):
+    from app.models.workstation import StationSession
+
+    sup = await crear_sesion_supervisor(db_session)
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    objetivo = await crear_usuario(db_session)
+    sesion = await crear_sesion_activa(db_session, estacion=estacion, user_id=objetivo.id)
+    await db_session.commit()
+    sesion_id, objetivo_id = sesion.id, objetivo.id
+    h_obj = {"X-Session-Id": str(sesion_id)}
+
+    assert (await client.get("/api/expedientes", headers=h_obj)).status_code != 401
+
+    resp = await client.patch(
+        f"/api/usuarios/{objetivo_id}",
+        headers={"X-Session-Id": str(sup.id)},
+        json={"is_active": False},
+    )
+    assert resp.status_code == 200
+
+    assert (await client.get("/api/expedientes", headers=h_obj)).status_code == 401
+    db_session.expire_all()
+    assert (await db_session.get(StationSession, sesion_id)).status == "cerrada"
+
+
+async def test_supervisor_de_otro_centro_no_es_supervisor_aqui(client, db_session):
+    from tests.conftest import crear_permiso
+
+    # Supervisor en OAX-01 y solo operador en OAX-02.
+    usuario = await crear_usuario(db_session)
+    await crear_permiso(
+        db_session, user_id=usuario.id, station_type=StationType.CAPTURA,
+        center_id="OAX-01", line_id=None, can_supervise=True,
+    )
+    await crear_permiso(
+        db_session, user_id=usuario.id, station_type=StationType.CAPTURA,
+        center_id="OAX-02", line_id=1, can_supervise=False,
+    )
+    est_b = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-02", line_id=1
+    )
+    sesion_b = await crear_sesion_activa(db_session, estacion=est_b, user_id=usuario.id)
+    await db_session.commit()
+
+    resp = await client.get("/api/usuarios", headers={"X-Session-Id": str(sesion_b.id)})
+    assert resp.status_code == 403

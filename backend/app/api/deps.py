@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.enums import StationType
+from app.models.usuario import CatUsuario
 from app.models.workstation import StationSession, UserStationPermission, Workstation
 
 __all__ = [
@@ -55,6 +56,11 @@ async def get_current_session(
     if estacion is None or not estacion.is_active:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
 
+    # Un usuario desactivado pierde acceso aunque su sesión siga "activa".
+    usuario = await db.get(CatUsuario, sesion.user_id)
+    if usuario is not None and not usuario.is_active:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+
     return SessionContext(
         session_id=sesion.id,
         user_id=sesion.user_id,
@@ -99,6 +105,9 @@ async def es_supervisor(session: SessionContext, db: AsyncSession) -> bool:
         select(UserStationPermission).where(
             UserStationPermission.user_id == session.user_id,
             UserStationPermission.can_supervise.is_(True),
+            # Supervisor lo es del centro donde tiene sesión, no de cualquier
+            # centro donde tenga un permiso de supervisor.
+            UserStationPermission.center_id == session.center_id,
         )
     )
     return permiso.scalars().first() is not None
