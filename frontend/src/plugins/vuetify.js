@@ -3,6 +3,7 @@ import "vuetify/styles";
 import { createVuetify } from "vuetify";
 import * as components from "vuetify/components";
 import * as directives from "vuetify/directives";
+import { es } from "vuetify/locale";
 
 // Escala de guinda institucional — extraída de Figma "01 — Foundations"
 // (sección 13 del handoff). Portada desde `frontend-impresion-central`
@@ -42,6 +43,7 @@ export const estadoColors = {
 };
 
 export default createVuetify({
+  locale: { locale: "es", fallback: "es", messages: { es } },
   components,
   directives,
   theme: {

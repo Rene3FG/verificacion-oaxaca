@@ -40,6 +40,22 @@ def _ahora() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
+# Sección 7 del handoff: /imprimir exige propietario/domicilio/PBV/Tracción.
+# Los expedientes que esperan impresión los llevan completos para que la demo
+# pueda llegar hasta imprimir sin un 409 por datos faltantes.
+DATOS_CERTIFICADO = dict(
+    tarjeta_circulacion="TC-0451288",
+    propietario_estado="Oaxaca",
+    propietario_municipio="Oaxaca de Juárez",
+    propietario_codigo_postal="68000",
+    propietario_colonia="Reforma",
+    propietario_calle="Av. Universidad",
+    propietario_numero_exterior="120",
+    pbv="2500",
+    traccion="4x2",
+)
+
+
 async def _existe(db, placa: str) -> bool:
     result = await db.execute(select(Verificacion).where(Verificacion.placa == placa))
     return result.scalar_one_or_none() is not None
@@ -188,6 +204,7 @@ async def seed_demo() -> None:
                 tipo_vehiculo="vehiculo",
                 combustible="diesel",
                 fuente_datos=FuenteDatos.SIOX,
+                **DATOS_CERTIFICADO,
             )
             verificacion = await _crear_expediente(
                 db,
@@ -253,6 +270,7 @@ async def seed_demo() -> None:
                 tipo_vehiculo="vehiculo",
                 combustible="gasolina",
                 fuente_datos=FuenteDatos.SIOX,
+                **DATOS_CERTIFICADO,
             )
             verificacion = await _crear_expediente(
                 db,

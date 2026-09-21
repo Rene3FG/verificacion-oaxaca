@@ -2123,3 +2123,13 @@ en Prueba. Sin defectos visuales encontrados. Nota de datos demo:
 `MKD-674-D` (seed_demo) no tiene propietario/domicilio/PBV/Tracción, así que
 `/imprimir` respondería 409 por campos obligatorios faltantes; no es un bug,
 el seed es anterior a esos campos.
+
+## Demo completo + locale es (2026-09-21)
+
+- `seed_demo.py`: `MKD-674-D` y `RSC-238-F` (los que esperan impresión) nacen con
+  propietario/domicilio/tarjeta/PBV/Tracción (`DATOS_CERTIFICADO`), así el
+  demo llega a imprimir sin 409 por datos faltantes. El seed es idempotente y
+  no actualiza filas ya creadas: en BDs existentes se aplicó por SQL.
+- `plugins/vuetify.js`: `locale: es`. Hallazgo de la auditoría de Captura: el
+  stepper mostraba "PREVIOUS/NEXT" en inglés; ahora "ANTERIOR/SIGUIENTE"
+  (y el resto de textos internos de Vuetify).
