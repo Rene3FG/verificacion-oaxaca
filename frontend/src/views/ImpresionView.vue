@@ -62,26 +62,6 @@ const municipioEstado = computed(() => {
   return partes.length ? partes.join(", ") : "—";
 });
 
-// Sección 7 del handoff: estos campos del vehículo son obligatorios para
-// imprimir (el backend responde 409 con el detalle si faltan) — aquí solo
-// se anticipa la advertencia; la validación real es del servidor.
-const CAMPOS_CERTIFICADO_OBLIGATORIOS = [
-  "tarjeta_circulacion",
-  "propietario_estado",
-  "propietario_municipio",
-  "propietario_codigo_postal",
-  "propietario_colonia",
-  "propietario_calle",
-  "propietario_numero_exterior",
-  "pbv",
-  "traccion",
-];
-const faltanDatosCertificado = computed(() => {
-  const v = expediente.value?.vehiculo;
-  if (!v) return false;
-  return CAMPOS_CERTIFICADO_OBLIGATORIOS.some((campo) => !v[campo]);
-});
-
 const puedeCalcularTipo = computed(
   () =>
     expediente.value && ESTADOS_SOLICITABLES.includes(expediente.value.estado)
@@ -92,11 +72,21 @@ const puedeSolicitarFolio = computed(
     !expediente.value.folio_externo &&
     ESTADOS_SOLICITABLES.includes(expediente.value.estado)
 );
+// Sección 3 del handoff: el primer clic (desde FOLIO_ASIGNADO) lo puede
+// hacer cualquier operador; el reintento técnico (desde IMPRESION_FALLIDA,
+// la impresora ya falló una vez) es exclusivo de Supervisor — el backend
+// devuelve 403 si no, pero se deshabilita aquí de una vez para no dejar
+// que el operador se tope con el error.
+const reintentoRequiereSupervisor = computed(
+  () =>
+    expediente.value?.estado === "IMPRESION_FALLIDA" && !session.puedeSupervisar
+);
 const puedeImprimir = computed(
   () =>
     expediente.value &&
     expediente.value.folio_externo &&
-    ESTADOS_IMPRIMIBLES.includes(expediente.value.estado)
+    ESTADOS_IMPRIMIBLES.includes(expediente.value.estado) &&
+    !reintentoRequiereSupervisor.value
 );
 const puedeCerrar = computed(
   () =>
@@ -104,11 +94,22 @@ const puedeCerrar = computed(
     expediente.value.estado === "IMPRESO" &&
     !expediente.value.cerrado_at
 );
-// Sección 3 del handoff: folio dañado ANTES de imprimir — solo aplica con
-// un folio ya asignado y sin haber impreso todavía (no cuenta como
-// reimpresión). Después de imprimir es otra operación, exclusiva de
-// Supervisor (ver pestaña "Reimpresión" en SupervisorView.vue).
-const puedeMarcarDanado = computed(() => expediente.value?.estado === "FOLIO_ASIGNADO");
+// Sección 3 del handoff: antes del primer clic en Imprimir (folio ya
+// asignado, nada impreso todavía), cualquier operador puede marcar el
+// folio físico como dañado — sin Supervisor, sin motivo.
+const puedeMarcarFolioDanado = computed(
+  () => expediente.value?.estado === "FOLIO_ASIGNADO"
+);
+// Reimpresión por daño y corrección de tipo post-impresión: ya no viven
+// aquí. Esos estados (IMPRESO/CERRADO_*) no aparecen en esta cola y salen
+// de ella en cuanto se abren, así que la card equivalente que existió
+// brevemente en este archivo (commit 7c9c36d) solo era alcanzable
+// mientras el expediente seguía cargado en memoria — se perdía en cuanto
+// se navegaba fuera. René resolvió el mismo hueco con
+// GET /api/supervision/expedientes/buscar?placa= + la pestaña
+// "Reimpresión" en SupervisorView.vue (su archivo), así que ambas
+// operaciones quedan solo ahí — acordado con él el 2026-09-03 para no
+// duplicarlas en dos pantallas.
 
 async function cargarCola() {
   cargandoLista.value = true;
@@ -219,6 +220,14 @@ async function imprimir() {
     const { data } = await api.post(`/impresion/imprimir/${expediente.value.id}`);
     expediente.value.estado = data.estado_expediente;
     if (data.estado_expediente === "IMPRESO") {
+      // El endpoint no devuelve hora_salida en la respuesta (solo
+      // estado_expediente/intentos), aunque el backend sí la fija en la
+      // primera impresión exitosa — mismo patrón de bug que
+      // folio_asignado_at/cerrado_at (ver commit 2026-08-26), misma
+      // solución: aproximar con "ahora" hasta el próximo fetch real.
+      if (!expediente.value.hora_salida) {
+        expediente.value.hora_salida = new Date().toISOString();
+      }
       aviso.value = "Certificado impreso correctamente.";
     } else {
       error.value = `La impresora no respondió. Intento número ${data.intentos}.`;
@@ -230,30 +239,32 @@ async function imprimir() {
   }
 }
 
-async function recargarExpediente() {
-  try {
-    const { data } = await api.get(`/expedientes/${expediente.value.id}`);
-    expediente.value = data;
-  } catch {
-    // Si falla el refresco se deja el estado local tal cual — no es un
-    // error nuevo que reportar, la operación que lo disparó ya reportó
-    // el suyo si falló.
-  }
-}
-
 async function marcarFolioDanado() {
   marcandoDanado.value = true;
   error.value = null;
   try {
-    const { data } = await api.post(`/impresion/folio/marcar-danado/${expediente.value.id}`);
-    aviso.value = `Folio ${data.folio_danado} marcado como dañado. Nuevo folio: ${data.folio_externo}.`;
+    const { data } = await api.post(
+      `/impresion/folio/marcar-danado/${expediente.value.id}`
+    );
+    expediente.value.folio_externo = data.folio_externo;
+    expediente.value.folio_asignado_at = new Date().toISOString();
+    aviso.value = `Folio ${data.folio_danado} marcado como dañado. Folio nuevo: ${data.folio_externo}.`;
   } catch (err) {
-    error.value = err.response?.data?.detail || "No se pudo marcar el folio dañado.";
+    error.value = err.response?.data?.detail || "No se pudo marcar el folio como dañado.";
+    // Sin folios de ese tipo disponibles, el expediente cae a FOLIO_ERROR
+    // (backend/app/api/routers/impresion.py: marcar_folio_danado) — se
+    // recarga el detalle para reflejar el estado real en vez de dejar la
+    // UI mostrando el folio viejo como si siguiera vigente.
+    try {
+      const { data: fresco } = await api.get(`/impresion/cola`);
+      const actualizado = fresco.find((e) => e.id === expediente.value.id);
+      if (actualizado) expediente.value.estado = actualizado.estado;
+    } catch {
+      // Sin conexión o expediente ya fuera de la cola: se deja el error
+      // original visible, no hay más que hacer aquí.
+    }
   } finally {
     marcandoDanado.value = false;
-    // Refresca siempre: si el inventario del tipo se agotó, el backend ya
-    // transicionó el expediente a FOLIO_ERROR antes de devolver el 409.
-    await recargarExpediente();
   }
 }
 
@@ -337,7 +348,7 @@ onMounted(cargarCola);
           recién al imprimir, ver 409 "Faltan datos obligatorios del
           certificado" en `calcularTipoCertificado`/`imprimir`), así que
           pueden venir vacíos si Captura todavía no los llenó. -->
-          <v-card class="mb-4" variant="outlined">
+          <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
             <v-card-title>Expediente completo</v-card-title>
             <v-card-subtitle class="text-wrap">
               Resultado y placas visibles para selección manual del tipo de certificado
@@ -407,26 +418,11 @@ onMounted(cargarCola);
                   <span class="text-caption text-medium-emphasis d-block">Código postal</span>
                   <span>{{ expediente.vehiculo?.propietario_codigo_postal ?? "—" }}</span>
                 </v-col>
-                <v-col v-if="expediente.hora_salida" cols="6">
-                  <span class="text-caption text-medium-emphasis d-block">Hora salida</span>
-                  <span>{{ formatearFecha(expediente.hora_salida) }}</span>
-                </v-col>
               </v-row>
-              <v-alert
-                v-if="faltanDatosCertificado"
-                type="warning"
-                density="compact"
-                variant="tonal"
-                class="mt-3"
-              >
-                Faltan datos obligatorios del certificado (domicilio, tarjeta de
-                circulación, PBV o tracción) — la impresión será rechazada hasta
-                que Captura o Prueba los complete.
-              </v-alert>
             </v-card-text>
           </v-card>
 
-          <v-card class="mb-4" variant="outlined">
+          <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
             <v-card-title>Certificado</v-card-title>
             <v-card-text>
               <!-- Solo APROBADO requiere selección manual (Particular/Doble
@@ -460,7 +456,7 @@ onMounted(cargarCola);
           POST /folios/solicitar (solo folio/estado_expediente, ver
           backend/app/api/routers/folios.py) ni en ExpedienteCompleto, así
           que no se fabrican aquí; solo se muestra lo que sí es real. -->
-          <v-card class="mb-4" variant="outlined">
+          <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
             <v-card-title>Folio certificado</v-card-title>
             <v-card-text>
               <p class="mb-1">Folio: {{ expediente.folio_externo ?? "sin asignar" }}</p>
@@ -481,11 +477,14 @@ onMounted(cargarCola);
               >
                 {{ expediente.estado === "FOLIO_ERROR" ? "Reintentar" : "Solicitar folio" }}
               </v-btn>
+              <!-- Sección 3 del handoff: antes del primer clic en Imprimir,
+              el Operador puede marcar el folio físico como dañado (sin
+              Supervisor, sin motivo) — el backend asigna el siguiente folio
+              del mismo tipo automáticamente. -->
               <v-btn
-                v-if="puedeMarcarDanado"
                 variant="text"
-                color="warning"
                 class="ml-2"
+                :disabled="!puedeMarcarFolioDanado"
                 :loading="marcandoDanado"
                 @click="marcarFolioDanado"
               >
@@ -494,7 +493,7 @@ onMounted(cargarCola);
             </v-card-text>
           </v-card>
 
-          <v-card class="mb-4" variant="outlined">
+          <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
             <v-card-title>Vista previa</v-card-title>
             <v-card-subtitle class="text-wrap">Certificado y resultados</v-card-subtitle>
             <v-card-text>
@@ -514,9 +513,19 @@ onMounted(cargarCola);
         </v-col>
       </v-row>
 
-      <v-card class="mb-4" variant="outlined">
+      <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title>Impresión</v-card-title>
         <v-card-text>
+          <!-- Hora Salida (regla 2 del frame "Cierre y reimpresión"): se
+          fija una sola vez, en el primer clic EXITOSO de Imprimir; ningún
+          camino posterior (reintento, cierre, reimpresión, corrección) la
+          modifica — ver backend/app/api/routers/impresion.py:imprimir_certificado. -->
+          <p v-if="expediente.hora_salida" class="text-caption text-medium-emphasis mb-2">
+            Hora Salida: {{ formatearFecha(expediente.hora_salida) }}
+          </p>
+          <p v-if="reintentoRequiereSupervisor" class="text-caption text-error mb-2">
+            La impresora falló antes; reintentar requiere una sesión de Supervisor.
+          </p>
           <v-btn
             color="primary"
             :disabled="!puedeImprimir"
@@ -528,7 +537,14 @@ onMounted(cargarCola);
         </v-card-text>
       </v-card>
 
-      <v-card variant="outlined">
+      <!-- Reimpresión por certificado físico dañado y corrección de tipo
+      después de imprimir: exclusivas de Supervisor, y solo alcanzan al
+      expediente una vez que ya salió de esta cola (IMPRESO/CERRADO_*).
+      Viven en SupervisorView.vue (pestaña "Reimpresión", buscador por
+      placa) — acordado con René el 2026-09-03 para no duplicarlas aquí,
+      ver nota en puedeMarcarFolioDanado arriba. -->
+
+      <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title>Cierre</v-card-title>
         <v-card-text>
           <p v-if="expediente.cerrado_at" class="text-caption text-medium-emphasis mb-2">

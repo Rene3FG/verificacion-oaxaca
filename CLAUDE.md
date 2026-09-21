@@ -2018,3 +2018,72 @@ ramas converjan al mismo sistema cuando se unifiquen.
    Prueba/Supervisor, solo lectura) sigue vigente pese a que el diseño se
    adelantó — su auditoría ahora encontrará el diseño ya aplicado, no
    pendiente.
+
+## Sección 13 aplicada a ImpresionView.vue y ExpedienteHeader.vue (2026-09-15)
+
+Nota: este `CLAUDE.md` (rama `frontend-impresion-central`) quedó desactualizado
+frente al de `etapa1-y-siox` desde hace varias sesiones — no se intentó
+sincronizar todo el historial aquí, solo se documenta el trabajo de hoy.
+
+Tarea de la semana 1 de la agenda de 4 semanas (acordada el 2026-09-14,
+ver `~/Descargas/Plan_Verificentros_Oaxaca_2026-09-14.pdf`): aplicar los
+tokens de spacing/radius/elevación de Foundations (sección 13,
+`frontend/src/styles/main.css`, completos desde el 2026-09-09) a
+`ImpresionView.vue` y `ExpedienteHeader.vue` — hasta hoy los tokens
+existían como CSS pero ninguna vista real los consumía.
+
+- **Commit `b3cd07a` (2026-09-09) encontrado sin pushear**: quedaba en un
+  worktree local (`.claude/worktrees/fix-rounded-collision`) de una sesión
+  anterior, nunca subido a origin. `frontend-impresion-central` en origin
+  no había avanzado desde entonces (`git fetch` limpio), así que se
+  pusheó directo (fast-forward, sin conflicto) antes de seguir.
+- **Sincronizado `frontend/src/utils/estado.js`** desde `etapa1-y-siox`
+  (HU-098-100, texto normalizado + ícono por estado, sesión de hoy en esa
+  rama) y aplicado el mismo cambio a `ExpedienteHeader.vue` de esta rama
+  — el archivo era textualmente idéntico a la versión pre-HU-098-100 de
+  `etapa1-y-siox` (el "rediseño Figma" de Sebastián de la sesión 2026-08-24
+  ya había convergido con esa versión por syncs posteriores), así que no
+  hizo falta merge manual.
+- **Clases institucionales aplicadas** (`variant="flat"` +
+  `rounded-institucional-lg elevation-institucional-0`, mismo tratamiento
+  en las 7 cards: header compartido + las 6 de `ImpresionView.vue` —
+  Expediente completo, Certificado, Folio certificado, Vista previa,
+  Impresión, Cierre): se eligió `elevation-institucional-0` (borde
+  institucional sin sombra) en vez de `-1`/`-2` para preservar el look
+  "bordered" que ya tenían con `variant="outlined"`, no introducir un
+  estilo de card flotante nuevo sin que Foundations lo pida explícitamente
+  (el propio comentario del CSS dice que la combinación de props es
+  decisión de cada vista, no un override global). Botones no se tocaron —
+  su forma ya la resuelve el default de Vuetify, Foundations no define un
+  radius específico de botón.
+- **Bug real encontrado y corregido al verificar en Chrome**:
+  `.elevation-institucional-0` en `main.css` ponía `border-radius`/
+  `box-shadow` con `!important` pero el `border` sin `!important` — Vuetify
+  lo pisaba y las cards quedaban sin borde visible pese a que la clase
+  estaba aplicada correctamente (confirmado con `getComputedStyle`:
+  `border-radius: 12px` y `box-shadow: none` sí llegaban, `border: 0px
+  solid rgba(0,0,0,0.12)` no). Corregido agregando `!important` al
+  `border`, mismo criterio que el resto del bloque. Sin este fix, aplicar
+  la clase a cualquier vista futura habría parecido no hacer nada.
+- Verificado visualmente en Chrome (login `operador1`/estación
+  `IMPRESION-REFORMA-01`, `vite --port 5174` proxeando al backend de
+  `etapa1-y-siox` en :8000): cola con `ExpedienteHeader` normalizado
+  (chip "Pendiente de impresión"/"Pendiente de impresión (rechazo)" con
+  ícono), y las 6 cards del detalle con el borde institucional + radio de
+  12px consistente, antes y después del fix de `!important`.
+- Build de frontend (`npx vite build`) limpio. Sin pruebas backend que
+  correr (cambio 100% frontend, sin tocar backend/).
+
+**Pendiente real de esta tarea**: el resto de la agenda de semana 1 sigue
+igual — QA de Impresión (jueves) y ajustes/colchón (viernes), originalmente
+asignados a Sebastián. `CapturaView.vue`/`PruebaView.vue`/
+`SupervisorView.vue`/`LoginView.vue`/`TopAppBar.vue` (semana 3, rama
+`etapa1-y-siox`) no se tocaron aquí — fuera del alcance de esta tarea.
+
+## Merge con frontend-impresion-central (2026-09-21)
+
+Se integró `origin/frontend-impresion-central` (c43c9a3) en `etapa1-y-siox`.
+Conflictos reales en CLAUDE.md, vuetify.js, Captura/Prueba/Supervisor/ImpresionView.
+Criterio: en archivos de René se conservó su versión (ya incluía la de Sebastián
+por syncs previos); `ImpresionView.vue` se tomó completo de Sebastián (su
+territorio). Build de frontend limpio.
