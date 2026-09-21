@@ -8,6 +8,7 @@ confirmada en la revisión del Figma 2026-08-24): un resultado RECHAZADO
 elegibilidad automática entre Particular/Doble Cero/Intensivo todavía; la
 selección correcta queda bajo responsabilidad del Operador de Impresión."""
 
+import html as _html
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from weasyprint import HTML
@@ -186,13 +187,13 @@ def generar_pdf_certificado(
       <body style="font-family: sans-serif;">
         <h1>Certificado de Verificación Vehicular</h1>
         <p><strong>Tipo:</strong> {tipo_certificado}</p>
-        <p><strong>Folio:</strong> {verificacion.folio_externo or "—"}</p>
+        <p><strong>Folio:</strong> {_html.escape(str(verificacion.folio_externo or "—"))}</p>
         <p><strong>Semestre:</strong> {semestre or "—"}</p>
         <p><strong>Expediente:</strong> {verificacion.id}</p>
-        <p><strong>Placa:</strong> {verificacion.placa}</p>
-        <p><strong>Marca / línea:</strong> {vehiculo.marca or "—"} {vehiculo.linea or ""}</p>
-        <p><strong>Modelo:</strong> {vehiculo.modelo or "—"}</p>
-        <p><strong>Combustible:</strong> {verificacion.combustible_validado or "—"}</p>
+        <p><strong>Placa:</strong> {_html.escape(str(verificacion.placa))}</p>
+        <p><strong>Marca / línea:</strong> {_html.escape(str(vehiculo.marca or "—"))} {_html.escape(str(vehiculo.linea or ""))}</p>
+        <p><strong>Modelo:</strong> {_html.escape(str(vehiculo.modelo or "—"))}</p>
+        <p><strong>Combustible:</strong> {_html.escape(str(verificacion.combustible_validado or "—"))}</p>
         <p><strong>Método de prueba:</strong> {metodo_etiqueta}</p>
         <p><strong>Resultado final:</strong> {resultado}</p>
         {bloque_mediciones}

@@ -175,3 +175,20 @@ async def test_supervisor_de_otro_centro_no_es_supervisor_aqui(client, db_sessio
 
     resp = await client.get("/api/usuarios", headers={"X-Session-Id": str(sesion_b.id)})
     assert resp.status_code == 403
+
+
+async def test_password_de_mas_de_72_bytes_responde_422_no_500(client, db_session):
+    sup = await crear_sesion_supervisor(db_session)
+    await db_session.commit()
+    resp = await client.post(
+        "/api/usuarios",
+        headers={"X-Session-Id": str(sup.id)},
+        json={"username": "largo", "password": "ñ" * 40, "nombre_completo": "X"},
+    )
+    assert resp.status_code == 422
+
+
+def test_verify_password_con_mas_de_72_bytes_devuelve_false():
+    from app.services.auth import hash_password, verify_password
+
+    assert verify_password("x" * 100, hash_password("corta-clave-1")) is False

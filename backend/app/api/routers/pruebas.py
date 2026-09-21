@@ -49,7 +49,8 @@ router = APIRouter(prefix="/api/pruebas", tags=["pruebas"])
 async def _obtener_expediente_de_la_linea(
     db: AsyncSession, session: SessionContext, expediente_id: uuid.UUID
 ) -> Verificacion:
-    verificacion = await db.get(Verificacion, expediente_id)
+    # Bloqueo de fila: evita dos ResultadoPrueba/transiciones por doble clic.
+    verificacion = await db.get(Verificacion, expediente_id, with_for_update=True)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)

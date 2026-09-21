@@ -345,3 +345,31 @@ async def test_expediente_completo_llega_a_cerrado(client, db_session):
     )
     assert resp_cerrar.status_code == 200
     assert resp_cerrar.json()["estado_expediente"] == EstadoVerificacion.CERRADO_APROBADO.value
+
+
+async def test_solicitar_folio_de_tipo_distinto_al_certificado_responde_409(client, db_session):
+    sesion_supervisor = await crear_sesion_supervisor(db_session)
+    await _registrar_lote(
+        client, sesion_supervisor, tipo_certificado="PARTICULAR",
+        folio_inicio="OAX-000101", folio_fin="OAX-000102",
+    )
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
+    )
+    expediente.certificado_tipo = "RECHAZO"
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/folios/solicitar/{expediente.id}",
+        params={"tipo_certificado": "PARTICULAR"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 409
+    assert "no coincide" in resp.json()["detail"]
+    disponibles = (
+        await db_session.execute(
+            select(Folio).where(Folio.folio == "OAX-000101", Folio.estatus == EstadoFolio.DISPONIBLE)
+        )
+    ).scalar_one_or_none()
+    assert disponibles is not None

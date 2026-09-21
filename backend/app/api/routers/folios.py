@@ -97,10 +97,24 @@ async def solicitar_folio(
     expediente reutiliza cualquier folio ya asignado/impreso del mismo tipo
     en vez de tomar uno nuevo del inventario en cada reintento."""
 
-    verificacion = await db.get(Verificacion, expediente_id)
+    # Bloqueo de fila: dos solicitudes simultáneas no consumen dos folios; la
+    # segunda espera y cae en la rama idempotente de abajo.
+    verificacion = await db.get(Verificacion, expediente_id, with_for_update=True)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
+
+    if (
+        verificacion.certificado_tipo is not None
+        and verificacion.certificado_tipo != tipo_certificado.value
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"El tipo de folio '{tipo_certificado.value}' no coincide con el "
+                f"certificado del expediente ('{verificacion.certificado_tipo}')."
+            ),
+        )
 
     folio_existente = (
         await db.execute(

@@ -98,3 +98,29 @@ def test_pdf_rechazo_por_inspeccion_visual_sin_bloque_de_mediciones():
     pdf = generar_pdf_certificado(_verificacion(), _vehiculo(), proyeccion)
 
     assert pdf.startswith(b"%PDF")
+
+
+def test_pdf_escapa_html_de_campos_de_texto_libre(monkeypatch):
+    """Placa/marca/línea vienen de captura o SIOX: no deben interpretarse
+    como HTML (p. ej. <img src=file:///...>) al pasar por WeasyPrint."""
+
+    capturado = {}
+
+    class _HTML:
+        def __init__(self, string):
+            capturado["html"] = string
+
+        def write_pdf(self):
+            return b"%PDF"
+
+    monkeypatch.setattr("app.services.certificado.HTML", _HTML)
+    verificacion = _verificacion()
+    verificacion.placa = '<img src="file:///etc/passwd">'
+    vehiculo = Vehiculo(marca="<b>X</b>", linea="A&B", modelo=2020)
+
+    generar_pdf_certificado(verificacion, vehiculo, {"certificate_type": "PARTICULAR"})
+
+    assert "<img" not in capturado["html"]
+    assert "&lt;img" in capturado["html"]
+    assert "<b>X</b>" not in capturado["html"]
+    assert "A&amp;B" in capturado["html"]

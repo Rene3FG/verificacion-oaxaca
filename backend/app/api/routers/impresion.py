@@ -98,9 +98,15 @@ async def cola_impresion(
 
 
 async def _obtener_expediente_y_vehiculo(
-    db: AsyncSession, session: SessionContext, expediente_id: uuid.UUID
+    db: AsyncSession,
+    session: SessionContext,
+    expediente_id: uuid.UUID,
+    bloquear: bool = True,
 ) -> tuple[Verificacion, Vehiculo]:
-    verificacion = await db.get(Verificacion, expediente_id)
+    # Bloqueo de fila: dos clics/operadores simultáneos sobre el mismo
+    # expediente se serializan, el segundo ve el estado ya transicionado
+    # (409 limpio) en vez de imprimir/consumir folio dos veces.
+    verificacion = await db.get(Verificacion, expediente_id, with_for_update=bloquear)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
@@ -318,7 +324,9 @@ async def vista_previa_certificado(
     que `certificado_tipo` ya se haya calculado/seleccionado antes (ya no
     se infiere aquí: un aprobado no tiene un único tipo posible)."""
 
-    verificacion, vehiculo = await _obtener_expediente_y_vehiculo(db, session, expediente_id)
+    verificacion, vehiculo = await _obtener_expediente_y_vehiculo(
+        db, session, expediente_id, bloquear=False
+    )
     if verificacion.certificado_tipo is None:
         raise HTTPException(
             status_code=409,
