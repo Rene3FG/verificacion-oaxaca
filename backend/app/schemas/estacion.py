@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import StationType
 
@@ -16,6 +16,7 @@ class WorkstationRead(BaseModel):
     line_id: int | None
     is_centralized: bool
     allowed_line_ids: list[int] | None
+    device_identifier: str | None = None
     is_active: bool
     capacidad_dinamometro_kg: float | None
 
@@ -38,3 +39,24 @@ class StationSessionRead(BaseModel):
     # para mostrar/ocultar la pantalla de Supervisor sin depender de a qué
     # tipo de estación física se conectó la sesión.
     can_supervise: bool = False
+
+
+class WorkstationCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    station_type: StationType
+    center_id: str = Field(min_length=1, max_length=60)
+    line_id: int | None = None
+    is_centralized: bool = False
+    allowed_line_ids: list[int] | None = None
+    device_identifier: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class WorkstationUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+    station_type: StationType | None = None
+    center_id: str | None = Field(default=None, min_length=1, max_length=60)
+    line_id: int | None = None
+    is_centralized: bool | None = None
+    allowed_line_ids: list[int] | None = None
+    device_identifier: str | None = Field(default=None, min_length=1, max_length=120)
+    is_active: bool | None = None

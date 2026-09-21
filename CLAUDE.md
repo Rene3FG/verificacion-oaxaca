@@ -2087,3 +2087,26 @@ Conflictos reales en CLAUDE.md, vuetify.js, Captura/Prueba/Supervisor/ImpresionV
 Criterio: en archivos de René se conservó su versión (ya incluía la de Sebastián
 por syncs previos); `ImpresionView.vue` se tomó completo de Sebastián (su
 territorio). Build de frontend limpio.
+
+## CRUD de usuarios y estaciones (2026-09-21)
+
+Adelantado de la semana 4 de la agenda por instrucción explícita del usuario
+("avancemos con todo lo que no le corresponde a Sebas").
+
+- Backend (todo `requiere_supervisor`): `POST /api/usuarios`, `PATCH
+  /api/usuarios/{id}` (nombre, restablecer contraseña, activar/desactivar;
+  no puede desactivarse a sí mismo); `POST /api/estaciones`, `PATCH
+  /api/estaciones/{id}` (editar/desactivar, unicidad de `name` y
+  `device_identifier` → 409). **Sin DELETE a propósito**: sesiones y
+  bitácora los referencian, se desactivan. `WorkstationRead` expone ahora
+  `device_identifier`. Contraseña mín. 8 caracteres.
+- Los permisos por estación siguen en `/api/permisos` (pestaña Permisos).
+- Frontend: `components/AdministracionPanel.vue` (usuarios + estaciones con
+  diálogos), montado como pestaña "Administración" en `SupervisorView.vue`.
+  Verificado en Chrome contra el backend real (alta de usuario, lista de
+  estaciones); el usuario de prueba se borró después.
+- 213 pruebas pasan (203→213 con las nuevas de usuarios/estaciones).
+- Automatización de navegador: la sesión vive en memoria del store, un
+  `navigate` por URL la pierde — ir a `/supervisor` con
+  `__vue_app__.config.globalProperties.$router.push`. `form_input` no
+  dispara `v-model`; usar `dispatchEvent(new Event('input'))`.

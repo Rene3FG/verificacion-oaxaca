@@ -11,7 +11,12 @@ from app.models.access_event import AccessEvent
 from app.models.enums import AccessEventResultado, StationType
 from app.models.usuario import CatUsuario
 from app.models.workstation import StationSession, UserStationPermission, Workstation
-from app.schemas.estacion import StationSessionRead, WorkstationRead
+from app.schemas.estacion import (
+    StationSessionRead,
+    WorkstationCreate,
+    WorkstationRead,
+    WorkstationUpdate,
+)
 from app.services.auth import verify_password
 
 router = APIRouter(prefix="/api/estaciones", tags=["estaciones"])
@@ -37,6 +42,73 @@ async def listar_estaciones(
 
     result = await db.execute(query.order_by(Workstation.center_id, Workstation.line_id))
     return list(result.scalars().all())
+
+
+async def _validar_unicidad(
+    db: AsyncSession, *, name: str | None, device_identifier: str | None, excluir: uuid.UUID | None
+) -> None:
+    for columna, valor, etiqueta in (
+        (Workstation.name, name, "nombre"),
+        (Workstation.device_identifier, device_identifier, "identificador de dispositivo"),
+    ):
+        if valor is None:
+            continue
+        query = select(Workstation.id).where(columna == valor)
+        if excluir is not None:
+            query = query.where(Workstation.id != excluir)
+        if (await db.execute(query)).first() is not None:
+            raise HTTPException(status_code=409, detail=f"Ya existe una estación con ese {etiqueta}.")
+
+
+@router.post("", response_model=WorkstationRead, status_code=201)
+async def crear_estacion(
+    payload: WorkstationCreate,
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> Workstation:
+    """Alta de estación desde la app (antes solo por app/seed.py)."""
+
+    await _validar_unicidad(
+        db, name=payload.name, device_identifier=payload.device_identifier, excluir=None
+    )
+    estacion = Workstation(**payload.model_dump(), is_active=True)
+    db.add(estacion)
+    await db.commit()
+    await db.refresh(estacion)
+    return estacion
+
+
+@router.patch("/{workstation_id}", response_model=WorkstationRead)
+async def actualizar_estacion(
+    workstation_id: uuid.UUID,
+    payload: WorkstationUpdate,
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> Workstation:
+    """Editar o desactivar una estación. Sin DELETE: las sesiones históricas
+    la referencian por FK. `capacidad_dinamometro_kg` sigue en su propio
+    endpoint."""
+
+    estacion = await db.get(Workstation, workstation_id)
+    if estacion is None:
+        raise HTTPException(status_code=404, detail="Estación no encontrada")
+
+    cambios = payload.model_dump(exclude_unset=True)
+    await _validar_unicidad(
+        db,
+        name=cambios.get("name"),
+        device_identifier=cambios.get("device_identifier"),
+        excluir=estacion.id,
+    )
+    obligatorios = ("name", "station_type", "center_id", "is_centralized", "is_active")
+    for campo, valor in cambios.items():
+        if valor is None and campo in obligatorios:
+            continue
+        setattr(estacion, campo, valor)
+
+    await db.commit()
+    await db.refresh(estacion)
+    return estacion
 
 
 @router.get("/{device_identifier}", response_model=WorkstationRead)

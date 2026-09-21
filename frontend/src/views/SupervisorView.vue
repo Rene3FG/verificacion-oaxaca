@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { api } from "../api/client";
 import { useSessionStore } from "../stores/session";
 import { colorEstado, iconoEstado, textoEstado } from "../utils/estado";
+import AdministracionPanel from "../components/AdministracionPanel.vue";
 
 const session = useSessionStore();
 
@@ -531,6 +532,7 @@ onMounted(() => {
       <v-tab value="equipos">Equipos</v-tab>
       <v-tab value="semestre">Semestre</v-tab>
       <v-tab value="reimpresion">Reimpresión</v-tab>
+      <v-tab value="administracion">Administración</v-tab>
     </v-tabs>
 
     <v-window v-model="tab">
@@ -905,6 +907,10 @@ onMounted(() => {
             </v-table>
           </v-card-text>
         </v-card>
+      </v-window-item>
+
+      <v-window-item value="administracion">
+        <AdministracionPanel />
       </v-window-item>
 
       <v-window-item value="semestre">
