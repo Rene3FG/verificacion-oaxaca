@@ -2110,3 +2110,16 @@ Adelantado de la semana 4 de la agenda por instrucción explícita del usuario
   `navigate` por URL la pierde — ir a `/supervisor` con
   `__vue_app__.config.globalProperties.$router.push`. `form_input` no
   dispara `v-model`; usar `dispatchEvent(new Event('input'))`.
+
+## Auditoría visual en Chrome post-merge (2026-09-21)
+
+Hecha por René/Claude (la semana 2 era de Sebastián; el usuario autorizó
+cubrirla). Contra el backend real, sesiones `supervisor1` (Supervisor, 9
+pestañas), `operador1` en estación Impresión y en estación Prueba. Resultado:
+todas las cards usan `rounded-institucional-lg` + `variant="flat"` (0
+`outlined`, 0 sin clase), Inter aplicado en `.v-application`, sin overflow
+horizontal, detalle de Impresión con sus 6 cards y checklist real de 8 puntos
+en Prueba. Sin defectos visuales encontrados. Nota de datos demo:
+`MKD-674-D` (seed_demo) no tiene propietario/domicilio/PBV/Tracción, así que
+`/imprimir` respondería 409 por campos obligatorios faltantes; no es un bug,
+el seed es anterior a esos campos.
