@@ -2133,3 +2133,28 @@ el seed es anterior a esos campos.
 - `plugins/vuetify.js`: `locale: es`. Hallazgo de la auditoría de Captura: el
   stepper mostraba "PREVIOUS/NEXT" en inglés; ahora "ANTERIOR/SIGUIENTE"
   (y el resto de textos internos de Vuetify).
+
+## Revisión del PR #1 — hallazgos corregidos (2026-09-21)
+
+Revisión automática de `etapa1-y-siox` vs `main` (10 hallazgos, sin verificar
+uno a uno). Corregidos, con pruebas (219 en total):
+- `es_supervisor` ahora exige `center_id == session.center_id` (antes bastaba
+  un permiso de supervisor en cualquier centro).
+- `get_current_session` rechaza (401) a usuarios `is_active=False`; desactivar
+  un usuario (`PATCH /usuarios`) cierra sus sesiones abiertas.
+- `POST /folios/solicitar`: 409 si el tipo pedido difiere de
+  `certificado_tipo` del expediente.
+- Bloqueo de fila (`with_for_update`) en `folios.solicitar`, el helper de
+  `pruebas.py` y el de `impresion.py` (salvo vista previa): doble clic/dos
+  operadores se serializan. Sin prueba de concurrencia real (la fixture usa
+  una sola sesión).
+- `generar_pdf_certificado` escapa HTML en placa/marca/línea/modelo/combustible/folio.
+- Contraseñas >72 bytes: 422 al crear/restablecer, `verify_password` → False
+  (401) en vez de 500.
+
+**Pendientes de esa revisión**: `consultar_siox` sin validar estado (puede
+pisar correcciones y dar 500); fecha UTC en semestre/prórroga (usar hora de
+Oaxaca); `reasignar_linea` acepta líneas inexistentes y estados en prueba;
+`ImpresionView.vue` no muestra el motivo real del error de vista previa (blob);
+rango de lotes sin tope; migración de folios sin migrar asignados;
+`/estaciones/logout` sin autenticación; `PATCH` de vehículo sin límite de estado.
