@@ -1,5 +1,57 @@
+import uuid
+
 from app.models.enums import StationType
+from app.models.workstation import StationSession
 from tests.conftest import crear_estacion, crear_sesion_activa, crear_sesion_supervisor
+
+
+async def test_logout_sin_sesion_valida_responde_401(client, db_session):
+    """Hallazgo de la revisión del PR #1: antes bastaba con el UUID en la
+    URL, sin ninguna autenticación — cualquiera podía cerrarle la sesión a
+    otro operador."""
+
+    estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA)
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/estaciones/logout/{sesion.id}", headers={"X-Session-Id": str(uuid.uuid4())}
+    )
+    assert resp.status_code == 401
+
+    await db_session.refresh(sesion)
+    assert sesion.status == "activa"
+
+
+async def test_logout_de_sesion_ajena_responde_403(client, db_session):
+    estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA)
+    propia = await crear_sesion_activa(db_session, estacion=estacion)
+    otra_estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA, line_id=2)
+    ajena = await crear_sesion_activa(db_session, estacion=otra_estacion)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/estaciones/logout/{ajena.id}", headers={"X-Session-Id": str(propia.id)}
+    )
+    assert resp.status_code == 403
+
+    await db_session.refresh(ajena)
+    assert ajena.status == "activa"
+
+
+async def test_logout_de_la_propia_sesion_la_cierra(client, db_session):
+    estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA)
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/estaciones/logout/{sesion.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert resp.status_code == 200
+
+    cerrada = await db_session.get(StationSession, sesion.id)
+    assert cerrada.status == "cerrada"
+    assert cerrada.logout_at is not None
 
 
 async def test_actualizar_capacidad_dinamometro_sin_supervisor_responde_403(client, db_session):

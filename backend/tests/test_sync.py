@@ -120,6 +120,50 @@ async def test_procesar_pendientes_respeta_backoff_tras_error(db_session):
     assert outbox.attempts == 2
 
 
+async def test_fila_en_backoff_no_bloquea_una_fila_mas_nueva_lista_para_enviar(db_session):
+    """Hallazgo de la revisión del PR #1: antes el `SELECT` limitaba a
+    `max_lote` filas *antes* de descartar las que seguían en backoff — con
+    `max_lote=1` y la fila más vieja en backoff, el lote se llenaba solo
+    con ella y la más nueva (lista para enviarse) nunca se intentaba."""
+
+    viejo = await _encolar(db_session)
+    await db_session.commit()
+
+    ahora = datetime.datetime.now(datetime.timezone.utc)
+    viejo.attempts = 1
+    viejo.sync_status = SyncStatus.ERROR
+    viejo.last_attempt_at = ahora  # backoff de 5s tras el 1er intento
+    db_session.add(viejo)
+    await db_session.commit()
+
+    nuevo = await _encolar(db_session)
+    nuevo.created_at = ahora + datetime.timedelta(seconds=1)
+    db_session.add(nuevo)
+    await db_session.commit()
+
+    enviados: list[uuid.UUID] = []
+
+    async def _enviar(row: SyncOutbox) -> dict:
+        enviados.append(row.id)
+        return {"ok": True}
+
+    # 1 segundo después: `viejo` sigue en backoff (necesita 5s), pero
+    # `nuevo` ya está listo. max_lote=1 fuerza el caso donde antes el lote
+    # se llenaba solo con la fila vieja en espera.
+    resultado = await procesar_pendientes(
+        db_session, enviar=_enviar, max_lote=1, ahora=ahora + datetime.timedelta(seconds=2)
+    )
+
+    assert enviados == [nuevo.id]
+    assert resultado["enviados"] == 1
+    assert resultado["en_backoff"] == 1
+
+    await db_session.refresh(nuevo)
+    await db_session.refresh(viejo)
+    assert nuevo.sync_status == SyncStatus.SYNCED
+    assert viejo.sync_status == SyncStatus.ERROR  # sin tocar, sigue en backoff
+
+
 async def test_procesar_endpoint_requiere_supervisor(client, db_session):
     estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA)
     sesion = await crear_sesion_activa(db_session, estacion=estacion)

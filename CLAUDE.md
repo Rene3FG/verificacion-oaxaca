@@ -2166,3 +2166,71 @@ uno a uno). Corregidos, con pruebas (219 en total):
 **Pendientes de esa revisión**: rango de lotes sin tope; migración de folios sin
 migrar asignados; `/estaciones/logout` sin autenticación; `PATCH` de vehículo sin
 límite de estado; `procesar_pendientes` puede dejar filas atascadas en backoff.
+
+## Revisión del PR #1 — tercera tanda: 3 de los 5 pendientes cerrados (2026-09-22)
+
+Cierra 3 de los 5 pendientes que quedaron abiertos de la sesión anterior. Los otros
+2 se revisaron y no requieren código — ver el final de esta sección. 228 pruebas
+(223→228).
+
+- **`/estaciones/logout/{session_id}` sin autenticación**: cualquiera que adivinara
+  o interceptara un `session_id` (UUID) podía cerrarle la sesión a cualquier
+  operador sin autenticarse — no dependía de ninguna sesión. Ahora exige
+  `X-Session-Id` (`get_current_session`) y compara contra el `session_id` de la
+  URL: cerrar la sesión de otro es 403. El frontend (`stores/session.js`) ya
+  mandaba su propio `X-Session-Id`, así que el caso normal no cambia; se agregó
+  `try/catch` alrededor del POST para que el logout local (limpiar el store) no
+  se bloquee si el servidor ya consideraba la sesión inválida (usuario
+  desactivado, doble clic). `tests/test_estaciones.py`: 401 sin sesión válida,
+  403 al intentar cerrar la sesión de otro (la ajena sigue `activa`), 200 al
+  cerrar la propia.
+- **Rango de lotes de folios sin tope**: `POST /api/folios/lotes` podía generar
+  millones de filas `Folio` de un rango mal tecleado (folio_inicio/folio_fin
+  invertidos en un prefijo largo, o un cero de más) en una sola request.
+  `MAX_FOLIOS_POR_LOTE = 10_000` (`app/services/folio_inventario.py`) — muy por
+  encima de cualquier lote real de este proyecto — rechaza (422) antes de
+  construir la lista. Prueba nueva verifica el 422 y que no queda ningún
+  `Folio`/`FolioLote` a medio crear.
+- **`procesar_pendientes` podía dejar filas atascadas detrás de otras en
+  backoff**: el `SELECT` limitaba a `max_lote` filas *antes* de descartar las
+  que seguían en backoff — si el backlog superaba `max_lote` y las filas más
+  viejas (primeras en el orden FIFO) estaban esperando su backoff, el lote
+  completo podía llenarse solo con ellas, dejando sin intentar filas más nuevas
+  que sí estaban listas, en cada llamada, hasta que las viejas expiraran. Ahora
+  se examina una ventana más amplia (`ventana_candidatos`, default 500) y el
+  backoff se filtra en Python antes de recortar a `max_lote` intentos reales.
+  `procesados` en la respuesta ahora cuenta la ventana de candidatos examinada
+  (antes, `max_lote`) — solo cambia si el backlog supera `max_lote`, que no pasaba
+  en ningún escenario de prueba existente. Prueba nueva reproduce el caso con
+  `max_lote=1`: una fila vieja en backoff y una nueva lista — antes la nueva
+  nunca se enviaba, ahora sí.
+
+**Los otros 2 pendientes, revisados, no requieren código:**
+- **Migración de folios (`5519017f44f2`) sin migrar asignados**: es una
+  migración ya aplicada desde el 2026-08-25 (`alembic current` confirma
+  `e2e5135e78d4`, la cabeza actual, muy por delante). El único ambiente que ha
+  existido para este proyecto es este dev local — nunca hubo un ambiente de
+  producción con folios `ASIGNADO` reales del modelo viejo (`folio_assignments`)
+  que esta migración pudiera haber perdido; el cliente sigue sin preparar el
+  hosting (pendiente desde 2026-08-14). Reescribir una migración ya aplicada no
+  cambia nada para un ambiente nuevo (que corre las migraciones desde cero, sin
+  datos viejos que migrar) — no hay riesgo real que corregir hoy. Si algún día
+  aparece un ambiente con datos reales del modelo `folio_requests`/
+  `folio_assignments` previos a esta migración (no debería, dado lo anterior),
+  sí habría que escribir una migración de datos nueva antes de aplicarla ahí.
+- **`PATCH` de vehículo sin límite de estado**: no es un hallazgo nuevo — es la
+  decisión de producto del 2026-08-14 (ver sección "Corrección de vehículo desde
+  Prueba"), confirmada explícitamente por el cliente: se puede corregir el
+  vehículo en Captura o Prueba sin importar el estado del expediente. La
+  revisión automática del PR lo señaló sin ese contexto; no se toca sin que el
+  cliente pida lo contrario.
+
+228 pruebas, todas pasan. Build de frontend (`npx vite build`) limpio. No se
+probó contra Chrome en esta sesión (cambios backend + un `try/catch` de
+frontend, sin UI nueva). Commit pendiente de push — sin token vigente en esta
+conversación, se pidió al usuario.
+
+**Pendiente real**: NOx/Lambda gasolina dinámico + rango CO+CO2 (bloqueado,
+falta el PDF de NOM-041 en el entorno), ambigüedad del folio en el snapshot,
+diseño visual (mapeo de spacing pendiente), agenda de 4 semanas (semana 3 en
+curso) — sin cambios respecto a la lista de siempre.

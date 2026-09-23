@@ -79,6 +79,20 @@ async def test_registrar_lote_con_rango_invalido_responde_422(client, db_session
     assert resp.status_code == 422
 
 
+async def test_registrar_lote_con_rango_mayor_al_tope_responde_422(client, db_session):
+    """Hallazgo de la revisión del PR #1: sin tope, un rango mal tecleado
+    podía pedir generar millones de filas `Folio` en una sola request."""
+
+    sesion = await crear_sesion_supervisor(db_session)
+
+    resp = await _registrar_lote(client, sesion, folio_inicio="OAX-0000001", folio_fin="OAX-9999999")
+    assert resp.status_code == 422
+    assert "máximo por lote" in resp.json()["detail"]
+
+    assert (await db_session.execute(select(Folio))).scalars().all() == []
+    assert (await db_session.execute(select(FolioLote))).scalars().all() == []
+
+
 async def test_solicitar_folio_toma_el_siguiente_disponible_del_tipo(client, db_session):
     sesion_supervisor = await crear_sesion_supervisor(db_session)
     await _registrar_lote(

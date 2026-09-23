@@ -16,6 +16,15 @@ from app.models.folio import Folio, FolioLote
 
 _RANGO_PATTERN = re.compile(r"^(?P<prefijo>.*?)(?P<numero>\d+)$")
 
+# Tope defensivo (hallazgo de la revisión del PR #1, 2026-09-22): sin un
+# límite, un rango mal tecleado (p.ej. invertir folio_inicio/folio_fin en un
+# prefijo largo, o un cero de más) podía pedir generar millones de filas
+# `Folio` en una sola request — el INSERT masivo resultante degrada la base
+# de datos para todo el sistema mientras corre. 10,000 folios por lote es
+# muy por encima de cualquier lote real de este proyecto (ver los lotes de
+# ejemplo del handoff, de un puñado a unos cientos).
+MAX_FOLIOS_POR_LOTE = 10_000
+
 
 class RangoDeFolioInvalido(Exception):
     pass
@@ -50,6 +59,11 @@ def generar_folios_de_rango(folio_inicio: str, folio_fin: str) -> list[str]:
     n_fin = int(m_fin.group("numero"))
     if n_fin < n_ini:
         raise RangoDeFolioInvalido("folio_fin debe ser mayor o igual que folio_inicio.")
+    if n_fin - n_ini + 1 > MAX_FOLIOS_POR_LOTE:
+        raise RangoDeFolioInvalido(
+            f"El rango pedido tiene {n_fin - n_ini + 1} folios; el máximo por lote es "
+            f"{MAX_FOLIOS_POR_LOTE}. Registre el lote en partes más pequeñas."
+        )
 
     prefijo = m_ini.group("prefijo")
     return [f"{prefijo}{str(n).zfill(ancho)}" for n in range(n_ini, n_fin + 1)]

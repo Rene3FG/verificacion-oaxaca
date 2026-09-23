@@ -73,8 +73,19 @@ export const useSessionStore = defineStore("session", {
     },
 
     async cerrarSesion() {
+      // El backend ahora exige sesión activa para este endpoint (hallazgo
+      // de seguridad de la revisión del PR #1, 2026-09-22: antes cualquiera
+      // podía cerrar la sesión de otro adivinando el UUID). Si la sesión ya
+      // era inválida en el servidor (usuario desactivado, ya cerrada desde
+      // otra pestaña), el POST puede responder 401/404 — igual se limpia el
+      // estado local, que es lo que le importa al operador frente a la
+      // pantalla.
       if (this.sesion) {
-        await api.post(`/estaciones/logout/${this.sesion.id}`);
+        try {
+          await api.post(`/estaciones/logout/${this.sesion.id}`);
+        } catch {
+          // Sesión ya inválida del lado del servidor: no bloquear el logout local.
+        }
       }
       this.sesion = null;
       this.usuario = null;

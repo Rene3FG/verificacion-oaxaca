@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import SessionContext, get_db, requiere_supervisor
+from app.api.deps import SessionContext, get_current_session, get_db, requiere_supervisor
 from app.models.access_event import AccessEvent
 from app.models.enums import AccessEventResultado, StationType
 from app.models.usuario import CatUsuario
@@ -248,7 +248,22 @@ async def iniciar_sesion(
 
 
 @router.post("/logout/{session_id}")
-async def cerrar_sesion(session_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict:
+async def cerrar_sesion(
+    session_id: uuid.UUID,
+    session: SessionContext = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Hallazgo de la revisión del PR #1 (2026-09-22): este endpoint no
+    exigía ninguna sesión — cualquiera que adivinara o interceptara un
+    `session_id` (UUID) podía cerrarle la sesión a cualquier operador,
+    sin autenticarse. Ahora exige una sesión activa (`X-Session-Id`) y
+    solo permite cerrar la propia — cerrar la sesión de otro es 403, no
+    una operación de administrador (para eso ya existe desactivar el
+    usuario, que si cierra sesiones ajenas, ver `actualizar_usuario`)."""
+
+    if session.session_id != session_id:
+        raise HTTPException(status_code=403, detail="No puede cerrar la sesión de otro usuario.")
+
     sesion = await db.get(StationSession, session_id)
     if sesion is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")

@@ -151,6 +151,7 @@ async def procesar_pendientes(
     *,
     enviar: EnviarUnoACentral = enviar_uno_a_central,
     max_lote: int = 50,
+    ventana_candidatos: int = 500,
     ahora: datetime.datetime | None = None,
 ) -> dict:
     """Envía ordenado (por created_at, FIFO) los pendientes/errados cuyo
@@ -159,35 +160,51 @@ async def procesar_pendientes(
     actualizados para el siguiente backoff. entity_uuid/SyncOutbox.id ya
     son estables desde la creación (ver docstring del módulo), así que
     reenviar la misma fila no duplica nada del lado del central siempre que
-    éste haga upsert-por-id."""
+    éste haga upsert-por-id.
+
+    **Hallazgo corregido (revisión PR #1, 2026-09-22)**: antes el `SELECT`
+    limitaba a `max_lote` filas *antes* de descartar las que seguían en
+    backoff. Si el backlog superaba `max_lote` y las filas más viejas
+    (primeras en el orden FIFO) todavía estaban esperando su backoff, el
+    lote completo podía llenarse solo con filas en espera — dejando sin
+    intentar filas más nuevas que sí estaban listas para enviarse, en cada
+    llamada, hasta que las viejas expiraran. Ahora se examina una ventana
+    de candidatos más amplia (`ventana_candidatos`) y el backoff se filtra
+    en Python antes de recortar a `max_lote` intentos reales, así una fila
+    lista se envía aunque haya filas más viejas todavía en espera."""
 
     ahora = ahora or datetime.datetime.now(datetime.timezone.utc)
 
-    pendientes = (
+    candidatos = (
         (
             await db.execute(
                 select(SyncOutbox)
                 .where(SyncOutbox.sync_status.in_([SyncStatus.PENDING, SyncStatus.ERROR]))
                 .order_by(SyncOutbox.created_at)
-                .limit(max_lote)
+                .limit(ventana_candidatos)
             )
         )
         .scalars()
         .all()
     )
 
-    enviados = 0
     en_backoff = 0
-    fallidos = 0
-
-    for row in pendientes:
+    listos: list[SyncOutbox] = []
+    for row in candidatos:
         if row.last_attempt_at is not None:
             espera = calcular_espera_segundos(row.attempts)
             transcurrido = (ahora - row.last_attempt_at).total_seconds()
             if transcurrido < espera:
                 en_backoff += 1
                 continue
+        listos.append(row)
+        if len(listos) >= max_lote:
+            break
 
+    enviados = 0
+    fallidos = 0
+
+    for row in listos:
         row.sync_status = SyncStatus.SYNCING
         row.attempts += 1
         row.last_attempt_at = ahora
@@ -208,7 +225,7 @@ async def procesar_pendientes(
 
     await db.commit()
     return {
-        "procesados": len(pendientes),
+        "procesados": len(candidatos),
         "enviados": enviados,
         "fallidos": fallidos,
         "en_backoff": en_backoff,
