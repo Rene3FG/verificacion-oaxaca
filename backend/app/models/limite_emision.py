@@ -23,7 +23,14 @@ class LimiteEmision(Base, UUIDPKMixin, TimestampMixin):
     filas sin acotar (ambos NULL) — nunca asume un año.
 
     Los valores reales de NOM-041 (gasolina, cargados 2026-09-01 desde el
-    DOF) ya están en esta tabla vía `app/seed_limites_nom041.py`.
+    DOF: HC/CO/O2; 2026-09-23: NOx/Factor Lambda, verificados dos veces por
+    fetch independiente — PROFEPA PDF + dof.gob.mx) ya están en esta tabla
+    vía `app/seed_limites_nom041.py`. NOx/Lambda se cargan pero NO
+    participan de `evaluar_resultado` todavía (decisión explícita del
+    usuario, ver el docstring de ese módulo de seed) — el rango de dilución
+    CO+CO2 (13%-16,5%, confirmado, sin cargar) necesitaría además una
+    columna `valor_minimo` que este modelo no tiene, porque es un rango de
+    validez de muestra, no un máximo por contaminante.
 
     `peso_bruto_desde_kg`/`peso_bruto_hasta_kg` (ambos NULL por defecto =
     sin acotar) reflejan que NOM-045-SEMARNAT-2017 (diésel, opacidad)

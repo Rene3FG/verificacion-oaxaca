@@ -23,8 +23,17 @@ METODO_POR_TIPO_PRUEBA = {
 # máximo" — define un rango de dilución CO+CO2 (13%-16,5%), algo distinto
 # a un límite de emisión por parámetro; decisión 2026-09-01: sacarlo de
 # aquí hasta decidir cómo representar ese rango, en vez de inventar un
-# máximo que la norma no da. NOx/lambda (también exigidos por la Tabla 1
-# dinámica) tampoco están representados todavía — ver CLAUDE.md.
+# máximo que la norma no da (sigue pendiente, ver CLAUDE.md — necesita
+# `valor_minimo` en `LimiteEmision` + una regla de rango, no de máximo).
+# NOx (`nox_ppm`, ya en `LecturaFaseGasolina`) y Factor Lambda ya tienen sus
+# valores oficiales cargados en `cat_limites_emision` (2026-09-23, ver
+# `app.seed_limites_nom041`), pero **decisión explícita del usuario:
+# seguir sin conectarlos aquí** — el equipo físico (dinamómetro/analizador)
+# todavía no tiene integración real (Equipment Integration Contract v1 sin
+# construir), así que exigirlos podría rechazar pruebas reales cuyo equipo
+# no los reporte. `lambda_factor` tampoco existe todavía como campo en
+# `LecturaFaseGasolina` — agregarlo es parte de conectar esto a evaluación,
+# no de solo cargar el catálogo.
 PARAMETROS_CON_LIMITE = {
     MetodoPrueba.GAS_STATIC: ("hc_ppm", "co_pct", "o2_pct"),
     MetodoPrueba.GAS_DYNAMIC: ("hc_ppm", "co_pct", "o2_pct"),

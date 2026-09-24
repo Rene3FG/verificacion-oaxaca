@@ -3,24 +3,37 @@ permisibles de emisión de gases contaminantes, vehículos en circulación que
 usan gasolina) en `cat_limites_emision`.
 
 Fuente: Diario Oficial de la Federación, 10 de junio de 2015, numeral 4.2
-(TABLA 1 — Método Dinámico, TABLA 2 — Método Estático).
+(TABLA 1 — Método Dinámico, TABLA 2 — Método Estático). Verificado dos veces
+por fetch independiente el 2026-09-23 (PROFEPA PDF + dof.gob.mx, mismos
+valores en ambos):
 https://www.profepa.gob.mx/innovaportal/file/7251/1/nom-041-semarnat-2015.pdf
+https://dof.gob.mx/nota_detalle.php?codigo=5396063&fecha=10/06/2015
 
-Solo HC/CO/O2 (ver `app.schemas.prueba.PARAMETROS_CON_LIMITE` — decisión
-2026-09-01: la norma no da un "co2_pct máximo" por sí solo, da un rango de
-dilución CO+CO2 [13%-16,5%] que este esquema todavía no representa; NOx y
-Factor Lambda, también exigidos por la Tabla 1 dinámica, tampoco están
-representados todavía). RALENTI y CRUCERO se cargan con el MISMO valor:
-ambas tablas oficiales dan un solo set de límites por año-modelo (no
-separan ralentí de crucero) — se asume que corresponden a los dos modos de
-una prueba bimodal que comparten el mismo límite (ver
-`NormalizedPayloadGasolina`), confirmado con el usuario antes de cargar.
+HC/CO/O2 (evaluados, ver `app.schemas.prueba.PARAMETROS_CON_LIMITE`) +
+NOx/Factor Lambda (cargados en catálogo 2026-09-23, **NO conectados a
+evaluar_resultado todavía** — decisión explícita del usuario: el contrato
+de integración de hardware, sección "Equipment Integration Contract v1" del
+Figma, sigue sin construirse, y conectar estos parámetros ya podría
+rechazar pruebas reales de centros cuyo equipo físico no los reporta.
+Administración ya puede verlos/corregirlos vía
+`POST /api/pruebas/limites-emision`, quedan listos para cuando se decida
+volverlos exigibles). NOx solo aplica a método dinámico (TABLA 2 estático
+no tiene columna de NOx en la norma). El rango de dilución CO+CO2
+[13%-16,5% vol.] (ambas tablas) SIGUE sin cargarse — no es un máximo por
+contaminante sino un rango de validez de la muestra (co_pct + co2_pct
+dentro del rango), y `LimiteEmision` solo tiene `valor_maximo`; hace falta
+migración (`valor_minimo`) + una regla de evaluación distinta (rango, no
+máximo) antes de representarlo — decisión explícita de dejarlo pendiente,
+no fabricar un modelo a medias.
+
+RALENTI y CRUCERO se cargan con el MISMO valor: ambas tablas oficiales dan
+un solo set de límites por año-modelo (no separan ralentí de crucero) — se
+asume que corresponden a los dos modos de una prueba bimodal que comparten
+el mismo límite (ver `NormalizedPayloadGasolina`), confirmado con el
+usuario antes de cargar.
 
 NOM-045-SEMARNAT-2017 (diésel, opacidad) NO se carga aquí: estratifica por
-peso bruto vehicular, no por año-modelo, y `cat_limites_emision` todavía no
-tiene esa columna — cargar solo el número de opacidad sin poder acotar por
-peso sería fabricar un límite que no aplica a todos los vehículos por
-igual. Queda pendiente (ver CLAUDE.md).
+peso bruto vehicular, no por año-modelo — ver `app.seed_limites_nom045`.
 
 Idempotente: upsert por metodo+fase+parametro+anio_modelo_desde+
 anio_modelo_hasta (mismo criterio que `POST /api/pruebas/limites-emision`).
@@ -36,14 +49,16 @@ from app.db.session import SessionLocal
 from app.models.enums import FaseLectura, MetodoPrueba
 from app.models.limite_emision import LimiteEmision
 
-# (metodo, anio_modelo_desde, anio_modelo_hasta, hc_ppm, co_pct, o2_pct)
+# (metodo, anio_modelo_desde, anio_modelo_hasta, hc_ppm, co_pct, o2_pct,
+#  nox_ppm, lambda_factor) — nox_ppm es None para GAS_STATIC (la norma no
+# mide NOx en método estático).
 TABLA_NOM_041 = [
     # TABLA 1 — Método Dinámico
-    (MetodoPrueba.GAS_DYNAMIC, None, 1990, 350, 2.5, 2.0),
-    (MetodoPrueba.GAS_DYNAMIC, 1991, None, 100, 1.0, 2.0),
+    (MetodoPrueba.GAS_DYNAMIC, None, 1990, 350, 2.5, 2.0, 2500, 1.05),
+    (MetodoPrueba.GAS_DYNAMIC, 1991, None, 100, 1.0, 2.0, 1500, 1.05),
     # TABLA 2 — Método Estático
-    (MetodoPrueba.GAS_STATIC, None, 1993, 400, 3.0, 2.0),
-    (MetodoPrueba.GAS_STATIC, 1994, None, 100, 1.0, 2.0),
+    (MetodoPrueba.GAS_STATIC, None, 1993, 400, 3.0, 2.0, None, 1.05),
+    (MetodoPrueba.GAS_STATIC, 1994, None, 100, 1.0, 2.0, None, 1.05),
 ]
 
 
@@ -51,8 +66,10 @@ async def cargar_limites_nom041() -> None:
     async with SessionLocal() as db:
         insertados = 0
         actualizados = 0
-        for metodo, desde, hasta, hc_ppm, co_pct, o2_pct in TABLA_NOM_041:
-            valores = {"hc_ppm": hc_ppm, "co_pct": co_pct, "o2_pct": o2_pct}
+        for metodo, desde, hasta, hc_ppm, co_pct, o2_pct, nox_ppm, lambda_factor in TABLA_NOM_041:
+            valores = {"hc_ppm": hc_ppm, "co_pct": co_pct, "o2_pct": o2_pct, "lambda_factor": lambda_factor}
+            if nox_ppm is not None:
+                valores["nox_ppm"] = nox_ppm
             for fase in (FaseLectura.RALENTI, FaseLectura.CRUCERO):
                 for parametro, valor_maximo in valores.items():
                     existente = (

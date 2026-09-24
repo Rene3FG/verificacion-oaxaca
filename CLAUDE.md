@@ -2271,3 +2271,40 @@ agenda de 4 semanas (semana 3 en curso, vence 2026-10-02), PR #1 sin revisión
 formal en GitHub (107 commits / 111 archivos frente a `main`, tarea manual del
 equipo, no de código). El mapeo de diseño de la sección 13 (spacing, radius,
 elevación) queda cerrado con esta sesión.
+
+## NOx/Factor Lambda de NOM-041 cargados en catálogo, sin conectar a evaluación (2026-09-23)
+
+El bloqueo real era no tener el texto de NOM-041 en el entorno — se resolvió
+con `WebFetch` a dos fuentes independientes que dieron los mismos valores
+(PROFEPA PDF + `dof.gob.mx`, Tabla 1 completa del método dinámico). Antes de
+tocar `evaluar_resultado` se preguntó al usuario el alcance (mismo criterio
+de siempre en este proyecto) y eligió explícitamente el alcance mínimo:
+
+- `LimiteEmision` gana filas reales de NOx (2500 ppm ≤1990 / 1500 ppm ≥1991,
+  solo `GAS_DYNAMIC` — la norma no mide NOx en método estático) y Factor
+  Lambda (1.05 máx., ambos métodos, ambos brackets de año) vía
+  `app/seed_limites_nom041.py` (12 filas nuevas). Administración ya puede
+  verlas/corregirlas en la pestaña de límites de emisión.
+- **Decisión explícita: NO conectarlos a `evaluar_resultado`.** El equipo
+  físico (dinamómetro/analizador) sigue sin integración real (`Equipment
+  Integration Contract v1` del Figma, sin construir) — exigir NOx/Lambda
+  hoy podría rechazar pruebas reales de centros cuyo equipo no los reporte
+  todavía. `PARAMETROS_CON_LIMITE` sigue igual (solo HC/CO/O2). `lambda_factor`
+  tampoco existe como campo en `LecturaFaseGasolina` — falta agregarlo si
+  algún día se decide conectar esto.
+- **El rango de dilución CO+CO2 (13%-16,5% vol., confirmado en ambas
+  fuentes) sigue sin cargarse**, decisión explícita también: no es un
+  máximo por contaminante como los demás parámetros, es un rango de validez
+  de la muestra (`co_pct + co2_pct` dentro del rango) — `LimiteEmision` solo
+  tiene `valor_maximo`, haría falta `valor_minimo` (migración) + una regla
+  de evaluación de rango distinta a la de máximo. Queda documentado con el
+  valor oficial ya verificado, listo para cuando se decida implementarlo.
+
+228 pruebas, todas pasan (sin cambios — estas filas no participan en la
+evaluación todavía). Commit sobre `etapa1-y-siox`, pusheado.
+
+**Pendiente real**: rango de dilución CO+CO2 (necesita `valor_minimo` +
+regla de rango), decidir si/cuándo conectar NOx/Lambda a la evaluación
+(depende del Equipment Integration Contract), ambigüedad del folio en el
+snapshot, agenda de 4 semanas (semana 3 en curso, vence 2026-10-02), PR #1
+sin revisión formal en GitHub.
