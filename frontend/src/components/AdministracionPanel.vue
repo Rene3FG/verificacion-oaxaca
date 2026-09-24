@@ -227,7 +227,7 @@ onMounted(() => {
     </v-card>
 
     <v-dialog v-model="usuarioAbierto" max-width="480">
-      <v-card>
+      <v-card class="rounded-institucional-lg">
         <v-card-title>{{ usuarioEditandoId ? "Editar usuario" : "Nuevo usuario" }}</v-card-title>
         <v-card-text>
           <v-text-field v-model="usuarioForm.username" label="Usuario" :disabled="!!usuarioEditandoId" />
@@ -248,7 +248,7 @@ onMounted(() => {
     </v-dialog>
 
     <v-dialog v-model="estacionAbierta" max-width="480">
-      <v-card>
+      <v-card class="rounded-institucional-lg">
         <v-card-title>{{ estacionEditandoId ? "Editar estación" : "Nueva estación" }}</v-card-title>
         <v-card-text>
           <v-text-field v-model="estacionForm.name" label="Nombre" />
