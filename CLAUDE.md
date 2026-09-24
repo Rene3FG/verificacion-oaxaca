@@ -2234,3 +2234,40 @@ conversación, se pidió al usuario.
 falta el PDF de NOM-041 en el entorno), ambigüedad del folio en el snapshot,
 diseño visual (mapeo de spacing pendiente), agenda de 4 semanas (semana 3 en
 curso) — sin cambios respecto a la lista de siempre.
+
+## Diseño institucional: diálogos de Administración + cierre del mapeo de spacing (2026-09-23)
+
+- Los diálogos de crear/editar usuario y estación en `AdministracionPanel.vue`
+  eran los únicos `v-card` de toda la app sin `rounded-institucional-lg` —
+  corregido para seguir el mismo patrón que el resto de diálogos (radio
+  institucional, sin `elevation-institucional-0` porque los diálogos sí
+  conservan la sombra flotante nativa de Vuetify; esa combinación es solo
+  para tarjetas de contenido en línea con `variant="flat"`).
+- **"Mapeo de spacing" (sección 13) verificado y cerrado sin cambio de
+  código.** Las custom properties `--space-4/8/12/16/24/32/48` de
+  `main.css` nunca se usan en ningún `.vue` (0 ocurrencias, verificado por
+  grep) — en su lugar toda la app usa las utilidades nativas de Vuetify
+  (`pa-*`/`ma-*`/`mb-*`/`ga-*`, etc.), y `vite.config.js` no tiene ningún
+  override de SASS del spacer de Vuetify (usa `vuetify/styles`
+  precompilado). El spacer por defecto de Vuetify 3 es de 4px por unidad,
+  así que `mb-4`/`ga-2`/etc. ya producen exactamente 16px/8px — los mismos
+  valores que las variables `--space-*`. Los factores realmente usados hoy
+  en la app (grep de `pa|ma|ml|mr|mt|mb|mx|my|ga` + dígito) van de 1 a 4
+  (4px a 16px), cubiertos sin excepción por el default de Vuetify. No hace
+  falta migrar nada a las custom properties para que el spacing coincida
+  con Figma; si en el futuro una vista necesita 24/32/48px (factores 6/8/12
+  de Vuetify), esas clases nativas ya los cubren igual, sin tocar
+  `main.css`. Las variables `--space-*` quedan sin uso real — no se
+  eliminaron esta sesión (son tokens documentados del design system, no
+  código propio), pero son candidatas a quitarse si algún día se decide
+  documentar el spacing sin custom properties redundantes.
+
+228 pruebas, todas pasan. `npx vite build` limpio. Commit `3d3216d` sobre
+`etapa1-y-siox`, pusheado.
+
+**Pendiente real**: NOx/Lambda gasolina dinámico + rango CO+CO2 (bloqueado,
+falta el PDF de NOM-041 en el entorno), ambigüedad del folio en el snapshot,
+agenda de 4 semanas (semana 3 en curso, vence 2026-10-02), PR #1 sin revisión
+formal en GitHub (107 commits / 111 archivos frente a `main`, tarea manual del
+equipo, no de código). El mapeo de diseño de la sección 13 (spacing, radius,
+elevación) queda cerrado con esta sesión.
