@@ -27,10 +27,20 @@ class LimiteEmision(Base, UUIDPKMixin, TimestampMixin):
     fetch independiente — PROFEPA PDF + dof.gob.mx) ya están en esta tabla
     vía `app/seed_limites_nom041.py`. NOx/Lambda se cargan pero NO
     participan de `evaluar_resultado` todavía (decisión explícita del
-    usuario, ver el docstring de ese módulo de seed) — el rango de dilución
-    CO+CO2 (13%-16,5%, confirmado, sin cargar) necesitaría además una
-    columna `valor_minimo` que este modelo no tiene, porque es un rango de
-    validez de muestra, no un máximo por contaminante.
+    usuario, ver el docstring de ese módulo de seed).
+
+    `valor_minimo` (agregada 2026-09-24, migración `a7c4e02f5b1d`) existe
+    solo para representar el rango de dilución CO+CO2 de NOM-041
+    (13%-16,5% vol., ambas tablas) — una fila con `parametro` distinto
+    ("co_co2_dilucion_pct") a los máximos por contaminante, donde el valor
+    evaluado sería `co_pct + co2_pct` en vez de un solo parámetro. NULL
+    (default) para todas las demás filas: siguen siendo un máximo puro. La
+    fila de dilución ya se carga vía `app/seed_limites_nom041.py`, pero
+    **tampoco participa de `evaluar_resultado`** — falta decidir qué pasa
+    con un expediente fuera de rango (¿rechazo igual que un contaminante
+    excedido, o solo nota de auditoría sin bloquear?), la misma clase de
+    decisión de producto que frenó a NOx/Lambda, así que se deja pendiente
+    en vez de adivinar.
 
     `peso_bruto_desde_kg`/`peso_bruto_hasta_kg` (ambos NULL por defecto =
     sin acotar) reflejan que NOM-045-SEMARNAT-2017 (diésel, opacidad)
@@ -77,6 +87,7 @@ class LimiteEmision(Base, UUIDPKMixin, TimestampMixin):
     )
     parametro: Mapped[str] = mapped_column(String(40), nullable=False)
     valor_maximo: Mapped[float] = mapped_column(Float, nullable=False)
+    valor_minimo: Mapped[float | None] = mapped_column(Float, nullable=True)
     anio_modelo_desde: Mapped[int | None] = mapped_column(Integer, nullable=True)
     anio_modelo_hasta: Mapped[int | None] = mapped_column(Integer, nullable=True)
     peso_bruto_desde_kg: Mapped[float | None] = mapped_column(Float, nullable=True)

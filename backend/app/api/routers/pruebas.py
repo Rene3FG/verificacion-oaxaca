@@ -436,6 +436,9 @@ class LimiteEmisionInput(BaseModel):
     fase: FaseLectura | None = None
     parametro: str
     valor_maximo: float
+    # NULL salvo para el rango de dilución CO+CO2 (parametro
+    # "co_co2_dilucion_pct") — ver docstring de LimiteEmision.
+    valor_minimo: float | None = None
     # NULL = sin acotar por ese lado (ver docstring de LimiteEmision).
     # anio_modelo_* solo tiene sentido para gasolina (NOM-041, por
     # año-modelo); peso_bruto_*_kg solo para diésel (NOM-045, por peso
@@ -463,6 +466,7 @@ async def listar_limites_emision(
             fase=fila.fase,
             parametro=fila.parametro,
             valor_maximo=fila.valor_maximo,
+            valor_minimo=fila.valor_minimo,
             anio_modelo_desde=fila.anio_modelo_desde,
             anio_modelo_hasta=fila.anio_modelo_hasta,
             peso_bruto_desde_kg=fila.peso_bruto_desde_kg,
@@ -491,6 +495,10 @@ async def cargar_limite_emision(
     if payload.metodo != MetodoPrueba.DIESEL_OPACITY and payload.fase is None:
         raise HTTPException(
             status_code=422, detail=f"{payload.metodo.value} requiere `fase` (RALENTI/CRUCERO)."
+        )
+    if payload.valor_minimo is not None and payload.valor_minimo > payload.valor_maximo:
+        raise HTTPException(
+            status_code=422, detail="valor_minimo no puede ser mayor que valor_maximo."
         )
     if (
         payload.anio_modelo_desde is not None
@@ -539,6 +547,7 @@ async def cargar_limite_emision(
 
     if existente is not None:
         existente.valor_maximo = payload.valor_maximo
+        existente.valor_minimo = payload.valor_minimo
         db.add(existente)
     else:
         db.add(
@@ -547,6 +556,7 @@ async def cargar_limite_emision(
                 fase=payload.fase,
                 parametro=payload.parametro,
                 valor_maximo=payload.valor_maximo,
+                valor_minimo=payload.valor_minimo,
                 anio_modelo_desde=payload.anio_modelo_desde,
                 anio_modelo_hasta=payload.anio_modelo_hasta,
                 peso_bruto_desde_kg=payload.peso_bruto_desde_kg,
@@ -559,6 +569,8 @@ async def cargar_limite_emision(
         "metodo": payload.metodo,
         "fase": payload.fase,
         "parametro": payload.parametro,
+        "valor_maximo": payload.valor_maximo,
+        "valor_minimo": payload.valor_minimo,
         "anio_modelo_desde": payload.anio_modelo_desde,
         "anio_modelo_hasta": payload.anio_modelo_hasta,
         "peso_bruto_desde_kg": payload.peso_bruto_desde_kg,

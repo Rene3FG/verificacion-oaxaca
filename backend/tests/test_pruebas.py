@@ -680,6 +680,57 @@ async def test_limites_emision_upsert_y_listado(client, db_session):
     assert fila_propia[0]["valor_maximo"] == 250
 
 
+async def test_limites_emision_valor_minimo_ida_y_vuelta(client, db_session):
+    """`valor_minimo` (2026-09-24, rango de dilución CO+CO2 de NOM-041)
+    debe sobrevivir el ciclo alta -> listado -> actualización, igual que
+    `valor_maximo`. No usa `parametro="co_co2_dilucion_pct"` a propósito
+    (evita chocar con las 4 filas reales que `seed_limites_nom041` puede
+    haber cargado en la misma base, mismo criterio que el test de arriba)."""
+
+    sesion_supervisor = await crear_sesion_supervisor(db_session, station_type=StationType.PRUEBA)
+
+    resp_alta = await client.post(
+        "/api/pruebas/limites-emision",
+        json={
+            "metodo": "GAS_DYNAMIC",
+            "fase": "RALENTI",
+            "parametro": "co_co2_dilucion_pct_test",
+            "valor_maximo": 16.5,
+            "valor_minimo": 13.0,
+        },
+        headers={"X-Session-Id": str(sesion_supervisor.id)},
+    )
+    assert resp_alta.status_code == 200
+    assert resp_alta.json()["valor_minimo"] == 13.0
+
+    resp_listado = await client.get(
+        "/api/pruebas/limites-emision",
+        headers={"X-Session-Id": str(sesion_supervisor.id)},
+    )
+    fila = [
+        f for f in resp_listado.json() if f["parametro"] == "co_co2_dilucion_pct_test"
+    ][0]
+    assert fila["valor_minimo"] == 13.0
+    assert fila["valor_maximo"] == 16.5
+
+
+async def test_limites_emision_valor_minimo_mayor_que_maximo_rechaza(client, db_session):
+    sesion_supervisor = await crear_sesion_supervisor(db_session, station_type=StationType.PRUEBA)
+    resp = await client.post(
+        "/api/pruebas/limites-emision",
+        json={
+            "metodo": "GAS_DYNAMIC",
+            "fase": "RALENTI",
+            "parametro": "co_co2_dilucion_pct_test",
+            "valor_maximo": 13.0,
+            "valor_minimo": 16.5,
+        },
+        headers={"X-Session-Id": str(sesion_supervisor.id)},
+    )
+    assert resp.status_code == 422
+    assert "valor_minimo" in resp.json()["detail"]
+
+
 async def test_limites_emision_diesel_no_admite_fase(client, db_session):
     sesion_supervisor = await crear_sesion_supervisor(db_session, station_type=StationType.PRUEBA)
     resp = await client.post(

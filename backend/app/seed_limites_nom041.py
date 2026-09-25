@@ -18,13 +18,18 @@ rechazar pruebas reales de centros cuyo equipo físico no los reporta.
 Administración ya puede verlos/corregirlos vía
 `POST /api/pruebas/limites-emision`, quedan listos para cuando se decida
 volverlos exigibles). NOx solo aplica a método dinámico (TABLA 2 estático
-no tiene columna de NOx en la norma). El rango de dilución CO+CO2
-[13%-16,5% vol.] (ambas tablas) SIGUE sin cargarse — no es un máximo por
+no tiene columna de NOx en la norma).
+
+El rango de dilución CO+CO2 [13%-16,5% vol.] (ambas tablas) se carga aquí
+(2026-09-24, migración `a7c4e02f5b1d` agregó `valor_minimo`) como el
+parámetro sintético `co_co2_dilucion_pct` — no es un máximo por
 contaminante sino un rango de validez de la muestra (co_pct + co2_pct
-dentro del rango), y `LimiteEmision` solo tiene `valor_maximo`; hace falta
-migración (`valor_minimo`) + una regla de evaluación distinta (rango, no
-máximo) antes de representarlo — decisión explícita de dejarlo pendiente,
-no fabricar un modelo a medias.
+dentro del rango). **Mismo criterio que NOx/Lambda: se carga en el
+catálogo pero NO se conecta a `evaluar_resultado`** — falta decidir qué
+pasa con un expediente fuera de rango (¿rechazo igual que un contaminante
+excedido, o solo nota de auditoría?), decisión de producto pendiente, no
+una cuestión técnica. Aplica a ambos métodos (dinámico y estático), ambas
+fases.
 
 RALENTI y CRUCERO se cargan con el MISMO valor: ambas tablas oficiales dan
 un solo set de límites por año-modelo (no separan ralentí de crucero) — se
@@ -61,6 +66,55 @@ TABLA_NOM_041 = [
     (MetodoPrueba.GAS_STATIC, 1994, None, 100, 1.0, 2.0, None, 1.05),
 ]
 
+# Rango de dilución CO+CO2, sin estratificar por año-modelo (la norma no lo
+# corta por año, a diferencia de HC/CO/O2/NOx) — mismo rango para ambos
+# métodos y ambas fases.
+DILUCION_CO_CO2_MIN = 13.0
+DILUCION_CO_CO2_MAX = 16.5
+
+
+async def _upsert_limite(
+    db,
+    *,
+    metodo: MetodoPrueba,
+    fase: FaseLectura | None,
+    parametro: str,
+    valor_maximo: float,
+    valor_minimo: float | None = None,
+    anio_modelo_desde: int | None = None,
+    anio_modelo_hasta: int | None = None,
+) -> str:
+    existente = (
+        await db.execute(
+            select(LimiteEmision).where(
+                LimiteEmision.metodo == metodo,
+                LimiteEmision.fase == fase,
+                LimiteEmision.parametro == parametro,
+                LimiteEmision.anio_modelo_desde == anio_modelo_desde,
+                LimiteEmision.anio_modelo_hasta == anio_modelo_hasta,
+            )
+        )
+    ).scalars().first()
+    if existente is not None:
+        if existente.valor_maximo != valor_maximo or existente.valor_minimo != valor_minimo:
+            existente.valor_maximo = valor_maximo
+            existente.valor_minimo = valor_minimo
+            db.add(existente)
+            return "actualizado"
+        return "sin_cambio"
+    db.add(
+        LimiteEmision(
+            metodo=metodo,
+            fase=fase,
+            parametro=parametro,
+            valor_maximo=valor_maximo,
+            valor_minimo=valor_minimo,
+            anio_modelo_desde=anio_modelo_desde,
+            anio_modelo_hasta=anio_modelo_hasta,
+        )
+    )
+    return "insertado"
+
 
 async def cargar_limites_nom041() -> None:
     async with SessionLocal() as db:
@@ -72,34 +126,35 @@ async def cargar_limites_nom041() -> None:
                 valores["nox_ppm"] = nox_ppm
             for fase in (FaseLectura.RALENTI, FaseLectura.CRUCERO):
                 for parametro, valor_maximo in valores.items():
-                    existente = (
-                        await db.execute(
-                            select(LimiteEmision).where(
-                                LimiteEmision.metodo == metodo,
-                                LimiteEmision.fase == fase,
-                                LimiteEmision.parametro == parametro,
-                                LimiteEmision.anio_modelo_desde == desde,
-                                LimiteEmision.anio_modelo_hasta == hasta,
-                            )
-                        )
-                    ).scalars().first()
-                    if existente is not None:
-                        if existente.valor_maximo != valor_maximo:
-                            existente.valor_maximo = valor_maximo
-                            db.add(existente)
-                            actualizados += 1
-                    else:
-                        db.add(
-                            LimiteEmision(
-                                metodo=metodo,
-                                fase=fase,
-                                parametro=parametro,
-                                valor_maximo=valor_maximo,
-                                anio_modelo_desde=desde,
-                                anio_modelo_hasta=hasta,
-                            )
-                        )
+                    resultado = await _upsert_limite(
+                        db,
+                        metodo=metodo,
+                        fase=fase,
+                        parametro=parametro,
+                        valor_maximo=valor_maximo,
+                        anio_modelo_desde=desde,
+                        anio_modelo_hasta=hasta,
+                    )
+                    if resultado == "insertado":
                         insertados += 1
+                    elif resultado == "actualizado":
+                        actualizados += 1
+
+        for metodo in (MetodoPrueba.GAS_DYNAMIC, MetodoPrueba.GAS_STATIC):
+            for fase in (FaseLectura.RALENTI, FaseLectura.CRUCERO):
+                resultado = await _upsert_limite(
+                    db,
+                    metodo=metodo,
+                    fase=fase,
+                    parametro="co_co2_dilucion_pct",
+                    valor_maximo=DILUCION_CO_CO2_MAX,
+                    valor_minimo=DILUCION_CO_CO2_MIN,
+                )
+                if resultado == "insertado":
+                    insertados += 1
+                elif resultado == "actualizado":
+                    actualizados += 1
+
         await db.commit()
         print(f"NOM-041: {insertados} filas insertadas, {actualizados} actualizadas.")
 

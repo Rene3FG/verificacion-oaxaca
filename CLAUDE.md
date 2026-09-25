@@ -2308,3 +2308,38 @@ regla de rango), decidir si/cuándo conectar NOx/Lambda a la evaluación
 (depende del Equipment Integration Contract), ambigüedad del folio en el
 snapshot, agenda de 4 semanas (semana 3 en curso, vence 2026-10-02), PR #1
 sin revisión formal en GitHub.
+
+## Rango de dilución CO+CO2 de NOM-041: `valor_minimo` cargado en catálogo, sin conectar a evaluación (2026-09-24)
+
+Cierra la mitad técnica del pendiente de arriba (`valor_minimo` + carga del
+rango) con el mismo criterio ya usado para NOx/Lambda: cargar el dato real
+en el catálogo, sin tocar `evaluar_resultado`.
+
+- Migración `a7c4e02f5b1d`: `cat_limites_emision.valor_minimo` (Float,
+  nullable, default NULL). No afecta filas existentes — todas siguen siendo
+  un máximo puro. `LimiteEmisionInput` (GET/POST `/api/pruebas/limites-emision`)
+  expone el campo; el POST valida `valor_minimo <= valor_maximo` (422 si no).
+- `app/seed_limites_nom041.py` carga el rango [13%-16,5% vol.] como el
+  parámetro sintético `co_co2_dilucion_pct`, sin estratificar por
+  año-modelo (a diferencia de HC/CO/O2/NOx) — 4 filas nuevas (2 métodos ×
+  2 fases). Refactor menor: la lógica de upsert (antes duplicada dentro del
+  loop principal) se extrajo a `_upsert_limite`, reusada por ambos bloques.
+- **Sigue sin conectarse a `evaluar_resultado`**, decisión explícita, mismo
+  criterio que NOx/Lambda: falta decidir qué hace un expediente fuera de
+  rango (¿rechazo igual que un contaminante excedido, o solo nota de
+  auditoría sin bloquear el resultado?) — es una decisión de producto, no
+  una pieza técnica faltante. `PARAMETROS_CON_LIMITE` no cambia.
+- 2 pruebas nuevas (`test_limites_emision_valor_minimo_ida_y_vuelta`,
+  `test_limites_emision_valor_minimo_mayor_que_maximo_rechaza`). 230
+  pruebas, todas pasan. No se agregó una prueba que invoque
+  `cargar_limites_nom041()` directamente — usa `SessionLocal()` real, fuera
+  de la transacción-savepoint de `db_session`, mismo riesgo de
+  contaminación de la BD de dev ya documentado en este archivo; se verificó
+  manualmente por `psql` (4 filas correctas, segunda corrida del script
+  0 insertadas/0 actualizadas).
+
+**Pendiente real, sin cambios de fondo**: decidir la regla de evaluación
+del rango de dilución (bloquea o solo audita) y si/cuándo conectar
+NOx/Lambda — ambas requieren decisión de producto, no código; ambigüedad
+del folio en el snapshot; agenda de 4 semanas (semana 3 en curso, vence
+2026-10-02); PR #1 sin revisión formal en GitHub.
