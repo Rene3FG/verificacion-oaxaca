@@ -144,9 +144,51 @@ async function desactivarEstacion(e) {
   }
 }
 
+// --- Parámetros ---
+const parametros = ref([]);
+const cargandoParametros = ref(false);
+const parametroAbierto = ref(false);
+const parametroEditando = ref(null);
+const parametroValor = ref("");
+const guardandoParametro = ref(false);
+
+async function cargarParametros() {
+  cargandoParametros.value = true;
+  try {
+    const { data } = await api.get("/parametros");
+    parametros.value = data;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo cargar los parámetros de sistema.";
+  } finally {
+    cargandoParametros.value = false;
+  }
+}
+
+function abrirParametro(p) {
+  parametroEditando.value = p;
+  parametroValor.value = p.valor;
+  parametroAbierto.value = true;
+}
+
+async function guardarParametro() {
+  guardandoParametro.value = true;
+  error.value = null;
+  try {
+    await api.patch(`/parametros/${parametroEditando.value.clave}`, { valor: parametroValor.value });
+    aviso.value = `Parámetro ${parametroEditando.value.clave} actualizado.`;
+    parametroAbierto.value = false;
+    await cargarParametros();
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo guardar el parámetro.";
+  } finally {
+    guardandoParametro.value = false;
+  }
+}
+
 onMounted(() => {
   cargarUsuarios();
   cargarEstaciones();
+  cargarParametros();
 });
 </script>
 
@@ -162,6 +204,7 @@ onMounted(() => {
     <v-btn-toggle v-model="sub" mandatory density="compact" class="mb-4">
       <v-btn value="usuarios">Usuarios</v-btn>
       <v-btn value="estaciones">Estaciones</v-btn>
+      <v-btn value="parametros">Parámetros</v-btn>
     </v-btn-toggle>
 
     <v-card v-if="sub === 'usuarios'" class="rounded-institucional-lg elevation-institucional-0" variant="flat">
@@ -197,7 +240,7 @@ onMounted(() => {
       </v-card-text>
     </v-card>
 
-    <v-card v-else class="rounded-institucional-lg elevation-institucional-0" variant="flat">
+    <v-card v-else-if="sub === 'estaciones'" class="rounded-institucional-lg elevation-institucional-0" variant="flat">
       <v-card-title class="d-flex align-center ga-2">
         Estaciones
         <v-spacer />
@@ -219,6 +262,33 @@ onMounted(() => {
               <td class="text-right">
                 <v-btn variant="text" size="small" @click="abrirEstacion(e)">Editar</v-btn>
                 <v-btn variant="text" size="small" color="error" @click="desactivarEstacion(e)">Desactivar</v-btn>
+              </td>
+            </tr>
+          </tbody>
+        </v-table>
+      </v-card-text>
+    </v-card>
+
+    <v-card v-else class="rounded-institucional-lg elevation-institucional-0" variant="flat">
+      <v-card-title>Parámetros de sistema</v-card-title>
+      <v-card-text>
+        <v-progress-linear v-if="cargandoParametros" indeterminate class="mb-4" />
+        <v-table v-else density="compact">
+          <thead>
+            <tr><th>Clave</th><th>Valor</th><th>Descripción</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in parametros" :key="p.clave">
+              <td><code>{{ p.clave }}</code></td>
+              <td>
+                {{ p.valor }}
+                <v-chip v-if="p.origen === 'default'" size="x-small" variant="tonal" class="ml-1">
+                  sin configurar, valor por defecto
+                </v-chip>
+              </td>
+              <td class="text-medium-emphasis">{{ p.descripcion }}</td>
+              <td class="text-right">
+                <v-btn variant="text" size="small" @click="abrirParametro(p)">Editar</v-btn>
               </td>
             </tr>
           </tbody>
@@ -261,6 +331,21 @@ onMounted(() => {
           <v-spacer />
           <v-btn variant="text" @click="estacionAbierta = false">Cancelar</v-btn>
           <v-btn color="primary" :loading="guardandoEstacion" @click="guardarEstacion">Guardar</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="parametroAbierto" max-width="480">
+      <v-card class="rounded-institucional-lg">
+        <v-card-title>Editar {{ parametroEditando?.clave }}</v-card-title>
+        <v-card-text>
+          <p class="text-medium-emphasis mb-3">{{ parametroEditando?.descripcion }}</p>
+          <v-text-field v-model="parametroValor" label="Valor" />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="parametroAbierto = false">Cancelar</v-btn>
+          <v-btn color="primary" :loading="guardandoParametro" @click="guardarParametro">Guardar</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

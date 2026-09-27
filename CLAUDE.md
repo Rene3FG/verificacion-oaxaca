@@ -2343,3 +2343,53 @@ del rango de dilución (bloquea o solo audita) y si/cuándo conectar
 NOx/Lambda — ambas requieren decisión de producto, no código; ambigüedad
 del folio en el snapshot; agenda de 4 semanas (semana 3 en curso, vence
 2026-10-02); PR #1 sin revisión formal en GitHub.
+
+## CRUD de parámetros de sistema (`cat_parametros_sistema`) para Administración (2026-09-27)
+
+Cierra la pieza de "Pantalla unificada de parámetros y catálogos" que el plan
+del 2026-09-14 dejaba pendiente en Administración — no bloqueada, solo sin
+construir. `obd_modelo_minimo` (usado de verdad en `obd_aplica`) no tenía
+forma de editarse fuera de tocar la BD a mano.
+
+- `GET /api/parametros` / `PATCH /api/parametros/{clave}` (`requiere_supervisor`),
+  solo sobre las 4 claves conocidas de `app/services/parametros.py::DEFAULTS`
+  — no admite dar de alta claves nuevas desde el panel (decisión de producto,
+  fuera de alcance). Las que todavía no tienen fila propia en
+  `cat_parametros_sistema` se listan con su valor por defecto y `origen:
+  "default"`, para que Supervisor vea el set completo aunque `seed.py` no
+  las haya insertado. `validar_valor()` valida por clave conocida
+  (`obd_modelo_minimo` año 1980-2100, `gasolina_prueba_default`
+  dinamica/estatica, `gasolina_permite_cambio_estatica` true/false).
+- Pestaña "Parámetros" en `AdministracionPanel.vue`, mismo patrón que
+  Usuarios/Estaciones (tabla + diálogo de edición).
+- **Hallazgo real, corregido aparte**: `DEFAULTS["folios_origen"]` seguía en
+  `"sistema_externo"` desde el scaffolding inicial, de antes de la revisión
+  del Figma del 2026-08-24 que confirmó folios como inventario LOCAL
+  (bloqueador E). La clave no se lee en ningún flujo real (`folios.py` ya
+  implementa inventario local desde el 2026-08-25) así que no era un bug de
+  comportamiento, pero sí mostraba un valor que contradice la arquitectura
+  real en un panel pensado para que Supervisor lo lea — corregido el
+  default a `"inventario_local"` y actualizada también la fila ya sembrada
+  en la BD de dev (vía el nuevo PATCH, verificado por curl).
+- **Fuera de alcance a propósito**: `gasolina_prueba_default` y
+  `gasolina_permite_cambio_estatica` existen como parámetros pero
+  `pruebas.py` no los lee todavía (usa `TipoPrueba.DINAMICA` fijo como
+  default y siempre permite el cambio a estática con motivo). Conectarlos
+  se decidió NO hacerlo esta sesión sin confirmar con el usuario: la regla
+  de negocio #5 de este mismo archivo fija "gasolina → dinámica" como el
+  default, así que no está claro si esos dos parámetros son configuración
+  real pendiente de conectar o vestigios de antes de esa regla — mismo
+  criterio de no adivinar reglas de negocio que el resto de este proyecto.
+- 236 pruebas (230→236), `npx vite build` limpio. Probado además contra el
+  backend real por curl (login `supervisor1`, GET, PATCH inválido → 422,
+  PATCH válido ida y vuelta) — sin extensión de Chrome conectada en esta
+  sesión, no se verificó visualmente en navegador la pestaña nueva.
+
+**Pendiente real, sin cambios**: decidir si `gasolina_prueba_default` /
+`gasolina_permite_cambio_estatica` deben conectarse a `pruebas.py` o
+retirarse del catálogo (ambigüedad nueva de esta sesión, ver arriba);
+rango de dilución CO+CO2 y NOx/Lambda sin conectar a evaluación; ambigüedad
+del folio en el snapshot; semana 3 de la agenda en curso (vence
+2026-10-02); PR #1 sin revisión formal en GitHub. El commit `04333ba`
+(rango de dilución del 2026-09-24) seguía sin pushear al empezar esta
+sesión — pendiente de token del usuario, mismo protocolo de siempre.

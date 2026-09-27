@@ -12,7 +12,21 @@ DEFAULTS = {
     "obd_modelo_minimo": "2006",
     "gasolina_prueba_default": "dinamica",
     "gasolina_permite_cambio_estatica": "true",
-    "folios_origen": "sistema_externo",
+    # Valor corregido (2026-09-27): el default original ("sistema_externo")
+    # quedó de antes de la revisión del Figma del 2026-08-24, que confirmó
+    # que los folios son inventario LOCAL (bloqueador E del plan del
+    # 2026-09-14) — folios_client.py/Folio ya implementan eso desde el
+    # 2026-08-25. Esta clave no se lee en ningún flujo real (ver folios.py),
+    # es solo informativa para el panel de Administración; se corrige aquí
+    # para no mostrar un valor que contradice la arquitectura real.
+    "folios_origen": "inventario_local",
+}
+
+DESCRIPCIONES = {
+    "obd_modelo_minimo": "Año-modelo mínimo (gasolina) a partir del cual aplica OBD/SBD.",
+    "gasolina_prueba_default": "Tipo de prueba con el que arranca un vehículo a gasolina (dinamica/estatica).",
+    "gasolina_permite_cambio_estatica": "Si el operador puede cambiar de dinámica a estática con motivo (true/false).",
+    "folios_origen": "Origen del inventario de folios (informativo; no se lee en el flujo real de folios.py).",
 }
 
 
@@ -26,6 +40,26 @@ async def get_parametro(db: AsyncSession, clave: str) -> str:
     if clave in DEFAULTS:
         return DEFAULTS[clave]
     raise KeyError(f"Parámetro de sistema no encontrado: {clave}")
+
+
+def validar_valor(clave: str, valor: str) -> str | None:
+    """Devuelve un mensaje de error si `valor` no es válido para `clave`,
+    o None si es válido. Solo valida las claves conocidas (ver DEFAULTS)."""
+
+    if clave == "obd_modelo_minimo":
+        try:
+            numero = int(valor)
+        except ValueError:
+            return "obd_modelo_minimo debe ser un año numérico (ej. 2006)."
+        if numero < 1980 or numero > 2100:
+            return "obd_modelo_minimo debe ser un año-modelo razonable."
+    elif clave == "gasolina_prueba_default":
+        if valor not in ("dinamica", "estatica"):
+            return "gasolina_prueba_default debe ser 'dinamica' o 'estatica'."
+    elif clave in ("gasolina_permite_cambio_estatica",):
+        if valor not in ("true", "false"):
+            return f"{clave} debe ser 'true' o 'false'."
+    return None
 
 
 async def obd_aplica(
