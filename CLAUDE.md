@@ -2412,3 +2412,30 @@ prórrogas.
 - Pendiente: leer los frames `Administración / …` a detalle (el zoom del canvas de Figma no respondió a la
   automatización el 2026-09-28) para afinar títulos, columnas y acciones; un Superadmin global aparte no existe
   (decisión ya tomada: `requiere_supervisor` como aproximación).
+
+## Acceso: pantallas de error diferenciadas y login según el Figma (2026-09-29)
+
+Cierra el hueco `Acceso / Error — Estación no configurada` y `Acceso / Error — Sin permiso`, con la
+especificación que entregó Sebastián (`Respuesta_para_Rene_Acceso_y_Errores_2026-09-28.pdf`, frames
+`#95:3875`, `#96:3886`, `#96:3927`, `#98:3908`, `#98:3925`). Es su lectura del Figma: el canvas no se pudo
+leer por automatización aquí, así que medidas y textos vienen de su PDF.
+
+- `stores/session.js`: nuevo `errorTipo` (`estacion_no_configurada` | `sin_permiso` | `credenciales`) y
+  `usuarioDenegado`, más la acción `limpiarError()`. Un **403** del login (credenciales válidas, sin
+  `UserStationPermission` para esa estación) ya no se trata como un 401 de contraseña equivocada.
+- `LoginView.vue` con 3 estados: **A** estación no configurada (título "No es posible iniciar sesión",
+  "Qué debe configurarse", botón "Reintentar detección" — antes había que recargar con F5); **B** acceso
+  denegado (tarjeta con usuario/estación/centro·línea, "Sin permiso para esta estación", botón
+  "Cambiar usuario"); **C** formulario ("Iniciar sesión", tarjeta "Estación detectada" con chip
+  Configurada y 4 filas Estación/Centro/Línea/Tipo, bloque "Validación de acceso", botón sin mayúsculas
+  forzadas). Tarjeta de 640 px. El 401 sigue mostrándose como alerta sobre el formulario.
+- `TopAppBar.vue`: en la ruta `login` muestra "Acceso operativo" y oculta los chips de estación y de
+  sincronización; título "Sistema de Verificación Vehicular Oaxaca".
+- **Sin cambios de backend.** Omitido a propósito: la fila "Rol asignado" del frame de acceso denegado
+  necesitaría que el 403 devolviera los permisos del usuario (un endpoint/campo nuevo).
+- Verificado en Chrome contra el backend real: estado A (segunda instancia de vite con
+  `VITE_DEVICE_IDENTIFIER` inexistente), estado C, estado B (`operador2` en estación de línea 1), 401 con
+  contraseña equivocada, "Cambiar usuario", y el login correcto sigue llevando a `/captura`.
+  `npx vite build` limpio.
+- Observado, sin corregir: si el navegador autocompleta el usuario, el label flotante de Vuetify se
+  encima sobre el valor (el `v-model` sigue vacío hasta que el usuario escribe).

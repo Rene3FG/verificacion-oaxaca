@@ -1,10 +1,12 @@
 <script setup>
-import { onBeforeUnmount, onMounted, watch } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { useSessionStore } from "../stores/session";
 
 const session = useSessionStore();
 const router = useRouter();
+const route = useRoute();
+const enLogin = computed(() => route.name === "login");
 
 const REFRESCO_SYNC_MS = 30_000;
 let intervalo = null;
@@ -50,9 +52,18 @@ function textoConexion(conexion, estadoSync) {
 
 <template>
   <v-app-bar color="primary" density="comfortable">
-    <v-app-bar-title>Sistema de Verificación Vehicular</v-app-bar-title>
+    <v-app-bar-title>Sistema de Verificación Vehicular Oaxaca</v-app-bar-title>
 
-    <v-chip v-if="session.estacion" class="mr-2 rounded-institucional-full" variant="flat" color="white">
+    <!-- Sin sesión (login) el Figma pide una barra limpia: solo "Acceso operativo",
+         sin chips de estación ni de sincronización. -->
+    <span v-if="enLogin" class="mr-4 text-body-2">Acceso operativo</span>
+
+    <v-chip
+      v-if="session.estacion && !enLogin"
+      class="mr-2 rounded-institucional-full"
+      variant="flat"
+      color="white"
+    >
       {{ session.estacion.station_type }} · {{ session.estacion.center_id }}
       <template v-if="session.estacion.line_id">
         · Línea {{ session.estacion.line_id }}
@@ -60,6 +71,7 @@ function textoConexion(conexion, estadoSync) {
     </v-chip>
 
     <v-chip
+      v-if="!enLogin"
       class="mr-2 rounded-institucional-full"
       variant="flat"
       :color="colorConexion(session.conexion, session.estadoSync?.en_error)"
