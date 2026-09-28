@@ -9,6 +9,7 @@ const STATION_TYPES = ["captura", "prueba", "impresion"];
 const error = ref(null);
 const aviso = ref(null);
 const sub = ref("usuarios");
+const catalogo = ref("parametros");
 
 // --- Usuarios ---
 const usuarios = ref([]);
@@ -203,9 +204,20 @@ onMounted(() => {
 
     <v-btn-toggle v-model="sub" mandatory density="compact" class="mb-4">
       <v-btn value="usuarios">Usuarios</v-btn>
+      <v-btn value="permisos">Roles y permisos</v-btn>
       <v-btn value="estaciones">Estaciones</v-btn>
-      <v-btn value="parametros">Parámetros</v-btn>
+      <v-btn value="catalogos">Parámetros y catálogos</v-btn>
     </v-btn-toggle>
+
+    <v-btn-toggle v-if="sub === 'catalogos'" v-model="catalogo" mandatory density="compact" class="mb-4 d-flex flex-wrap">
+      <v-btn value="parametros">Parámetros del sistema</v-btn>
+      <v-btn value="limites">Límites de emisión</v-btn>
+      <v-btn value="equipos">Equipos</v-btn>
+      <v-btn value="folios">Folios</v-btn>
+      <v-btn value="semestre">Periodos y prórrogas</v-btn>
+    </v-btn-toggle>
+
+    <slot v-if="sub === 'permisos'" name="permisos" />
 
     <v-card v-if="sub === 'usuarios'" class="rounded-institucional-lg elevation-institucional-0" variant="flat">
       <v-card-title class="d-flex align-center ga-2">
@@ -269,7 +281,11 @@ onMounted(() => {
       </v-card-text>
     </v-card>
 
-    <v-card v-else class="rounded-institucional-lg elevation-institucional-0" variant="flat">
+    <v-card
+      v-else-if="sub === 'catalogos' && catalogo === 'parametros'"
+      class="rounded-institucional-lg elevation-institucional-0"
+      variant="flat"
+    >
       <v-card-title>Parámetros de sistema</v-card-title>
       <v-card-text>
         <v-progress-linear v-if="cargandoParametros" indeterminate class="mb-4" />
@@ -295,6 +311,11 @@ onMounted(() => {
         </v-table>
       </v-card-text>
     </v-card>
+
+    <slot v-if="sub === 'catalogos' && catalogo === 'limites'" name="limites" />
+    <slot v-if="sub === 'catalogos' && catalogo === 'equipos'" name="equipos" />
+    <slot v-if="sub === 'catalogos' && catalogo === 'folios'" name="folios" />
+    <slot v-if="sub === 'catalogos' && catalogo === 'semestre'" name="semestre" />
 
     <v-dialog v-model="usuarioAbierto" max-width="480">
       <v-card class="rounded-institucional-lg">

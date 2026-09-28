@@ -525,12 +525,7 @@ onMounted(() => {
 
     <v-tabs v-model="tab" class="mb-4">
       <v-tab value="monitor">Monitor</v-tab>
-      <v-tab value="permisos">Permisos</v-tab>
       <v-tab value="sincronizacion">Sincronización</v-tab>
-      <v-tab value="folios">Folios</v-tab>
-      <v-tab value="limites">Límites de emisión</v-tab>
-      <v-tab value="equipos">Equipos</v-tab>
-      <v-tab value="semestre">Semestre</v-tab>
       <v-tab value="reimpresion">Reimpresión</v-tab>
       <v-tab value="administracion">Administración</v-tab>
     </v-tabs>
@@ -593,72 +588,6 @@ onMounted(() => {
         </v-card>
       </v-window-item>
 
-      <v-window-item value="permisos">
-        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
-          <v-card-title class="d-flex align-center ga-2">
-            Permisos por estación
-            <v-spacer />
-            <v-btn color="primary" prepend-icon="mdi-plus" @click="abrirNuevoPermiso">
-              Nuevo permiso
-            </v-btn>
-          </v-card-title>
-          <v-card-text>
-            <v-progress-linear v-if="cargandoPermisos" indeterminate class="mb-4" />
-            <p v-else-if="permisos.length === 0" class="text-medium-emphasis">
-              Sin permisos registrados para este centro.
-            </p>
-            <v-table v-else density="compact">
-              <thead>
-                <tr>
-                  <th>Usuario</th>
-                  <th>Estación</th>
-                  <th>Centro</th>
-                  <th>Línea</th>
-                  <th>Opera</th>
-                  <th>Supervisa</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="permiso in permisos" :key="permiso.id">
-                  <td>
-                    {{ usuariosPorId[permiso.user_id]?.username ?? permiso.user_id.slice(0, 8) }}
-                  </td>
-                  <td>{{ permiso.station_type }}</td>
-                  <td>{{ permiso.center_id }}</td>
-                  <td>{{ permiso.line_id ?? "Todas" }}</td>
-                  <td>
-                    <v-switch
-                      :model-value="permiso.can_operate"
-                      hide-details
-                      density="compact"
-                      color="primary"
-                      @update:model-value="(v) => actualizarPermiso(permiso, 'can_operate', v)"
-                    />
-                  </td>
-                  <td>
-                    <v-switch
-                      :model-value="permiso.can_supervise"
-                      hide-details
-                      density="compact"
-                      color="primary"
-                      @update:model-value="(v) => actualizarPermiso(permiso, 'can_supervise', v)"
-                    />
-                  </td>
-                  <td>
-                    <v-btn
-                      size="small"
-                      variant="text"
-                      icon="mdi-delete"
-                      @click="eliminarPermiso(permiso)"
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </v-table>
-          </v-card-text>
-        </v-card>
-      </v-window-item>
 
       <v-window-item value="sincronizacion">
         <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
@@ -726,261 +655,328 @@ onMounted(() => {
         </v-card>
       </v-window-item>
 
-      <v-window-item value="folios">
-        <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
-          <v-card-title class="d-flex align-center ga-2">
-            Inventario local de folios
-            <v-spacer />
-            <v-btn
-              variant="text"
-              icon="mdi-refresh"
-              :loading="cargandoInventario"
-              @click="cargarInventarioFolios"
-            />
-          </v-card-title>
-          <v-card-text>
-            <v-progress-linear v-if="cargandoInventario" indeterminate class="mb-4" />
-            <v-table v-else density="compact">
-              <thead>
-                <tr>
-                  <th>Tipo</th>
-                  <th>Disponibles</th>
-                  <th>Asignados</th>
-                  <th>Impresos</th>
-                  <th>Dañados</th>
-                  <th>Invalidados</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="fila in inventarioFolios" :key="fila.tipo_certificado">
-                  <td>{{ fila.tipo_certificado }}</td>
-                  <td>{{ fila.disponibles }}</td>
-                  <td>{{ fila.asignados }}</td>
-                  <td>{{ fila.impresos }}</td>
-                  <td>{{ fila.danados }}</td>
-                  <td>{{ fila.invalidados }}</td>
-                </tr>
-              </tbody>
-            </v-table>
-          </v-card-text>
-        </v-card>
 
-        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
-          <v-card-title>Registrar lote por rango</v-card-title>
-          <v-card-text>
-            <v-select
-              v-model="loteForm.tipo_certificado"
-              :items="TIPOS_CERTIFICADO"
-              label="Tipo de certificado"
-              variant="outlined"
-              density="comfortable"
-            />
-            <v-text-field
-              v-model="loteForm.folio_inicio"
-              label="Folio inicial (ej. OAX-000001)"
-              variant="outlined"
-              density="comfortable"
-            />
-            <v-text-field
-              v-model="loteForm.folio_fin"
-              label="Folio final (ej. OAX-000500)"
-              variant="outlined"
-              density="comfortable"
-            />
-            <v-btn
-              color="primary"
-              :loading="registrandoLote"
-              :disabled="!loteForm.folio_inicio || !loteForm.folio_fin"
-              @click="registrarLoteFolios"
-            >
-              Registrar lote
-            </v-btn>
-          </v-card-text>
-        </v-card>
-      </v-window-item>
 
-      <v-window-item value="limites">
-        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
-          <v-card-title class="d-flex align-center ga-2">
-            Límites de emisión (NOM-041/NOM-045)
-            <v-spacer />
-            <v-btn
-              variant="text"
-              icon="mdi-refresh"
-              :loading="cargandoLimites"
-              @click="cargarLimitesEmision"
-            />
-            <v-btn color="primary" prepend-icon="mdi-plus" @click="abrirNuevoLimite">
-              Nuevo límite
-            </v-btn>
-          </v-card-title>
-          <v-card-text>
-            <v-progress-linear v-if="cargandoLimites" indeterminate class="mb-4" />
-            <p v-else-if="limitesEmision.length === 0" class="text-medium-emphasis">
-              Sin límites cargados. NOM-041 (gasolina) debería estar precargada por
-              <code>seed_limites_nom041.py</code>; NOM-045 (diésel) sigue pendiente de la tabla
-              oficial.
-            </p>
-            <v-table v-else density="compact">
-              <thead>
-                <tr>
-                  <th>Método</th>
-                  <th>Fase</th>
-                  <th>Parámetro</th>
-                  <th>Máximo</th>
-                  <th>Año-modelo</th>
-                  <th>Peso bruto (kg)</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(fila, i) in limitesEmision" :key="i">
-                  <td>{{ fila.metodo }}</td>
-                  <td>{{ fila.fase ?? "—" }}</td>
-                  <td>{{ fila.parametro }}</td>
-                  <td>{{ fila.valor_maximo }}</td>
-                  <td>{{ rangoTexto(fila.anio_modelo_desde, fila.anio_modelo_hasta) }}</td>
-                  <td>{{ rangoTexto(fila.peso_bruto_desde_kg, fila.peso_bruto_hasta_kg) }}</td>
-                </tr>
-              </tbody>
-            </v-table>
-          </v-card-text>
-        </v-card>
-      </v-window-item>
-
-      <v-window-item value="equipos">
-        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
-          <v-card-title class="d-flex align-center ga-2">
-            Capacidad del dinamómetro por línea
-            <v-spacer />
-            <v-btn
-              variant="text"
-              icon="mdi-refresh"
-              :loading="cargandoEstaciones"
-              @click="cargarEstacionesPrueba"
-            />
-          </v-card-title>
-          <v-card-subtitle class="text-wrap">
-            Sección 10 del handoff: si el peso bruto del vehículo excede la capacidad
-            configurada aquí, la prueba de gasolina en esa línea deja de proponer dinámica
-            por default y no se puede forzar (límite físico del equipo).
-          </v-card-subtitle>
-          <v-card-text>
-            <v-progress-linear v-if="cargandoEstaciones" indeterminate class="mb-4" />
-            <p v-else-if="estacionesPrueba.length === 0" class="text-medium-emphasis">
-              Sin estaciones de Prueba en este centro.
-            </p>
-            <v-table v-else density="compact">
-              <thead>
-                <tr>
-                  <th>Línea</th>
-                  <th>Estación</th>
-                  <th>Capacidad (kg)</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="estacion in estacionesPrueba" :key="estacion.id">
-                  <td>{{ estacion.line_id ?? "—" }}</td>
-                  <td>{{ estacion.name }}</td>
-                  <td style="max-width: 160px">
-                    <v-text-field
-                      v-model.number="estacion._valor"
-                      type="number"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                      placeholder="Sin configurar"
-                    />
-                  </td>
-                  <td>
-                    <v-btn
-                      size="small"
-                      variant="text"
-                      :loading="guardandoCapacidad[estacion.id]"
-                      @click="guardarCapacidad(estacion)"
-                    >
-                      Guardar
-                    </v-btn>
-                  </td>
-                </tr>
-              </tbody>
-            </v-table>
-          </v-card-text>
-        </v-card>
-      </v-window-item>
 
       <v-window-item value="administracion">
-        <AdministracionPanel />
-      </v-window-item>
+        <AdministracionPanel>
+          <template #permisos>
+            <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
+              <v-card-title class="d-flex align-center ga-2">
+                Permisos por estación
+                <v-spacer />
+                <v-btn color="primary" prepend-icon="mdi-plus" @click="abrirNuevoPermiso">
+                  Nuevo permiso
+                </v-btn>
+              </v-card-title>
+              <v-card-text>
+                <v-progress-linear v-if="cargandoPermisos" indeterminate class="mb-4" />
+                <p v-else-if="permisos.length === 0" class="text-medium-emphasis">
+                  Sin permisos registrados para este centro.
+                </p>
+                <v-table v-else density="compact">
+                  <thead>
+                    <tr>
+                      <th>Usuario</th>
+                      <th>Estación</th>
+                      <th>Centro</th>
+                      <th>Línea</th>
+                      <th>Opera</th>
+                      <th>Supervisa</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="permiso in permisos" :key="permiso.id">
+                      <td>
+                        {{ usuariosPorId[permiso.user_id]?.username ?? permiso.user_id.slice(0, 8) }}
+                      </td>
+                      <td>{{ permiso.station_type }}</td>
+                      <td>{{ permiso.center_id }}</td>
+                      <td>{{ permiso.line_id ?? "Todas" }}</td>
+                      <td>
+                        <v-switch
+                          :model-value="permiso.can_operate"
+                          hide-details
+                          density="compact"
+                          color="primary"
+                          @update:model-value="(v) => actualizarPermiso(permiso, 'can_operate', v)"
+                        />
+                      </td>
+                      <td>
+                        <v-switch
+                          :model-value="permiso.can_supervise"
+                          hide-details
+                          density="compact"
+                          color="primary"
+                          @update:model-value="(v) => actualizarPermiso(permiso, 'can_supervise', v)"
+                        />
+                      </td>
+                      <td>
+                        <v-btn
+                          size="small"
+                          variant="text"
+                          icon="mdi-delete"
+                          @click="eliminarPermiso(permiso)"
+                        />
+                      </td>
+                    </tr>
+                  </tbody>
+                </v-table>
+              </v-card-text>
+            </v-card>
+          </template>
+          <template #limites>
+            <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
+              <v-card-title class="d-flex align-center ga-2">
+                Límites de emisión (NOM-041/NOM-045)
+                <v-spacer />
+                <v-btn
+                  variant="text"
+                  icon="mdi-refresh"
+                  :loading="cargandoLimites"
+                  @click="cargarLimitesEmision"
+                />
+                <v-btn color="primary" prepend-icon="mdi-plus" @click="abrirNuevoLimite">
+                  Nuevo límite
+                </v-btn>
+              </v-card-title>
+              <v-card-text>
+                <v-progress-linear v-if="cargandoLimites" indeterminate class="mb-4" />
+                <p v-else-if="limitesEmision.length === 0" class="text-medium-emphasis">
+                  Sin límites cargados. NOM-041 (gasolina) debería estar precargada por
+                  <code>seed_limites_nom041.py</code>; NOM-045 (diésel) sigue pendiente de la tabla
+                  oficial.
+                </p>
+                <v-table v-else density="compact">
+                  <thead>
+                    <tr>
+                      <th>Método</th>
+                      <th>Fase</th>
+                      <th>Parámetro</th>
+                      <th>Máximo</th>
+                      <th>Año-modelo</th>
+                      <th>Peso bruto (kg)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(fila, i) in limitesEmision" :key="i">
+                      <td>{{ fila.metodo }}</td>
+                      <td>{{ fila.fase ?? "—" }}</td>
+                      <td>{{ fila.parametro }}</td>
+                      <td>{{ fila.valor_maximo }}</td>
+                      <td>{{ rangoTexto(fila.anio_modelo_desde, fila.anio_modelo_hasta) }}</td>
+                      <td>{{ rangoTexto(fila.peso_bruto_desde_kg, fila.peso_bruto_hasta_kg) }}</td>
+                    </tr>
+                  </tbody>
+                </v-table>
+              </v-card-text>
+            </v-card>
+          </template>
+          <template #equipos>
+            <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
+              <v-card-title class="d-flex align-center ga-2">
+                Capacidad del dinamómetro por línea
+                <v-spacer />
+                <v-btn
+                  variant="text"
+                  icon="mdi-refresh"
+                  :loading="cargandoEstaciones"
+                  @click="cargarEstacionesPrueba"
+                />
+              </v-card-title>
+              <v-card-subtitle class="text-wrap">
+                Sección 10 del handoff: si el peso bruto del vehículo excede la capacidad
+                configurada aquí, la prueba de gasolina en esa línea deja de proponer dinámica
+                por default y no se puede forzar (límite físico del equipo).
+              </v-card-subtitle>
+              <v-card-text>
+                <v-progress-linear v-if="cargandoEstaciones" indeterminate class="mb-4" />
+                <p v-else-if="estacionesPrueba.length === 0" class="text-medium-emphasis">
+                  Sin estaciones de Prueba en este centro.
+                </p>
+                <v-table v-else density="compact">
+                  <thead>
+                    <tr>
+                      <th>Línea</th>
+                      <th>Estación</th>
+                      <th>Capacidad (kg)</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="estacion in estacionesPrueba" :key="estacion.id">
+                      <td>{{ estacion.line_id ?? "—" }}</td>
+                      <td>{{ estacion.name }}</td>
+                      <td style="max-width: 160px">
+                        <v-text-field
+                          v-model.number="estacion._valor"
+                          type="number"
+                          variant="outlined"
+                          density="compact"
+                          hide-details
+                          placeholder="Sin configurar"
+                        />
+                      </td>
+                      <td>
+                        <v-btn
+                          size="small"
+                          variant="text"
+                          :loading="guardandoCapacidad[estacion.id]"
+                          @click="guardarCapacidad(estacion)"
+                        >
+                          Guardar
+                        </v-btn>
+                      </td>
+                    </tr>
+                  </tbody>
+                </v-table>
+              </v-card-text>
+            </v-card>
+          </template>
+          <template #folios>
+            <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
+              <v-card-title class="d-flex align-center ga-2">
+                Inventario local de folios
+                <v-spacer />
+                <v-btn
+                  variant="text"
+                  icon="mdi-refresh"
+                  :loading="cargandoInventario"
+                  @click="cargarInventarioFolios"
+                />
+              </v-card-title>
+              <v-card-text>
+                <v-progress-linear v-if="cargandoInventario" indeterminate class="mb-4" />
+                <v-table v-else density="compact">
+                  <thead>
+                    <tr>
+                      <th>Tipo</th>
+                      <th>Disponibles</th>
+                      <th>Asignados</th>
+                      <th>Impresos</th>
+                      <th>Dañados</th>
+                      <th>Invalidados</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="fila in inventarioFolios" :key="fila.tipo_certificado">
+                      <td>{{ fila.tipo_certificado }}</td>
+                      <td>{{ fila.disponibles }}</td>
+                      <td>{{ fila.asignados }}</td>
+                      <td>{{ fila.impresos }}</td>
+                      <td>{{ fila.danados }}</td>
+                      <td>{{ fila.invalidados }}</td>
+                    </tr>
+                  </tbody>
+                </v-table>
+              </v-card-text>
+            </v-card>
 
-      <v-window-item value="semestre">
-        <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
-          <v-card-title class="d-flex align-center ga-2">
-            Semestre y prórroga
-            <v-spacer />
-            <v-btn
-              variant="text"
-              icon="mdi-refresh"
-              :loading="cargandoSemestre"
-              @click="cargarSemestre"
-            />
-          </v-card-title>
-          <v-card-text>
-            <v-progress-linear v-if="cargandoSemestre" indeterminate class="mb-4" />
-            <template v-else-if="semestreInfo">
-              <p class="mb-2">
-                <strong>Semestre actual:</strong> {{ semestreInfo.semestre_actual }}°
-              </p>
-              <p class="mb-2">
-                <strong>Prórroga:</strong>
-                <v-chip
-                  size="small"
-                  :color="semestreInfo.prorroga_activa ? 'success' : undefined"
-                  class="ml-1"
+            <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
+              <v-card-title>Registrar lote por rango</v-card-title>
+              <v-card-text>
+                <v-select
+                  v-model="loteForm.tipo_certificado"
+                  :items="TIPOS_CERTIFICADO"
+                  label="Tipo de certificado"
+                  variant="outlined"
+                  density="comfortable"
+                />
+                <v-text-field
+                  v-model="loteForm.folio_inicio"
+                  label="Folio inicial (ej. OAX-000001)"
+                  variant="outlined"
+                  density="comfortable"
+                />
+                <v-text-field
+                  v-model="loteForm.folio_fin"
+                  label="Folio final (ej. OAX-000500)"
+                  variant="outlined"
+                  density="comfortable"
+                />
+                <v-btn
+                  color="primary"
+                  :loading="registrandoLote"
+                  :disabled="!loteForm.folio_inicio || !loteForm.folio_fin"
+                  @click="registrarLoteFolios"
                 >
-                  {{ semestreInfo.prorroga_activa ? "Activa" : "Inactiva" }}
-                </v-chip>
-              </p>
-              <p v-if="semestreInfo.prorroga_activa" class="text-caption text-medium-emphasis">
-                Hasta {{ semestreInfo.fecha_final_prorroga }} — {{ semestreInfo.motivo_prorroga }}
-              </p>
-            </template>
-          </v-card-text>
-        </v-card>
+                  Registrar lote
+                </v-btn>
+              </v-card-text>
+            </v-card>
+          </template>
+          <template #semestre>
+            <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
+              <v-card-title class="d-flex align-center ga-2">
+                Semestre y prórroga
+                <v-spacer />
+                <v-btn
+                  variant="text"
+                  icon="mdi-refresh"
+                  :loading="cargandoSemestre"
+                  @click="cargarSemestre"
+                />
+              </v-card-title>
+              <v-card-text>
+                <v-progress-linear v-if="cargandoSemestre" indeterminate class="mb-4" />
+                <template v-else-if="semestreInfo">
+                  <p class="mb-2">
+                    <strong>Semestre actual:</strong> {{ semestreInfo.semestre_actual }}°
+                  </p>
+                  <p class="mb-2">
+                    <strong>Prórroga:</strong>
+                    <v-chip
+                      size="small"
+                      :color="semestreInfo.prorroga_activa ? 'success' : undefined"
+                      class="ml-1"
+                    >
+                      {{ semestreInfo.prorroga_activa ? "Activa" : "Inactiva" }}
+                    </v-chip>
+                  </p>
+                  <p v-if="semestreInfo.prorroga_activa" class="text-caption text-medium-emphasis">
+                    Hasta {{ semestreInfo.fecha_final_prorroga }} — {{ semestreInfo.motivo_prorroga }}
+                  </p>
+                </template>
+              </v-card-text>
+            </v-card>
 
-        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
-          <v-card-title>Configurar prórroga del 1er periodo</v-card-title>
-          <v-card-subtitle class="text-wrap">
-            Hasta la fecha final, se imprime Semestre 1 para todos los vehículos sin importar
-            el mes. No se contempla prórroga del 2º periodo. Una fecha final en el pasado
-            desactiva la prórroga vigente antes de tiempo.
-          </v-card-subtitle>
-          <v-card-text>
-            <v-text-field
-              v-model="prorrogaForm.fecha_final"
-              label="Fecha final"
-              type="date"
-              variant="outlined"
-              density="comfortable"
-            />
-            <v-textarea
-              v-model="prorrogaForm.motivo"
-              label="Motivo (obligatorio)"
-              variant="outlined"
-              density="comfortable"
-              rows="2"
-            />
-            <v-btn
-              color="primary"
-              :loading="guardandoProrroga"
-              :disabled="!prorrogaForm.fecha_final || !prorrogaForm.motivo.trim()"
-              @click="guardarProrroga"
-            >
-              Guardar
-            </v-btn>
-          </v-card-text>
-        </v-card>
+            <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
+              <v-card-title>Configurar prórroga del 1er periodo</v-card-title>
+              <v-card-subtitle class="text-wrap">
+                Hasta la fecha final, se imprime Semestre 1 para todos los vehículos sin importar
+                el mes. No se contempla prórroga del 2º periodo. Una fecha final en el pasado
+                desactiva la prórroga vigente antes de tiempo.
+              </v-card-subtitle>
+              <v-card-text>
+                <v-text-field
+                  v-model="prorrogaForm.fecha_final"
+                  label="Fecha final"
+                  type="date"
+                  variant="outlined"
+                  density="comfortable"
+                />
+                <v-textarea
+                  v-model="prorrogaForm.motivo"
+                  label="Motivo (obligatorio)"
+                  variant="outlined"
+                  density="comfortable"
+                  rows="2"
+                />
+                <v-btn
+                  color="primary"
+                  :loading="guardandoProrroga"
+                  :disabled="!prorrogaForm.fecha_final || !prorrogaForm.motivo.trim()"
+                  @click="guardarProrroga"
+                >
+                  Guardar
+                </v-btn>
+              </v-card-text>
+            </v-card>
+          </template>
+        </AdministracionPanel>
       </v-window-item>
+
 
       <v-window-item value="reimpresion">
         <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">

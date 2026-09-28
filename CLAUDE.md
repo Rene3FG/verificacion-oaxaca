@@ -2393,3 +2393,22 @@ del folio en el snapshot; semana 3 de la agenda en curso (vence
 2026-10-02); PR #1 sin revisión formal en GitHub. El commit `04333ba`
 (rango de dilución del 2026-09-24) seguía sin pushear al empezar esta
 sesión — pendiente de token del usuario, mismo protocolo de siempre.
+
+## Administración como módulo del Figma: navegación de dos niveles (2026-09-29)
+
+`SupervisorView.vue` pasa de 9 pestañas sueltas a 4 (Monitor, Sincronización, Reimpresión,
+Administración). `AdministracionPanel.vue` ahora es el módulo completo, con el orden de los frames
+`Administración / …` del Figma: **Usuarios · Roles y permisos · Estaciones · Parámetros y catálogos**, y este
+último con un segundo nivel: Parámetros del sistema · Límites de emisión · Equipos · Folios · Periodos y
+prórrogas.
+
+- Mecanismo: los paneles de Permisos, Límites, Equipos, Folios y Semestre siguen viviendo en
+  `SupervisorView.vue` (su estado, diálogos y funciones no se movieron) y se inyectan en
+  `AdministracionPanel` por slots con nombre (`#permisos`, `#limites`, `#equipos`, `#folios`, `#semestre`).
+  Los datos siguen cargándose todos en `onMounted` del padre, así que no hay carga perezosa por sección.
+- "Sincronización" conserva su nombre: el frame `Supervisión / Errores y reintentos` del Figma no está
+  leído a detalle y no se asumió que es lo mismo.
+- Sin cambios de backend. Verificado en Chrome recorriendo las 9 secciones; `npx vite build` limpio.
+- Pendiente: leer los frames `Administración / …` a detalle (el zoom del canvas de Figma no respondió a la
+  automatización el 2026-09-28) para afinar títulos, columnas y acciones; un Superadmin global aparte no existe
+  (decisión ya tomada: `requiere_supervisor` como aproximación).
