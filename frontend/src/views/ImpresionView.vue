@@ -521,12 +521,22 @@ onMounted(cargarCola);
             <v-card-title>Vista previa</v-card-title>
             <v-card-subtitle class="text-wrap">Certificado y resultados</v-card-subtitle>
             <v-card-text>
-              <p v-if="!expediente.certificado_tipo" class="text-caption text-medium-emphasis mb-2">
+              <v-alert
+                v-if="expediente.estado === 'FOLIO_ERROR'"
+                type="error"
+                variant="tonal"
+                class="mb-3"
+                icon="mdi-alert-circle-outline"
+              >
+                <div class="font-weight-bold">No se puede generar vista previa</div>
+                No quedan folios disponibles en la lista del tipo seleccionado. La impresión queda bloqueada hasta que existan nuevos folios disponibles.
+              </v-alert>
+              <p v-else-if="!expediente.certificado_tipo" class="text-caption text-medium-emphasis mb-2">
                 Calcula el tipo de certificado para poder generar la vista previa.
               </p>
               <v-btn
                 variant="outlined"
-                :disabled="!expediente.certificado_tipo"
+                :disabled="!expediente.certificado_tipo || expediente.estado === 'FOLIO_ERROR'"
                 :loading="cargandoVistaPrevia"
                 @click="verVistaPrevia"
               >
@@ -538,8 +548,23 @@ onMounted(cargarCola);
       </v-row>
 
       <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
-        <v-card-title>Impresión</v-card-title>
+        <v-card-title>
+          {{ expediente.estado === "IMPRESION_FALLIDA" ? "Error de impresora" : "Impresión" }}
+        </v-card-title>
+        <v-card-subtitle v-if="expediente.estado === 'IMPRESION_FALLIDA'" class="text-wrap">
+          Folio {{ expediente.folio_externo ?? "—" }} asignado · sin certificado físico válido
+        </v-card-subtitle>
         <v-card-text>
+          <v-alert
+            v-if="expediente.estado === 'IMPRESION_FALLIDA'"
+            type="error"
+            variant="tonal"
+            class="mb-3"
+            icon="mdi-printer-alert"
+          >
+            <div class="font-weight-bold">No fue posible imprimir</div>
+            La impresión falló y no se obtuvo un certificado físico válido. El folio permanece asignado. El reintento técnico conserva el mismo folio y la Hora Salida original, pero solo puede ejecutarlo un Supervisor.
+          </v-alert>
           <!-- Hora Salida (regla 2 del frame "Cierre y reimpresión"): se
           fija una sola vez, en el primer clic EXITOSO de Imprimir; ningún
           camino posterior (reintento, cierre, reimpresión, corrección) la
@@ -569,13 +594,31 @@ onMounted(cargarCola);
       ver nota en puedeMarcarFolioDanado arriba. -->
 
       <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
-        <v-card-title>Cierre</v-card-title>
+        <v-card-title>
+          {{ expediente.estado === "IMPRESO" ? "Salida enviada a impresora" : "Cierre" }}
+        </v-card-title>
+        <v-card-subtitle v-if="expediente.estado === 'IMPRESO'" class="text-wrap">
+          Pendiente de confirmación física por el operador
+        </v-card-subtitle>
         <v-card-text>
+          <v-alert
+            v-if="expediente.estado === 'IMPRESO'"
+            type="success"
+            variant="tonal"
+            class="mb-3"
+            icon="mdi-check-circle-outline"
+          >
+            <div class="font-weight-bold">Impresión completada</div>
+            El certificado y los resultados fueron impresos. El expediente todavía requiere cierre.
+          </v-alert>
+          <p v-if="expediente.estado === 'IMPRESO'" class="text-caption text-medium-emphasis mb-3">
+            La salida fue enviada a impresora. Verifica físicamente el certificado; al cerrar se registrarán IMPRESO + CERRADO.
+          </p>
           <p v-if="expediente.cerrado_at" class="text-caption text-medium-emphasis mb-2">
             Cerrado el {{ formatearFecha(expediente.cerrado_at) }}
           </p>
           <v-btn
-            color="success"
+            color="primary"
             :disabled="!puedeCerrar"
             :loading="cerrando"
             @click="cerrarExpediente"
