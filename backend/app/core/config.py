@@ -10,6 +10,12 @@ class Settings(BaseSettings):
 
     siox_base_url: str = "https://siox.finanzasoaxaca.gob.mx/pagoTenencia"
 
+    # Supuesto (2026-09-29): el central expone un endpoint HTTP idempotente por
+    # `id`. Vacío = sin central configurado (enviar_uno_a_central lanza).
+    central_sync_url: str = ""
+    central_sync_token: str = ""
+    central_sync_timeout_s: float = 10.0
+
     obd_modelo_minimo: int = 2006
 
 

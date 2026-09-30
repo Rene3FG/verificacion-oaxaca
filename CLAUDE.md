@@ -2460,3 +2460,7 @@ Por instrucción del usuario ("reglas intuitivas, asumiendo cosas, dejando los p
 6. **Checklist NOM-045**: solo bloqueo de UI, sin persistir.
 
 Siguen bloqueados por terceros (sin cambio): integración real de equipos, sistema central de sync (`enviar_uno_a_central`), y confirmación por escrito de folios como inventario local (el Sheet Etapa 8 aún dice "externo"). 240 pruebas.
+
+## Cliente HTTP al central de sync (2026-09-29, supuesto)
+
+`enviar_uno_a_central` ya no es solo un stub: con `CENTRAL_SYNC_URL` (y opcional `CENTRAL_SYNC_TOKEN`, `CENTRAL_SYNC_TIMEOUT_S`) en `.env` hace `POST` con `id`/`entity_type`/`entity_uuid`/`operation`/`payload`/`created_at`, cabecera `Idempotency-Key` = `SyncOutbox.id` y `Authorization: Bearer`. Cualquier 2xx = recibido; otro código lanza y la fila queda en ERROR con backoff. **Contrato asumido** (upsert por id en el central); ajustar cuando se defina el central real. Sin URL configurada se comporta como antes (NotImplementedError). 242 pruebas.
