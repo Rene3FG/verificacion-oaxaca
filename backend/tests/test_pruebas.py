@@ -15,8 +15,8 @@ from app.models.sync_outbox import SyncOutbox
 from app.services.integridad import calcular_hash_resultado_prueba
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa, crear_sesion_supervisor
 
-LECTURA_GASOLINA_OK = {"hc_ppm": 50, "co_pct": 0.3, "co2_pct": 10.0, "o2_pct": 1.0}
-LECTURA_GASOLINA_EXCEDIDA = {"hc_ppm": 999, "co_pct": 0.3, "co2_pct": 10.0, "o2_pct": 1.0}
+LECTURA_GASOLINA_OK = {"hc_ppm": 50, "co_pct": 0.3, "co2_pct": 14.0, "o2_pct": 1.0}
+LECTURA_GASOLINA_EXCEDIDA = {"hc_ppm": 999, "co_pct": 0.3, "co2_pct": 14.0, "o2_pct": 1.0}
 
 LIMITES_GASOLINA_DEFAULT = {"hc_ppm": 200, "co_pct": 1.0, "co2_pct": 16.0, "o2_pct": 2.0}
 
@@ -1094,3 +1094,98 @@ async def test_guardar_resultado_sin_prueba_iniciada_no_envia_a_impresion(client
 
     await db_session.refresh(expediente)
     assert expediente.estado == EstadoVerificacion.PRUEBA_CONFIGURADA
+
+
+async def _expediente_en_prueba_dinamica(db_session):
+    sesion = await _sesion_prueba(db_session)
+    await _cargar_limites_gasolina(db_session, MetodoPrueba.GAS_DYNAMIC)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="GASOLINA",
+    )
+    expediente.tipo_prueba_final = TipoPrueba.DINAMICA
+    db_session.add(expediente)
+    await db_session.commit()
+    return sesion, expediente
+
+
+async def _post_resultado(client, sesion, expediente, ralenti, crucero=None):
+    return await client.post(
+        f"/api/pruebas/resultado/{expediente.id}",
+        json={"normalized_payload": {"ralenti": ralenti, "crucero": crucero or LECTURA_GASOLINA_OK}},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+
+async def test_dilucion_fuera_de_rango_invalida_la_muestra_con_409(client, db_session):
+    """Supuesto 2026-09-29: dilución CO+CO2 fuera de 13%-16,5% no rechaza al
+    vehículo, invalida la muestra (repetir prueba) y no guarda resultado."""
+
+    sesion, expediente = await _expediente_en_prueba_dinamica(db_session)
+    for fase in (FaseLectura.RALENTI, FaseLectura.CRUCERO):
+        db_session.add(
+            LimiteEmision(
+                metodo=MetodoPrueba.GAS_DYNAMIC,
+                fase=fase,
+                parametro="co_co2_dilucion_pct",
+                valor_minimo=13.0,
+                valor_maximo=16.5,
+            )
+        )
+    await db_session.commit()
+
+    resp = await _post_resultado(
+        client, sesion, expediente, {**LECTURA_GASOLINA_OK, "co2_pct": 8.0}
+    )
+
+    assert resp.status_code == 409
+    assert "repetir" in resp.json()["detail"]
+    filas = (await db_session.execute(select(ResultadoPrueba))).scalars().all()
+    assert all(f.verificacion_id != expediente.id for f in filas)
+
+
+async def test_nox_reportado_sobre_limite_rechaza(client, db_session):
+    sesion, expediente = await _expediente_en_prueba_dinamica(db_session)
+    await _cargar_limites(db_session, MetodoPrueba.GAS_DYNAMIC, FaseLectura.RALENTI, {"nox_ppm": 1500})
+
+    resp = await _post_resultado(
+        client, sesion, expediente, {**LECTURA_GASOLINA_OK, "nox_ppm": 2000}
+    )
+
+    assert resp.status_code == 200
+    assert (
+        resp.json()["estado_expediente"]
+        == EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO.value
+    )
+
+
+async def test_nox_y_lambda_no_reportados_no_se_exigen(client, db_session):
+    sesion, expediente = await _expediente_en_prueba_dinamica(db_session)
+    await _cargar_limites(
+        db_session, MetodoPrueba.GAS_DYNAMIC, FaseLectura.RALENTI, {"nox_ppm": 1500, "lambda_factor": 1.05}
+    )
+
+    resp = await _post_resultado(client, sesion, expediente, LECTURA_GASOLINA_OK)
+
+    assert resp.status_code == 200
+    assert (
+        resp.json()["estado_expediente"]
+        == EstadoVerificacion.PENDIENTE_IMPRESION.value
+    )
+
+
+async def test_lambda_reportado_sobre_limite_rechaza(client, db_session):
+    sesion, expediente = await _expediente_en_prueba_dinamica(db_session)
+    await _cargar_limites(db_session, MetodoPrueba.GAS_DYNAMIC, FaseLectura.CRUCERO, {"lambda_factor": 1.05})
+
+    resp = await _post_resultado(
+        client, sesion, expediente, LECTURA_GASOLINA_OK, {**LECTURA_GASOLINA_OK, "lambda_factor": 1.2}
+    )
+
+    assert resp.status_code == 200
+    assert (
+        resp.json()["estado_expediente"]
+        == EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO.value
+    )

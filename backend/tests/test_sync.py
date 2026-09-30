@@ -236,3 +236,55 @@ async def test_estado_cuenta_pendientes_y_errores(client, db_session, monkeypatc
     assert body["en_error"] == 2
     assert body["sincronizados"] == 0
     assert body["pendiente_mas_antiguo"] is not None
+
+
+async def test_enviar_uno_a_central_http_idempotente_con_bearer(monkeypatch):
+    """Supuesto 2026-09-29: POST al central con Idempotency-Key = id de la
+    fila y Bearer; 2xx = recibido, 5xx lanza para que quede en ERROR."""
+
+    import uuid
+
+    import httpx
+
+    from app.core.config import settings
+    from app.models.sync_outbox import SyncOutbox
+    from app.services import sync as sync_mod
+
+    vistos = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        vistos.append(request)
+        return httpx.Response(200 if len(vistos) == 1 else 503, json={"ok": True})
+
+    transporte = httpx.MockTransport(handler)
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        sync_mod.httpx, "AsyncClient", lambda **kw: real(transport=transporte, **kw)
+    )
+    monkeypatch.setattr(settings, "central_sync_url", "http://central.test/sync")
+    monkeypatch.setattr(settings, "central_sync_token", "tok")
+
+    row = SyncOutbox(
+        id=uuid.uuid4(),
+        entity_type="verificacion",
+        entity_uuid=uuid.uuid4(),
+        operation="update",
+        payload={"a": 1},
+    )
+    assert await sync_mod.enviar_uno_a_central(row) == {"ok": True}
+    assert vistos[0].headers["Idempotency-Key"] == str(row.id)
+    assert vistos[0].headers["Authorization"] == "Bearer tok"
+
+    with __import__("pytest").raises(httpx.HTTPStatusError):
+        await sync_mod.enviar_uno_a_central(row)
+
+
+async def test_enviar_uno_a_central_sin_url_sigue_lanzando(monkeypatch):
+    import pytest
+
+    from app.core.config import settings
+    from app.services import sync as sync_mod
+
+    monkeypatch.setattr(settings, "central_sync_url", "")
+    with pytest.raises(NotImplementedError):
+        await sync_mod.enviar_uno_a_central(None)

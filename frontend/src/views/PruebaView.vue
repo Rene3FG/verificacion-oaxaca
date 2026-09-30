@@ -161,8 +161,24 @@ const esMetodoGasolina = computed(
   () => metodoPrueba.value === "GAS_DYNAMIC" || metodoPrueba.value === "GAS_STATIC"
 );
 
+// Checklist "Prueba / Diésel — Preparación NOM-045" (Figma, nodo 239:4554):
+// los 6 puntos deben confirmarse antes de iniciar la medición de opacidad.
+// Solo bloquea la UI; el backend no persiste la confirmación (no hay columna).
+const PREPARACION_NOM045 = [
+  { id: "transmision", label: "Transmisión segura y ruedas inmovilizadas" },
+  { id: "temperatura", label: "Motor a temperatura normal" },
+  { id: "regimen", label: "Régimen máximo gobernado válido" },
+  { id: "escape", label: "Escape sin fugas ni obstrucciones" },
+  { id: "pedal", label: "Pedal con carrera libre" },
+  { id: "humo", label: "Sin humo azul/blanco durante 10 s" },
+];
+const preparacionNom045 = reactive({});
+const preparacionCompleta = computed(
+  () => metodoPrueba.value !== "DIESEL_OPACITY" || PREPARACION_NOM045.every((p) => preparacionNom045[p.id])
+);
+
 function faseVacia() {
-  return { hc_ppm: null, co_pct: null, co2_pct: null, o2_pct: null, nox_ppm: null, speed_kph: null };
+  return { hc_ppm: null, co_pct: null, co2_pct: null, o2_pct: null, nox_ppm: null, lambda_factor: null, speed_kph: null };
 }
 const lecturaGasolina = reactive({ ralenti: faseVacia(), crucero: faseVacia() });
 const lecturaDiesel = reactive({
@@ -187,6 +203,7 @@ const lecturaCompleta = computed(() =>
 function limpiarFase(fase) {
   const out = { hc_ppm: fase.hc_ppm, co_pct: fase.co_pct, co2_pct: fase.co2_pct, o2_pct: fase.o2_pct };
   if (fase.nox_ppm !== null && fase.nox_ppm !== "") out.nox_ppm = fase.nox_ppm;
+  if (fase.lambda_factor !== null && fase.lambda_factor !== "") out.lambda_factor = fase.lambda_factor;
   if (fase.speed_kph !== null && fase.speed_kph !== "") out.speed_kph = fase.speed_kph;
   return out;
 }
@@ -202,6 +219,7 @@ function construirNormalizedPayload() {
 }
 
 function reiniciarPrueba() {
+  for (const p of PREPARACION_NOM045) preparacionNom045[p.id] = false;
   cambioAEstatica.value = false;
   motivoCambio.value = "";
   Object.assign(lecturaGasolina.ralenti, faseVacia());
@@ -638,7 +656,22 @@ onMounted(() => {
             <p class="mb-3 text-body-2">
               Tipo de prueba: <strong>{{ expediente.tipo_prueba_final }}</strong>
             </p>
-            <v-btn color="primary" :loading="iniciando" @click="iniciarPrueba">
+            <div v-if="metodoPrueba === 'DIESEL_OPACITY'" class="mb-3">
+              <p class="text-subtitle-2">Preparación NOM-045</p>
+              <p class="text-caption text-medium-emphasis mb-1">
+                Procedimiento de opacidad por aceleración instantánea estática. Confirma cada punto
+                antes de medir.
+              </p>
+              <v-checkbox
+                v-for="p in PREPARACION_NOM045"
+                :key="p.id"
+                v-model="preparacionNom045[p.id]"
+                :label="p.label"
+                density="compact"
+                hide-details
+              />
+            </div>
+            <v-btn color="primary" :loading="iniciando" :disabled="!preparacionCompleta" @click="iniciarPrueba">
               Iniciar prueba
             </v-btn>
           </template>
@@ -655,8 +688,9 @@ onMounted(() => {
 
             <template v-else-if="esMetodoGasolina">
               <p class="text-caption text-medium-emphasis mb-2">
-                HC/CO/CO2/O2 son obligatorios en ambas fases; NOx y velocidad solo si el equipo
-                los reporta.
+                HC/CO/CO2/O2 son obligatorios en ambas fases; NOx, Lambda y velocidad solo si el equipo
+                los reporta (si los reporta y exceden el límite, se rechaza). Si CO+CO2 queda fuera de
+                13%-16,5% la muestra es inválida y hay que repetir la prueba.
               </p>
 
               <p class="text-subtitle-2 mb-2">Ralentí</p>
@@ -666,6 +700,7 @@ onMounted(() => {
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.co2_pct" label="CO2 (%)" type="number" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.o2_pct" label="O2 (%)" type="number" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.nox_ppm" label="NOx (ppm, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.lambda_factor" label="Factor Lambda (opcional)" type="number" step="0.01" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.speed_kph" label="Velocidad (km/h, opcional)" type="number" variant="outlined" density="compact" /></v-col>
               </v-row>
 
@@ -676,6 +711,7 @@ onMounted(() => {
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.co2_pct" label="CO2 (%)" type="number" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.o2_pct" label="O2 (%)" type="number" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.nox_ppm" label="NOx (ppm, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.lambda_factor" label="Factor Lambda (opcional)" type="number" step="0.01" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.speed_kph" label="Velocidad (km/h, opcional)" type="number" variant="outlined" density="compact" /></v-col>
               </v-row>
             </template>

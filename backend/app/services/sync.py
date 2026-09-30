@@ -31,9 +31,11 @@ import datetime
 import uuid
 from typing import Awaitable, Callable
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.enums import SyncStatus
 from app.models.event_log import EventLog
 from app.models.sync_outbox import SyncOutbox
@@ -138,12 +140,34 @@ EnviarUnoACentral = Callable[[SyncOutbox], Awaitable[dict]]
 
 
 async def enviar_uno_a_central(row: SyncOutbox) -> dict:
-    """Stub — no hay integración real definida con un servidor central
-    (mismo patrón que consultar_placa/impresora/sistema de folios: función
-    inyectable, monkeypatcheable en pruebas, lista para conectar cuando
-    exista el central real)."""
+    """Supuesto (2026-09-29, el central real no está definido): el central
+    expone `POST {central_sync_url}` que recibe la fila y hace upsert por
+    `id` (idempotente ante reenvíos), con `Authorization: Bearer`; cualquier
+    2xx cuenta como recibido. Sin `central_sync_url` no hay central y se
+    lanza NotImplementedError, igual que antes (la fila queda en ERROR con
+    backoff). Inyectable/monkeypatcheable en pruebas."""
 
-    raise NotImplementedError("Integración con el central aún no está definida.")
+    if not settings.central_sync_url:
+        raise NotImplementedError("Integración con el central aún no está definida.")
+
+    headers = {"Idempotency-Key": str(row.id)}
+    if settings.central_sync_token:
+        headers["Authorization"] = f"Bearer {settings.central_sync_token}"
+    cuerpo = {
+        "id": str(row.id),
+        "entity_type": row.entity_type,
+        "entity_uuid": str(row.entity_uuid),
+        "operation": row.operation,
+        "payload": row.payload,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+    async with httpx.AsyncClient(timeout=settings.central_sync_timeout_s) as cliente:
+        resp = await cliente.post(settings.central_sync_url, json=cuerpo, headers=headers)
+    resp.raise_for_status()
+    try:
+        return resp.json()
+    except ValueError:
+        return {"status_code": resp.status_code}
 
 
 async def procesar_pendientes(
