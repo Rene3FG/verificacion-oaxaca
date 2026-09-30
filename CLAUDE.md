@@ -2443,3 +2443,7 @@ leer por automatización aquí, así que medidas y textos vienen de su PDF.
 ## Checklist de preparación NOM-045 (2026-09-29)
 
 `PruebaView.vue`: en `PRUEBA_CONFIGURADA` con método `DIESEL_OPACITY`, "Iniciar prueba" queda deshabilitado hasta marcar los 6 puntos del Figma (nodo 239:4554: transmisión/ruedas, temperatura, régimen gobernado, escape, pedal, sin humo 10 s). Solo bloquea la UI; el backend no persiste la confirmación (sin columna). Pendiente: decidir si debe guardarse como evidencia en el expediente.
+
+## BD de pruebas separada (2026-09-29)
+
+`backend/tests/conftest.py` fija `DATABASE_URL*` a la base `verificacion_test` (mismo servidor, puerto 5433) antes de importar la app; una fixture de sesión la crea si falta, corre `alembic upgrade head` y carga los seeds de NOM-041/045. Ya no hay que limpiar `sync_outbox`/expedientes tras probar manualmente contra `uvicorn` de desarrollo: la lección del 2026-08-14/18 queda obsoleta. Si se agrega una migración, la siguiente corrida de pytest la aplica sola. 236 pruebas.

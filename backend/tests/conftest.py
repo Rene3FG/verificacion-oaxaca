@@ -1,4 +1,22 @@
+import os
+import subprocess
+import sys
 import uuid
+
+import psycopg2
+import pytest
+
+# BD propia de pruebas: antes pytest compartía la BD de desarrollo y las
+# corridas manuales contra uvicorn ensuciaban aserciones de conteo (test_sync,
+# test_colas_y_lineas). Debe fijarse ANTES de importar app.core.config.
+_TEST_DB = "verificacion_test"
+for _var in ("DATABASE_URL", "DATABASE_URL_SYNC"):
+    _base = os.environ.get(_var) or ""
+    if not _base:
+        for _line in open(os.path.join(os.path.dirname(__file__), "..", ".env")):
+            if _line.startswith(_var + "="):
+                _base = _line.split("=", 1)[1].strip()
+    os.environ[_var] = _base.rsplit("/", 1)[0] + "/" + _TEST_DB
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -13,6 +31,27 @@ from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
 from app.models.workstation import StationSession, UserStationPermission, Workstation
 from app.services.auth import hash_password
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _base_de_pruebas():
+    """Crea verificacion_test si falta, la migra a head y carga los catálogos
+    de límites (los mismos seeds que usa desarrollo)."""
+    dsn = os.environ["DATABASE_URL_SYNC"].replace("+psycopg2", "")
+    admin = psycopg2.connect(dsn.rsplit("/", 1)[0] + "/postgres")
+    admin.autocommit = True
+    with admin.cursor() as cur:
+        cur.execute("SELECT 1 FROM pg_database WHERE datname=%s", (_TEST_DB,))
+        if not cur.fetchone():
+            cur.execute(f"CREATE DATABASE {_TEST_DB}")
+    admin.close()
+    backend = os.path.join(os.path.dirname(__file__), "..")
+    for cmd in (
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        [sys.executable, "-m", "app.seed_limites_nom041"],
+        [sys.executable, "-m", "app.seed_limites_nom045"],
+    ):
+        subprocess.run(cmd, cwd=backend, check=True, env=os.environ, capture_output=True)
 
 
 @pytest_asyncio.fixture
