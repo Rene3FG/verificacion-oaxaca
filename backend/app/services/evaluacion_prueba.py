@@ -25,6 +25,39 @@ class LimitesNoConfigurados(Exception):
     pass
 
 
+class MuestraInvalida(Exception):
+    """Dilución CO+CO2 fuera del rango de validez de la NOM-041: la muestra
+    no es representativa (fuga en el escape o sonda mal insertada), la prueba
+    debe repetirse; no es un rechazo del vehículo."""
+
+
+# Supuesto de producto (2026-09-29, el cliente no ha decidido; reversible):
+# - NOx y Factor Lambda se evalúan SOLO si el equipo los reporta (son
+#   opcionales en el contrato; nunca se fabrica un 0) y, al exceder el
+#   límite, RECHAZAN como cualquier otro contaminante.
+# - Dilución CO+CO2 fuera de [valor_minimo, valor_maximo] invalida la
+#   muestra (409, repetir prueba) en vez de rechazar al vehículo.
+PARAMETROS_OPCIONALES_GASOLINA = ("nox_ppm", "lambda_factor")
+PARAMETRO_DILUCION = "co_co2_dilucion_pct"
+
+
+async def _rangos_dilucion(
+    db: AsyncSession, metodo: MetodoPrueba, fase: FaseLectura
+) -> tuple[float, float] | None:
+    fila = (
+        await db.execute(
+            select(LimiteEmision).where(
+                LimiteEmision.metodo == metodo,
+                LimiteEmision.fase == fase,
+                LimiteEmision.parametro == PARAMETRO_DILUCION,
+            )
+        )
+    ).scalars().first()
+    if fila is None or fila.valor_minimo is None:
+        return None
+    return fila.valor_minimo, fila.valor_maximo
+
+
 def _en_rango_anio(anio: int | None, desde: int | None, hasta: int | None) -> bool:
     """NOM-041 estratifica los límites por año-modelo (p. ej. Tabla 1:
     1990 y anteriores / 1991 y posteriores). Si el vehículo no tiene
@@ -113,6 +146,19 @@ async def evaluar_gasolina(
         )
 
     excedidos: dict[str, dict] = {}
+    for etiqueta, fase, lectura in (
+        ("ralenti", FaseLectura.RALENTI, payload.ralenti),
+        ("crucero", FaseLectura.CRUCERO, payload.crucero),
+    ):
+        rango = await _rangos_dilucion(db, metodo, fase)
+        if rango is not None:
+            dilucion = lectura.co_pct + lectura.co2_pct
+            if not rango[0] <= dilucion <= rango[1]:
+                raise MuestraInvalida(
+                    f"Dilución CO+CO2 de {dilucion:g}% en {etiqueta} fuera del rango "
+                    f"{rango[0]:g}%-{rango[1]:g}%: muestra inválida, repetir la prueba."
+                )
+
     for etiqueta, lectura, limites in (
         ("ralenti", payload.ralenti, limites_ralenti),
         ("crucero", payload.crucero, limites_crucero),
@@ -121,6 +167,11 @@ async def evaluar_gasolina(
             valor = getattr(lectura, parametro)
             limite = limites[parametro]
             if valor > limite:
+                excedidos[f"{etiqueta}.{parametro}"] = {"valor": valor, "limite": limite}
+        for parametro in PARAMETROS_OPCIONALES_GASOLINA:
+            valor = getattr(lectura, parametro)
+            limite = limites.get(parametro)
+            if valor is not None and limite is not None and valor > limite:
                 excedidos[f"{etiqueta}.{parametro}"] = {"valor": valor, "limite": limite}
 
     resultado = ResultadoPruebaEnum.RECHAZADO if excedidos else ResultadoPruebaEnum.APROBADO

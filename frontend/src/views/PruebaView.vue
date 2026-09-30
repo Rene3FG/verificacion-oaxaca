@@ -178,7 +178,7 @@ const preparacionCompleta = computed(
 );
 
 function faseVacia() {
-  return { hc_ppm: null, co_pct: null, co2_pct: null, o2_pct: null, nox_ppm: null, speed_kph: null };
+  return { hc_ppm: null, co_pct: null, co2_pct: null, o2_pct: null, nox_ppm: null, lambda_factor: null, speed_kph: null };
 }
 const lecturaGasolina = reactive({ ralenti: faseVacia(), crucero: faseVacia() });
 const lecturaDiesel = reactive({
@@ -203,6 +203,7 @@ const lecturaCompleta = computed(() =>
 function limpiarFase(fase) {
   const out = { hc_ppm: fase.hc_ppm, co_pct: fase.co_pct, co2_pct: fase.co2_pct, o2_pct: fase.o2_pct };
   if (fase.nox_ppm !== null && fase.nox_ppm !== "") out.nox_ppm = fase.nox_ppm;
+  if (fase.lambda_factor !== null && fase.lambda_factor !== "") out.lambda_factor = fase.lambda_factor;
   if (fase.speed_kph !== null && fase.speed_kph !== "") out.speed_kph = fase.speed_kph;
   return out;
 }
@@ -687,8 +688,9 @@ onMounted(() => {
 
             <template v-else-if="esMetodoGasolina">
               <p class="text-caption text-medium-emphasis mb-2">
-                HC/CO/CO2/O2 son obligatorios en ambas fases; NOx y velocidad solo si el equipo
-                los reporta.
+                HC/CO/CO2/O2 son obligatorios en ambas fases; NOx, Lambda y velocidad solo si el equipo
+                los reporta (si los reporta y exceden el límite, se rechaza). Si CO+CO2 queda fuera de
+                13%-16,5% la muestra es inválida y hay que repetir la prueba.
               </p>
 
               <p class="text-subtitle-2 mb-2">Ralentí</p>
@@ -698,6 +700,7 @@ onMounted(() => {
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.co2_pct" label="CO2 (%)" type="number" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.o2_pct" label="O2 (%)" type="number" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.nox_ppm" label="NOx (ppm, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.lambda_factor" label="Factor Lambda (opcional)" type="number" step="0.01" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.ralenti.speed_kph" label="Velocidad (km/h, opcional)" type="number" variant="outlined" density="compact" /></v-col>
               </v-row>
 
@@ -708,6 +711,7 @@ onMounted(() => {
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.co2_pct" label="CO2 (%)" type="number" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.o2_pct" label="O2 (%)" type="number" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.nox_ppm" label="NOx (ppm, opcional)" type="number" variant="outlined" density="compact" /></v-col>
+                <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.lambda_factor" label="Factor Lambda (opcional)" type="number" step="0.01" variant="outlined" density="compact" /></v-col>
                 <v-col cols="6" sm="3"><v-text-field v-model.number="lecturaGasolina.crucero.speed_kph" label="Velocidad (km/h, opcional)" type="number" variant="outlined" density="compact" /></v-col>
               </v-row>
             </template>

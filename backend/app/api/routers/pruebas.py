@@ -39,7 +39,12 @@ from app.schemas.prueba import (
 )
 from app.schemas.verificacion import ExpedienteCompleto
 from app.services import state_machine
-from app.services.evaluacion_prueba import LimitesNoConfigurados, evaluar_diesel, evaluar_gasolina
+from app.services.evaluacion_prueba import (
+    LimitesNoConfigurados,
+    MuestraInvalida,
+    evaluar_diesel,
+    evaluar_gasolina,
+)
 from app.services.integridad import calcular_hash_resultado_prueba
 from app.services.sync import encolar_sync
 
@@ -331,7 +336,7 @@ async def guardar_resultado_prueba(
             )
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
-    except LimitesNoConfigurados as exc:
+    except (LimitesNoConfigurados, MuestraInvalida) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     # HU-102 (Etapa 12): el id se genera aquí en vez de dejarlo al default

@@ -47,6 +47,7 @@ class LecturaFaseGasolina(BaseModel):
     co2_pct: float
     o2_pct: float
     nox_ppm: float | None = None
+    lambda_factor: float | None = None
     speed_kph: float | None = None
 
 

@@ -2447,3 +2447,16 @@ leer por automatización aquí, así que medidas y textos vienen de su PDF.
 ## BD de pruebas separada (2026-09-29)
 
 `backend/tests/conftest.py` fija `DATABASE_URL*` a la base `verificacion_test` (mismo servidor, puerto 5433) antes de importar la app; una fixture de sesión la crea si falta, corre `alembic upgrade head` y carga los seeds de NOM-041/045. Ya no hay que limpiar `sync_outbox`/expedientes tras probar manualmente contra `uvicorn` de desarrollo: la lección del 2026-08-14/18 queda obsoleta. Si se agrega una migración, la siguiente corrida de pytest la aplica sola. 236 pruebas.
+
+## Supuestos de producto asumidos (2026-09-29) — REVERSIBLES, confirmar con cliente/Luis
+
+Por instrucción del usuario ("reglas intuitivas, asumiendo cosas, dejando los pendientes") se cerraron decisiones abiertas con la opción más conservadora. Cada una está en un solo lugar para revertirla:
+
+1. **NOx y Factor Lambda (gasolina)**: se evalúan solo si el equipo los reporta (`lambda_factor` nuevo, opcional, en `LecturaFaseGasolina`); si exceden su límite del catálogo, RECHAZAN. No reportados = no se exigen (nunca se fabrica 0). Código: `evaluacion_prueba.PARAMETROS_OPCIONALES_GASOLINA`.
+2. **Dilución CO+CO2 fuera de 13%-16,5%**: NO rechaza al vehículo; invalida la muestra → 409 "repetir la prueba", sin guardar resultado (`MuestraInvalida`). Solo aplica si hay fila `co_co2_dilucion_pct` con `valor_minimo` en el catálogo. Si el cliente prefiere rechazo, cambiar el `raise` por una entrada en `excedidos`.
+3. **Folio en el snapshot**: se mantiene el SCHEMA literal (sin folio en el JSON).
+4. **Reimpresión "Nuevo folio"**: automático (siguiente folio disponible), como ya hace el backend; el campo manual del Figma se considera sobrante.
+5. **Inspección visual y OBD/SBD**: se quedan en la estación de Prueba (decisión del 2026-08-07) hasta que Luis diga lo contrario.
+6. **Checklist NOM-045**: solo bloqueo de UI, sin persistir.
+
+Siguen bloqueados por terceros (sin cambio): integración real de equipos, sistema central de sync (`enviar_uno_a_central`), y confirmación por escrito de folios como inventario local (el Sheet Etapa 8 aún dice "externo"). 240 pruebas.
