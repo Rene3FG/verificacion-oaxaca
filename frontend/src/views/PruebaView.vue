@@ -161,6 +161,22 @@ const esMetodoGasolina = computed(
   () => metodoPrueba.value === "GAS_DYNAMIC" || metodoPrueba.value === "GAS_STATIC"
 );
 
+// Checklist "Prueba / Diésel — Preparación NOM-045" (Figma, nodo 239:4554):
+// los 6 puntos deben confirmarse antes de iniciar la medición de opacidad.
+// Solo bloquea la UI; el backend no persiste la confirmación (no hay columna).
+const PREPARACION_NOM045 = [
+  { id: "transmision", label: "Transmisión segura y ruedas inmovilizadas" },
+  { id: "temperatura", label: "Motor a temperatura normal" },
+  { id: "regimen", label: "Régimen máximo gobernado válido" },
+  { id: "escape", label: "Escape sin fugas ni obstrucciones" },
+  { id: "pedal", label: "Pedal con carrera libre" },
+  { id: "humo", label: "Sin humo azul/blanco durante 10 s" },
+];
+const preparacionNom045 = reactive({});
+const preparacionCompleta = computed(
+  () => metodoPrueba.value !== "DIESEL_OPACITY" || PREPARACION_NOM045.every((p) => preparacionNom045[p.id])
+);
+
 function faseVacia() {
   return { hc_ppm: null, co_pct: null, co2_pct: null, o2_pct: null, nox_ppm: null, speed_kph: null };
 }
@@ -202,6 +218,7 @@ function construirNormalizedPayload() {
 }
 
 function reiniciarPrueba() {
+  for (const p of PREPARACION_NOM045) preparacionNom045[p.id] = false;
   cambioAEstatica.value = false;
   motivoCambio.value = "";
   Object.assign(lecturaGasolina.ralenti, faseVacia());
@@ -638,7 +655,22 @@ onMounted(() => {
             <p class="mb-3 text-body-2">
               Tipo de prueba: <strong>{{ expediente.tipo_prueba_final }}</strong>
             </p>
-            <v-btn color="primary" :loading="iniciando" @click="iniciarPrueba">
+            <div v-if="metodoPrueba === 'DIESEL_OPACITY'" class="mb-3">
+              <p class="text-subtitle-2">Preparación NOM-045</p>
+              <p class="text-caption text-medium-emphasis mb-1">
+                Procedimiento de opacidad por aceleración instantánea estática. Confirma cada punto
+                antes de medir.
+              </p>
+              <v-checkbox
+                v-for="p in PREPARACION_NOM045"
+                :key="p.id"
+                v-model="preparacionNom045[p.id]"
+                :label="p.label"
+                density="compact"
+                hide-details
+              />
+            </div>
+            <v-btn color="primary" :loading="iniciando" :disabled="!preparacionCompleta" @click="iniciarPrueba">
               Iniciar prueba
             </v-btn>
           </template>

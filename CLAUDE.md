@@ -2439,3 +2439,7 @@ leer por automatización aquí, así que medidas y textos vienen de su PDF.
   `npx vite build` limpio.
 - Observado, sin corregir: si el navegador autocompleta el usuario, el label flotante de Vuetify se
   encima sobre el valor (el `v-model` sigue vacío hasta que el usuario escribe).
+
+## Checklist de preparación NOM-045 (2026-09-29)
+
+`PruebaView.vue`: en `PRUEBA_CONFIGURADA` con método `DIESEL_OPACITY`, "Iniciar prueba" queda deshabilitado hasta marcar los 6 puntos del Figma (nodo 239:4554: transmisión/ruedas, temperatura, régimen gobernado, escape, pedal, sin humo 10 s). Solo bloquea la UI; el backend no persiste la confirmación (sin columna). Pendiente: decidir si debe guardarse como evidencia en el expediente.
