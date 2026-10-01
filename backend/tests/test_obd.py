@@ -151,3 +151,44 @@ async def test_solicitar_y_guardar_resultado_obd_camino_completo(client, db_sess
     )
     assert resp_resultado.status_code == 200
     assert resp_resultado.json()["estado_expediente"] == EstadoVerificacion.LISTO_PARA_PRUEBA.value
+
+
+async def test_evaluar_obd_desde_estacion_captura_responde_403(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.INSPECCION_VISUAL_APROBADA,
+        tipo_vehiculo="vehiculo",
+        combustible="gasolina",
+        modelo=2020,
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/obd/evaluar/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
+
+
+async def test_evaluar_obd_expediente_otra_linea_responde_403(client, db_session):
+    sesion = await _sesion_prueba(db_session, line_id=1)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=2,
+        estado=EstadoVerificacion.INSPECCION_VISUAL_APROBADA,
+        tipo_vehiculo="vehiculo",
+        combustible="gasolina",
+        modelo=2020,
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/obd/evaluar/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
