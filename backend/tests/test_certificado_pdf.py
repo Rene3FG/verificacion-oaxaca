@@ -100,6 +100,27 @@ def test_pdf_rechazo_por_inspeccion_visual_sin_bloque_de_mediciones():
     assert pdf.startswith(b"%PDF")
 
 
+def test_pdf_no_imprime_el_folio(monkeypatch):
+    """Regla del cliente (2026-10-01): el folio viene preimpreso en el papel
+    del certificado; el sistema no debe sobreimprimirlo."""
+
+    capturado = {}
+
+    class _HTML:
+        def __init__(self, string):
+            capturado["html"] = string
+
+        def write_pdf(self):
+            return b"%PDF"
+
+    monkeypatch.setattr("app.services.certificado.HTML", _HTML)
+
+    generar_pdf_certificado(_verificacion(), _vehiculo(), {"certificate_type": "PARTICULAR"})
+
+    assert "OAX-000001" not in capturado["html"]
+    assert "Folio" not in capturado["html"]
+
+
 def test_pdf_escapa_html_de_campos_de_texto_libre(monkeypatch):
     """Placa/marca/línea vienen de captura o SIOX: no deben interpretarse
     como HTML (p. ej. <img src=file:///...>) al pasar por WeasyPrint."""

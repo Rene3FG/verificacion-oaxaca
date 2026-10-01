@@ -187,7 +187,6 @@ def generar_pdf_certificado(
       <body style="font-family: sans-serif;">
         <h1>Certificado de Verificación Vehicular</h1>
         <p><strong>Tipo:</strong> {tipo_certificado}</p>
-        <p><strong>Folio:</strong> {_html.escape(str(verificacion.folio_externo or "—"))}</p>
         <p><strong>Semestre:</strong> {semestre or "—"}</p>
         <p><strong>Expediente:</strong> {verificacion.id}</p>
         <p><strong>Placa:</strong> {_html.escape(str(verificacion.placa))}</p>
