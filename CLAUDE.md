@@ -2464,3 +2464,22 @@ Siguen bloqueados por terceros (sin cambio): integración real de equipos, siste
 ## Cliente HTTP al central de sync (2026-09-29, supuesto)
 
 `enviar_uno_a_central` ya no es solo un stub: con `CENTRAL_SYNC_URL` (y opcional `CENTRAL_SYNC_TOKEN`, `CENTRAL_SYNC_TIMEOUT_S`) en `.env` hace `POST` con `id`/`entity_type`/`entity_uuid`/`operation`/`payload`/`created_at`, cabecera `Idempotency-Key` = `SyncOutbox.id` y `Authorization: Bearer`. Cualquier 2xx = recibido; otro código lanza y la fila queda en ERROR con backoff. **Contrato asumido** (upsert por id en el central); ajustar cuando se defina el central real. Sin URL configurada se comporta como antes (NotImplementedError). 242 pruebas.
+
+## Higiene técnica: guards de estación/línea en `test_obd.py` (2026-09-30)
+
+Adelanta la pieza de "pruebas de los routers `obd` e `inspección`" del plan de 3
+semanas (originalmente jueves 8-oct, independiente de Luis/cliente). Al
+re-escanear el repo se encontró que `obd.py` ya tenía ambos guards
+(`requiere_estacion(PRUEBA)`, `assert_linea_permitida`) desde el 2026-08-07,
+pero `test_obd.py` nunca los ejercitaba — a diferencia de `test_inspeccion.py`,
+que sí cubre el 403 de estación ajena y el 403 de línea ajena con el mismo
+patrón. Dos pruebas nuevas (`test_evaluar_obd_desde_estacion_captura_responde_403`,
+`test_evaluar_obd_expediente_otra_linea_responde_403`), mismo criterio exacto
+que las de `test_inspeccion.py`. Sin cambios de código de producción — los
+guards ya funcionaban, solo faltaba la prueba. **244 pruebas** (242→244).
+
+**Pendiente real, sin cambios**: decidir la regla de evaluación del rango de
+dilución CO+CO2 y si/cuándo conectar NOx/Lambda (ambas con supuesto reversible
+documentado el 2026-09-29), ambigüedad del folio en el snapshot, semana 3 de
+la agenda vence 2026-10-02, PR #1 sin revisión formal en GitHub, reuniones con
+Luis/proveedor agendadas 5-7 oct.
