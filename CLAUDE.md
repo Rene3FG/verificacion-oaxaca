@@ -2465,21 +2465,38 @@ Siguen bloqueados por terceros (sin cambio): integración real de equipos, siste
 
 `enviar_uno_a_central` ya no es solo un stub: con `CENTRAL_SYNC_URL` (y opcional `CENTRAL_SYNC_TOKEN`, `CENTRAL_SYNC_TIMEOUT_S`) en `.env` hace `POST` con `id`/`entity_type`/`entity_uuid`/`operation`/`payload`/`created_at`, cabecera `Idempotency-Key` = `SyncOutbox.id` y `Authorization: Bearer`. Cualquier 2xx = recibido; otro código lanza y la fila queda en ERROR con backoff. **Contrato asumido** (upsert por id en el central); ajustar cuando se defina el central real. Sin URL configurada se comporta como antes (NotImplementedError). 242 pruebas.
 
-## Higiene técnica: guards de estación/línea en `test_obd.py` (2026-09-30)
+## Higiene técnica: guards de estación/línea sin prueba en obd/pruebas/folios/impresión (2026-09-30)
 
 Adelanta la pieza de "pruebas de los routers `obd` e `inspección`" del plan de 3
-semanas (originalmente jueves 8-oct, independiente de Luis/cliente). Al
-re-escanear el repo se encontró que `obd.py` ya tenía ambos guards
-(`requiere_estacion(PRUEBA)`, `assert_linea_permitida`) desde el 2026-08-07,
-pero `test_obd.py` nunca los ejercitaba — a diferencia de `test_inspeccion.py`,
-que sí cubre el 403 de estación ajena y el 403 de línea ajena con el mismo
-patrón. Dos pruebas nuevas (`test_evaluar_obd_desde_estacion_captura_responde_403`,
-`test_evaluar_obd_expediente_otra_linea_responde_403`), mismo criterio exacto
-que las de `test_inspeccion.py`. Sin cambios de código de producción — los
-guards ya funcionaban, solo faltaba la prueba. **244 pruebas** (242→244).
+semanas (originalmente jueves 8-oct, independiente de Luis/cliente) y la
+extiende: tras cerrar el hueco de `obd.py` se auditó **todo** router que usa
+`requiere_estacion`/`assert_linea_permitida` (mismo criterio de
+[[feedback-audit-then-reaudit]] — no asumir que un solo archivo tenía el
+problema), comparando contra qué routers sí tenían la pareja de pruebas
+403 (estación ajena + línea ajena) que `test_inspeccion.py` ya modelaba.
+
+Todos los guards de producción ya funcionaban correctamente (`requiere_estacion`/
+`assert_linea_permitida` existen desde agosto en cada uno de estos routers) —
+esto es exclusivamente cobertura de prueba faltante, cero cambios de código de
+producción:
+
+- `obd.py` (`evaluar`): 2 pruebas nuevas (sesión anterior).
+- `pruebas.py` (`configurar`/`iniciar`/`resultado`, los tres comparten
+  `_obtener_expediente_de_la_linea`): **tenía CERO pruebas 403** pese a tener
+  los guards en los 3 endpoints — 6 pruebas nuevas.
+- `folios.py` (`solicitar`): 2 pruebas nuevas (estación ajena + línea fuera de
+  `allowed_line_ids`, caso de estación centralizada).
+- `impresion.py` (`tipo-certificado`/`imprimir`, ambos vía
+  `_obtener_expediente_y_vehiculo`): 4 pruebas nuevas. `vista-previa`,
+  `folio/marcar-danado` y `cerrar` comparten el mismo helper y quedan sin
+  prueba dedicada — mismo patrón, pendiente si se quiere cobertura exhaustiva.
+
+**256 pruebas** (242→256, +14 sobre las dos sesiones de hoy). `npx vite build`
+limpio (sin cambios de frontend).
 
 **Pendiente real, sin cambios**: decidir la regla de evaluación del rango de
 dilución CO+CO2 y si/cuándo conectar NOx/Lambda (ambas con supuesto reversible
 documentado el 2026-09-29), ambigüedad del folio en el snapshot, semana 3 de
 la agenda vence 2026-10-02, PR #1 sin revisión formal en GitHub, reuniones con
-Luis/proveedor agendadas 5-7 oct.
+Luis/proveedor agendadas 5-7 oct. Cobertura 403 aún no exhaustiva en
+`vista-previa`/`folio/marcar-danado`/`cerrar` de `impresion.py` (ver arriba).

@@ -387,3 +387,36 @@ async def test_solicitar_folio_de_tipo_distinto_al_certificado_responde_409(clie
         )
     ).scalar_one_or_none()
     assert disponibles is not None
+
+
+async def test_solicitar_desde_estacion_captura_responde_403(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/folios/solicitar/{expediente.id}",
+        params={"tipo_certificado": "PARTICULAR"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
+
+
+async def test_solicitar_expediente_de_linea_no_permitida_responde_403(client, db_session):
+    sesion = await _sesion_impresion(db_session, allowed_line_ids=[1])
+    expediente = await crear_expediente(
+        db_session, linea_id=2, estado=EstadoVerificacion.PENDIENTE_IMPRESION
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/folios/solicitar/{expediente.id}",
+        params={"tipo_certificado": "PARTICULAR"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403

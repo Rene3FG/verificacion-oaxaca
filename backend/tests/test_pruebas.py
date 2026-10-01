@@ -1189,3 +1189,118 @@ async def test_lambda_reportado_sobre_limite_rechaza(client, db_session):
         resp.json()["estado_expediente"]
         == EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO.value
     )
+
+
+async def test_configurar_desde_estacion_captura_responde_403(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.LISTO_PARA_PRUEBA,
+        combustible_validado="GASOLINA",
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/configurar/{expediente.id}?tipo_prueba=DINAMICA",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
+
+
+async def test_configurar_expediente_otra_linea_responde_403(client, db_session):
+    sesion = await _sesion_prueba(db_session, line_id=1)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=2,
+        estado=EstadoVerificacion.LISTO_PARA_PRUEBA,
+        combustible_validado="GASOLINA",
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/configurar/{expediente.id}?tipo_prueba=DINAMICA",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
+
+
+async def test_iniciar_desde_estacion_captura_responde_403(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_CONFIGURADA,
+        combustible_validado="GASOLINA",
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/iniciar/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
+
+
+async def test_iniciar_expediente_otra_linea_responde_403(client, db_session):
+    sesion = await _sesion_prueba(db_session, line_id=1)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=2,
+        estado=EstadoVerificacion.PRUEBA_CONFIGURADA,
+        combustible_validado="GASOLINA",
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/iniciar/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
+
+
+async def test_resultado_desde_estacion_captura_responde_403(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="GASOLINA",
+        tipo_vehiculo="vehiculo",
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/resultado/{expediente.id}",
+        json={"normalized_payload": _payload_gasolina()},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
+
+
+async def test_resultado_expediente_otra_linea_responde_403(client, db_session):
+    sesion = await _sesion_prueba(db_session, line_id=1)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=2,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="GASOLINA",
+        tipo_vehiculo="vehiculo",
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/resultado/{expediente.id}",
+        json={"normalized_payload": _payload_gasolina()},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
