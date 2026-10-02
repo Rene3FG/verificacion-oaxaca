@@ -163,6 +163,7 @@ const estado = computed(() => {
           label="Usuario"
           variant="outlined"
           autocomplete="username"
+          persistent-placeholder
           @keyup.enter="entrar"
         />
         <v-text-field
@@ -171,6 +172,7 @@ const estado = computed(() => {
           type="password"
           variant="outlined"
           autocomplete="current-password"
+          persistent-placeholder
           @keyup.enter="entrar"
         />
 
