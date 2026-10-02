@@ -38,6 +38,7 @@ from app.schemas.prueba import (
     metodo_de,
 )
 from app.schemas.verificacion import ExpedienteCompleto
+from app.services.parametros import get_parametro
 from app.services import state_machine
 from app.services.evaluacion_prueba import (
     LimitesNoConfigurados,
@@ -176,6 +177,8 @@ async def configurar_prueba(
         tipo_default = TipoPrueba.OPACIDAD
     elif excede_capacidad_dinamometro:
         tipo_default = TipoPrueba.ESTATICA
+    elif (await get_parametro(db, "gasolina_prueba_default")) == "estatica":
+        tipo_default = TipoPrueba.ESTATICA
     else:
         tipo_default = TipoPrueba.DINAMICA
 
@@ -204,6 +207,14 @@ async def configurar_prueba(
                     f"Un vehículo a gasolina solo puede cambiar de DINAMICA a "
                     f"ESTATICA, no a {tipo_prueba}."
                 ),
+            )
+        if (
+            not excede_capacidad_dinamometro
+            and (await get_parametro(db, "gasolina_permite_cambio_estatica")) != "true"
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="El cambio de dinámica a estática no está permitido por configuración.",
             )
         if not cambio_manual or not motivo:
             raise HTTPException(

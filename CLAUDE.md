@@ -2514,3 +2514,12 @@ Supuesto intuitivo (reversible): la confirmación de los 6 puntos es evidencia, 
 pedal, humo}}`; en diésel (`TipoPrueba.OPACIDAD`) exige los 6 en `true` (422 con los que faltan) y los
 guarda en `event_log.detalle_json` del evento `prueba_iniciada`. Gasolina lo ignora. Sin columna ni
 migración nueva. `PruebaView.vue` manda el checklist. Para revertir: quitar el bloque de `iniciar_prueba`.
+
+## `gasolina_prueba_default` y `gasolina_permite_cambio_estatica` conectados (2026-10-01) — supuesto
+
+Supuesto intuitivo (reversible): ambos parámetros son configuración real, no vestigios. `configurar_prueba`
+los lee con `get_parametro`: `gasolina_prueba_default=estatica` hace ESTATICA el default de gasolina;
+`gasolina_permite_cambio_estatica=false` bloquea (409) el cambio manual dinámica→estática, salvo que el
+vehículo exceda la capacidad del dinamómetro (imposibilidad física). Con los defaults de siempre
+(dinamica/true) el comportamiento no cambia. Pendiente: `PruebaView.vue` sigue calculando el default de
+gasolina fijo (dinámica) y solo muestra el 409 como texto; falta exponer los parámetros al frontend. 267 pruebas.
