@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import select
 
 from app.models.enums import (
@@ -567,5 +568,54 @@ async def test_imprimir_expediente_de_linea_no_permitida_responde_403(client, db
     resp = await client.post(
         f"/api/impresion/imprimir/{expediente.id}",
         headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "metodo, ruta",
+    [
+        ("get", "/api/impresion/vista-previa/{id}"),
+        ("post", "/api/impresion/folio/marcar-danado/{id}"),
+        ("post", "/api/impresion/cerrar/{id}"),
+    ],
+)
+async def test_endpoints_restantes_desde_estacion_captura_responden_403(
+    client, db_session, metodo, ruta
+):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.FOLIO_ASIGNADO
+    )
+    await db_session.commit()
+
+    resp = await getattr(client, metodo)(
+        ruta.format(id=expediente.id), headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "metodo, ruta",
+    [
+        ("get", "/api/impresion/vista-previa/{id}"),
+        ("post", "/api/impresion/folio/marcar-danado/{id}"),
+        ("post", "/api/impresion/cerrar/{id}"),
+    ],
+)
+async def test_endpoints_restantes_expediente_de_linea_no_permitida_responden_403(
+    client, db_session, metodo, ruta
+):
+    sesion = await _sesion_impresion(db_session, allowed_line_ids=[1])
+    expediente = await crear_expediente(
+        db_session, linea_id=2, estado=EstadoVerificacion.FOLIO_ASIGNADO
+    )
+    await db_session.commit()
+
+    resp = await getattr(client, metodo)(
+        ruta.format(id=expediente.id), headers={"X-Session-Id": str(sesion.id)}
     )
     assert resp.status_code == 403

@@ -2500,3 +2500,26 @@ documentado el 2026-09-29), ambigüedad del folio en el snapshot, semana 3 de
 la agenda vence 2026-10-02, PR #1 sin revisión formal en GitHub, reuniones con
 Luis/proveedor agendadas 5-7 oct. Cobertura 403 aún no exhaustiva en
 `vista-previa`/`folio/marcar-danado`/`cerrar` de `impresion.py` (ver arriba).
+
+## Cobertura 403 exhaustiva en `impresion.py` (2026-10-01)
+
+Cierra el hueco anotado el 2026-09-30: `vista-previa`, `folio/marcar-danado` y `cerrar` ahora tienen
+pruebas de 403 por estación ajena (Captura) y por expediente de línea no permitida
+(`tests/test_impresion.py`, parametrizadas). Sin cambios de código de producción. 263 pruebas.
+
+## Checklist NOM-045 persistido como evidencia (2026-10-01) — supuesto
+
+Supuesto intuitivo (reversible): la confirmación de los 6 puntos es evidencia, no solo bloqueo de UI.
+`POST /api/pruebas/iniciar/{id}` acepta `{preparacion_nom045: {transmision, temperatura, regimen, escape,
+pedal, humo}}`; en diésel (`TipoPrueba.OPACIDAD`) exige los 6 en `true` (422 con los que faltan) y los
+guarda en `event_log.detalle_json` del evento `prueba_iniciada`. Gasolina lo ignora. Sin columna ni
+migración nueva. `PruebaView.vue` manda el checklist. Para revertir: quitar el bloque de `iniciar_prueba`.
+
+## `gasolina_prueba_default` y `gasolina_permite_cambio_estatica` conectados (2026-10-01) — supuesto
+
+Supuesto intuitivo (reversible): ambos parámetros son configuración real, no vestigios. `configurar_prueba`
+los lee con `get_parametro`: `gasolina_prueba_default=estatica` hace ESTATICA el default de gasolina;
+`gasolina_permite_cambio_estatica=false` bloquea (409) el cambio manual dinámica→estática, salvo que el
+vehículo exceda la capacidad del dinamómetro (imposibilidad física). Con los defaults de siempre
+(dinamica/true) el comportamiento no cambia. Pendiente: `PruebaView.vue` sigue calculando el default de
+gasolina fijo (dinámica) y solo muestra el 409 como texto; falta exponer los parámetros al frontend. 267 pruebas.

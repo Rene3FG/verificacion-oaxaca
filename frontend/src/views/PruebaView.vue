@@ -163,7 +163,7 @@ const esMetodoGasolina = computed(
 
 // Checklist "Prueba / Diésel — Preparación NOM-045" (Figma, nodo 239:4554):
 // los 6 puntos deben confirmarse antes de iniciar la medición de opacidad.
-// Solo bloquea la UI; el backend no persiste la confirmación (no hay columna).
+// Se bloquea en UI y el backend la exige (422) y la deja en la bitácora (event_log).
 const PREPARACION_NOM045 = [
   { id: "transmision", label: "Transmisión segura y ruedas inmovilizadas" },
   { id: "temperatura", label: "Motor a temperatura normal" },
@@ -369,7 +369,9 @@ async function iniciarPrueba() {
   iniciando.value = true;
   error.value = null;
   try {
-    await api.post(`/pruebas/iniciar/${expediente.value.id}`);
+    await api.post(`/pruebas/iniciar/${expediente.value.id}`, {
+      preparacion_nom045: metodoPrueba.value === "DIESEL_OPACITY" ? { ...preparacionNom045 } : null,
+    });
     aviso.value = "Prueba iniciada.";
     await recargarExpediente();
   } catch (err) {

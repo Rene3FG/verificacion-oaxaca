@@ -1304,3 +1304,113 @@ async def test_resultado_expediente_otra_linea_responde_403(client, db_session):
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp.status_code == 403
+
+
+async def _expediente_diesel_configurado(db_session):
+    sesion = await _sesion_prueba(db_session, line_id=1)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_CONFIGURADA,
+        combustible_validado="DIESEL",
+    )
+    expediente.tipo_prueba_final = TipoPrueba.OPACIDAD
+    db_session.add(expediente)
+    await db_session.commit()
+    return sesion, expediente
+
+
+async def test_iniciar_diesel_sin_checklist_nom045_responde_422(client, db_session):
+    sesion, expediente = await _expediente_diesel_configurado(db_session)
+
+    resp = await client.post(
+        f"/api/pruebas/iniciar/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 422
+
+    resp = await client.post(
+        f"/api/pruebas/iniciar/{expediente.id}",
+        json={"preparacion_nom045": {"transmision": True, "temperatura": True}},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 422
+    assert "regimen" in resp.json()["detail"]
+
+
+async def test_iniciar_diesel_con_checklist_completo_lo_guarda_en_bitacora(client, db_session):
+    sesion, expediente = await _expediente_diesel_configurado(db_session)
+
+    resp = await client.post(
+        f"/api/pruebas/iniciar/{expediente.id}",
+        json={
+            "preparacion_nom045": {
+                p: True
+                for p in ("transmision", "temperatura", "regimen", "escape", "pedal", "humo")
+            }
+        },
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+    evento = (
+        await db_session.execute(
+            select(EventLog).where(
+                EventLog.verificacion_id == expediente.id,
+                EventLog.evento == "prueba_iniciada",
+            )
+        )
+    ).scalars().one()
+    assert evento.detalle_json["preparacion_nom045"]["humo"] is True
+
+
+async def _fijar_parametro(db_session, clave, valor):
+    from sqlalchemy import delete
+
+    from app.models.catalogos import CatParametroSistema
+
+    await db_session.execute(
+        delete(CatParametroSistema).where(CatParametroSistema.clave == clave)
+    )
+    db_session.add(CatParametroSistema(clave=clave, valor=valor, descripcion=clave))
+
+
+async def _expediente_gasolina_listo(db_session):
+    sesion = await _sesion_prueba(db_session)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.LISTO_PARA_PRUEBA,
+        combustible_validado="GASOLINA",
+    )
+    return sesion, expediente
+
+
+async def test_parametro_gasolina_prueba_default_estatica_cambia_el_default(client, db_session):
+    sesion, expediente = await _expediente_gasolina_listo(db_session)
+    await _fijar_parametro(db_session, "gasolina_prueba_default", "estatica")
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/configurar/{expediente.id}?tipo_prueba=DINAMICA",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 409  # el default ahora es ESTATICA; DINAMICA exige cambio
+    resp = await client.post(
+        f"/api/pruebas/configurar/{expediente.id}?tipo_prueba=ESTATICA",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+
+
+async def test_parametro_gasolina_permite_cambio_estatica_false_bloquea_el_cambio(client, db_session):
+    sesion, expediente = await _expediente_gasolina_listo(db_session)
+    await _fijar_parametro(db_session, "gasolina_permite_cambio_estatica", "false")
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/pruebas/configurar/{expediente.id}"
+        "?tipo_prueba=ESTATICA&cambio_manual=true&motivo=x",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 409
+    assert "configuración" in resp.json()["detail"]
