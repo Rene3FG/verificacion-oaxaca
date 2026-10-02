@@ -2506,3 +2506,11 @@ Luis/proveedor agendadas 5-7 oct. Cobertura 403 aún no exhaustiva en
 Cierra el hueco anotado el 2026-09-30: `vista-previa`, `folio/marcar-danado` y `cerrar` ahora tienen
 pruebas de 403 por estación ajena (Captura) y por expediente de línea no permitida
 (`tests/test_impresion.py`, parametrizadas). Sin cambios de código de producción. 263 pruebas.
+
+## Checklist NOM-045 persistido como evidencia (2026-10-01) — supuesto
+
+Supuesto intuitivo (reversible): la confirmación de los 6 puntos es evidencia, no solo bloqueo de UI.
+`POST /api/pruebas/iniciar/{id}` acepta `{preparacion_nom045: {transmision, temperatura, regimen, escape,
+pedal, humo}}`; en diésel (`TipoPrueba.OPACIDAD`) exige los 6 en `true` (422 con los que faltan) y los
+guarda en `event_log.detalle_json` del evento `prueba_iniciada`. Gasolina lo ignora. Sin columna ni
+migración nueva. `PruebaView.vue` manda el checklist. Para revertir: quitar el bloque de `iniciar_prueba`.

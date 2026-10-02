@@ -248,9 +248,20 @@ def _cambio_tipo_prueba_event(verificacion_id, usuario_id, motivo, tipo_prueba):
     )
 
 
+PREPARACION_NOM045 = ("transmision", "temperatura", "regimen", "escape", "pedal", "humo")
+
+
+class IniciarPruebaInput(BaseModel):
+    """Checklist de preparación NOM-045 (Figma, nodo 239:4554). Obligatorio
+    solo en diésel (opacidad); en gasolina se ignora."""
+
+    preparacion_nom045: dict[str, bool] | None = None
+
+
 @router.post("/iniciar/{expediente_id}")
 async def iniciar_prueba(
     expediente_id: uuid.UUID,
+    payload: IniciarPruebaInput | None = None,
     session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -265,6 +276,21 @@ async def iniciar_prueba(
             ),
         )
 
+    detalle = None
+    if verificacion.tipo_prueba_final == TipoPrueba.OPACIDAD:
+        marcados = (payload.preparacion_nom045 if payload else None) or {}
+        faltan = [p for p in PREPARACION_NOM045 if not marcados.get(p)]
+        if faltan:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Checklist de preparación NOM-045 incompleto; falta confirmar: "
+                    + ", ".join(faltan)
+                ),
+            )
+        # Evidencia: queda en la bitácora (event_log) del expediente.
+        detalle = {"preparacion_nom045": {p: True for p in PREPARACION_NOM045}}
+
     await state_machine.transition(
         db,
         verificacion,
@@ -272,6 +298,7 @@ async def iniciar_prueba(
         usuario_id=session.user_id,
         modulo="prueba",
         evento="prueba_iniciada",
+        detalle=detalle,
     )
     await db.commit()
     return {"estado_expediente": verificacion.estado}
