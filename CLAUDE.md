@@ -2500,3 +2500,9 @@ documentado el 2026-09-29), ambigüedad del folio en el snapshot, semana 3 de
 la agenda vence 2026-10-02, PR #1 sin revisión formal en GitHub, reuniones con
 Luis/proveedor agendadas 5-7 oct. Cobertura 403 aún no exhaustiva en
 `vista-previa`/`folio/marcar-danado`/`cerrar` de `impresion.py` (ver arriba).
+
+## Cobertura 403 exhaustiva en `impresion.py` (2026-10-01)
+
+Cierra el hueco anotado el 2026-09-30: `vista-previa`, `folio/marcar-danado` y `cerrar` ahora tienen
+pruebas de 403 por estación ajena (Captura) y por expediente de línea no permitida
+(`tests/test_impresion.py`, parametrizadas). Sin cambios de código de producción. 263 pruebas.
