@@ -2523,3 +2523,90 @@ los lee con `get_parametro`: `gasolina_prueba_default=estatica` hace ESTATICA el
 vehículo exceda la capacidad del dinamómetro (imposibilidad física). Con los defaults de siempre
 (dinamica/true) el comportamiento no cambia. Pendiente: `PruebaView.vue` sigue calculando el default de
 gasolina fijo (dinámica) y solo muestra el 409 como texto; falta exponer los parámetros al frontend. 267 pruebas.
+
+## `PruebaView.vue` lee el tipo de prueba del backend (2026-10-05)
+
+Cierra el pendiente de la sección anterior. `GET /api/pruebas/configuracion/{id}` (`requiere_estacion(PRUEBA)`)
+devuelve `tipo_default`, `puede_cambiar_a_estatica` y `excede_capacidad_dinamometro`, calculados con el mismo
+helper que usa `configurar_prueba` (`_tipo_prueba_por_defecto`) — la regla ya no se replica en Vue.
+`/api/parametros` no servía: es solo de supervisor. `PruebaView.vue` lo consulta al abrir un expediente en
+`LISTO_PARA_PRUEBA`, oculta el switch de cambio a estática cuando no se permite y avisa cuando el peso excede
+el dinamómetro; si la consulta falla cae al cálculo local de antes. 268 pruebas.
+
+## Certificado como sobreimpresión de las plantillas del cliente (2026-10-05) — supuestos
+
+El cliente mandó las plantillas Word que usa hoy el sistema de verificación (`~/Descargas/Particular.doc`
+gasolina, `~/Descargas/IntensivoDie.doc` diésel). Son formatos de **sobreimpresión** sobre papel preimpreso:
+solo los datos, 3 copias por hoja A4, y la 2ª copia lleva además la placa en grande. `generar_pdf_certificado`
+deja de ser el HTML de trazabilidad y reproduce esas posiciones (`_LAYOUT_PARTICULAR`/`_LAYOUT_INTENSIVO` en
+`app/services/certificado.py`).
+
+- Coordenadas medidas del render de LibreOffice de las plantillas (`pdftotext -bbox`), con desfase propio
+  por copia y por bloque (las 3 copias no son traslaciones exactas). Comparado por superposición contra la
+  plantilla: coinciden las 6 copias. **Word puede desplazar unos puntos** respecto a LibreOffice → calibrar
+  contra el papel real con `certificado_offset_x_mm`/`certificado_offset_y_mm` (±20 mm) en Parámetros.
+- Parámetros nuevos en `cat_parametros_sistema` (editables en Administración): `certificado_clave_centro`
+  (CVV-06), `certificado_marca_equipo` (OBERTECH), `certificado_numero_equipo` (001) — texto que las
+  plantillas traían escrito a mano —, `certificado_imprime_folio` (false) y los dos offsets.
+  `cargar_config_certificado(db)` los resuelve; `generar_pdf_certificado` sigue siendo pura.
+- Supuestos (reversibles):
+  - Layout por **método**: diésel → Intensivo, todo lo demás (incluido rechazo visual sin lecturas) →
+    Particular. El texto fijo "PARTICULAR" se reemplaza por el tipo real; no hay plantilla de Doble Cero ni
+    de Rechazo.
+  - Mapeo de marcadores: `<NombrePropietario…>` ← `razon_social` (no se captura nombre/apellidos
+    separados), `<PoblacionPro>` ← colonia, `<Serie1>` ← NIV, `<SubMarca>` ← línea, `<Linea>` ← número de
+    línea, `<Fecha>` ← fin de la prueba, `<Hora> / <HoraFIN>` ← creación del expediente / fin de la prueba,
+    Km/h ← `speed_kph`.
+  - `<CertificadoAnt>`, `<Multa>`, `<TOTPOT5024>`/`<TOTPOT2540>` no existen en el sistema → en blanco.
+  - `<FOLIO>` aparece en la plantilla pero la regla del cliente del 2026-10-01 es no imprimirlo (viene
+    preimpreso) → apagado por defecto, `certificado_imprime_folio=true` lo activa sin tocar código.
+  - Texto largo (p. ej. "OAXACA DE JUAREZ" en municipio) se imprime con letra más chica (mín. 5 pt) hasta
+    caber en su hueco, en vez de encimarse con el campo siguiente.
+- 3 pruebas nuevas en `tests/test_certificado_pdf.py`. 271 pruebas.
+
+**Pendiente real**: confirmar con el cliente los supuestos de arriba (sobre todo `<FOLIO>`, Multa,
+Certificado anterior y las potencias TOTPOT), pedir las plantillas de Doble Cero y Rechazo si existen, y
+calibrar con una hoja real impresa. Lo demás sin cambios: reuniones con Luis/proveedor (5-7 oct), central de
+sync sin definir, integración de equipos, PR #1 sin revisión formal.
+
+## Auditoría Sheet + Figma y huecos cerrados (2026-10-05, 2ª sesión)
+
+**Fuentes revisadas.** Sheet "HU verificacion" (Drive, sin cambios desde 2026-08-04): las 110 HU de las 12
+etapas, leídas completas exportando el archivo a xlsx. Figma "Verificentros Oaxaca — Design System & Product
+UI": última edición hace ~1 mes según la lista de recientes de Figma → sin cambios posteriores a las revisiones
+del 24-ago y 28-sep; el canvas sigue sin poder leerse como texto.
+
+**Cerrado en esta sesión (todo con pruebas; 286 en total):**
+- **HU-045/054/083/084 — interrumpir y reintentar prueba.** `PRUEBA_EN_PROCESO` solo podía terminar en
+  `PRUEBA_FINALIZADA`. Nuevo `POST /api/pruebas/interrumpir/{id}` (`causa` CANCELADA | ERROR_EQUIPO, `motivo`
+  obligatorio, `mensaje_tecnico` opcional): desde `PRUEBA_CONFIGURADA`/`PRUEBA_EN_PROCESO` vuelve a
+  `LISTO_PARA_PRUEBA` sin resultado, limpia `tipo_prueba_final` y deja evento `prueba_cancelada`/
+  `prueba_error_equipo` con número de intento. `PruebaView.vue`: botones "Cancelar prueba" / "Registrar error
+  del equipo" con diálogo. "Pausar" no se hizo: sin equipo integrado no hay nada que pausar.
+- **HU-032 — bug real.** `POST /api/obd/resultado` solo dejaba el resultado en `event_log`; la fila de
+  `resultados_obd_sbd` se quedaba sin `resultado`/`codigos_error`/`datos_raw`/`recibido_at`. Ahora se escriben
+  (y `solicitado_at` al solicitar).
+- **HU-033/082 — OBD sin comunicación.** `sin_comunicacion=true` + `mensaje_tecnico` → resultado ERROR con la
+  evidencia en `datos_raw`; opción "Sin comunicación" en `PruebaView.vue`.
+- **HU-029 — motivo de aplica/no aplica OBD** en la respuesta de `/obd/evaluar` y en la bitácora.
+- **HU-072/074 — paquete documental** (`app/services/paquete_documental.py`): la vista previa ahora es
+  certificado + hoja de resultados complementarios (inspección visual, OBD/SBD, prueba con límites aplicados y
+  hash de integridad). `GET /api/impresion/resultados/{id}` y `POST /api/impresion/imprimir-resultados/{id}`
+  (hoja blanca, sin folio, sin cambio de estado, evento en bitácora). Botón "Imprimir resultados" en
+  `ImpresionView.vue` (único cambio en la vista de Sebas).
+- **HU-010 — formato mínimo de placa**: 5-10 letras/números/guiones con al menos un número, normalizada a
+  mayúsculas sin espacios (422 si no cumple; Captura muestra el mensaje legible).
+- **HU-004 — Top App Bar** muestra usuario y fecha/hora.
+- Verificado contra el servidor real (uvicorn + BD de dev) y en Chrome; expedientes de prueba borrados.
+
+**Huecos que siguen abiertos, sin dependencia externa:**
+- HU-056 a 060 y HU-090: filtros de la cola de Impresión (línea, resultado, estado de folio/impresión, errores)
+  y búsqueda por placa/expediente — `ImpresionView.vue` (Sebas, plan del jue 8-oct).
+- HU-016: "entidad federativa" de la placa no existe como campo.
+- HU-053: la cola de Impresión no muestra un tipo de certificado sugerido.
+- HU-105/109/110: estado de sincronización por registro (hoy solo el conteo global de la barra).
+- N2 (tipo de verificación) y N4 (pantalla Supervisión / Auditoría) del plan del 1-oct.
+
+**Bloqueados por terceros (sin cambio):** HU-041/043/044/046 (estado del equipo y lecturas en tiempo real,
+Equipment Integration Contract), Etapa 8/12 del Sheet todavía dice "sistema externo de folios" (N5, reescribir
+con Luis), inspección visual/OBD en Captura (Sheet/Figma) vs Prueba (código) — Q1 a Luis.

@@ -18,8 +18,10 @@ from app.api.deps import (
 from app.models.enums import EstadoFolio, EstadoPrintJob, EstadoVerificacion, StationType, TipoCertificado
 from app.models.event_log import EventLog
 from app.models.folio import Folio
+from app.models.inspeccion_visual import InspeccionVisual
 from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
+from app.models.resultado_obd_sbd import ResultadoObdSbd
 from app.models.resultado_prueba import ResultadoPrueba
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
@@ -30,10 +32,13 @@ from app.services.certificado import (
     TipoCertificadoRequiereSeleccionManual,
     campos_obligatorios_faltantes,
     determinar_tipo_certificado,
+    cargar_config_certificado,
     generar_pdf_certificado,
+    html_certificado,
 )
 from app.services.folio_inventario import SinFolioDisponible, asignar_siguiente_folio
 from app.services.impresora import imprimir as imprimir_en_impresora
+from app.services.paquete_documental import html_resultados, pdf_de_html, pdf_paquete
 from app.services.proyeccion_certificado import LayoutSinMapeo, generar_proyeccion_certificado
 from app.services.semestre import obtener_prorroga_activa
 from app.services.sync import registrar_evento_con_sync
@@ -189,7 +194,19 @@ async def _imprimir_y_registrar(
     de tipo) — la mecánica de "generar → enviar → registrar intento" es
     idéntica en los tres casos, solo cambia qué folio/tipo se imprime."""
 
-    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, print_job.certificate_projection_json)
+    proyeccion = print_job.certificate_projection_json
+    resultado_prueba = (
+        await db.get(ResultadoPrueba, uuid.UUID(proyeccion["test_result_id"]))
+        if proyeccion.get("test_result_id")
+        else None
+    )
+    pdf_bytes = generar_pdf_certificado(
+        verificacion,
+        vehiculo,
+        proyeccion,
+        resultado_prueba=resultado_prueba,
+        config=await cargar_config_certificado(db),
+    )
     exito = await imprimir_en_impresora(pdf_bytes)
 
     db.add(
@@ -348,8 +365,118 @@ async def vista_previa_certificado(
     except LayoutSinMapeo as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, proyeccion)
+    # HU-072: la vista previa muestra el paquete documental completo —
+    # certificado (sobreimpresión) + resultados complementarios.
+    pdf_bytes = pdf_paquete(
+        html_certificado(
+            verificacion,
+            vehiculo,
+            proyeccion,
+            resultado_prueba=resultado_prueba,
+            config=await cargar_config_certificado(db),
+        ),
+        await _html_resultados_expediente(db, verificacion, vehiculo),
+    )
     return Response(content=pdf_bytes, media_type="application/pdf")
+
+
+# Desde que la prueba terminó (o la inspección rechazó) hasta el cierre: los
+# resultados complementarios ya son definitivos y se pueden entregar.
+ESTADOS_CON_RESULTADOS = {
+    EstadoVerificacion.PENDIENTE_IMPRESION,
+    EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO,
+    EstadoVerificacion.FOLIO_SOLICITADO,
+    EstadoVerificacion.FOLIO_ASIGNADO,
+    EstadoVerificacion.FOLIO_ERROR,
+    EstadoVerificacion.IMPRESION_FALLIDA,
+    EstadoVerificacion.IMPRESO,
+    EstadoVerificacion.CERRADO_APROBADO,
+    EstadoVerificacion.CERRADO_RECHAZADO,
+}
+
+
+async def _html_resultados_expediente(
+    db: AsyncSession, verificacion: Verificacion, vehiculo: Vehiculo
+) -> str:
+    async def ultimo(modelo):
+        return (
+            await db.execute(
+                select(modelo)
+                .where(modelo.verificacion_id == verificacion.id)
+                .order_by(modelo.created_at.desc())
+            )
+        ).scalars().first()
+
+    return html_resultados(
+        verificacion,
+        vehiculo,
+        inspeccion=await ultimo(InspeccionVisual),
+        obd=await ultimo(ResultadoObdSbd),
+        resultado_prueba=await ultimo(ResultadoPrueba),
+    )
+
+
+async def _expediente_con_resultados(db, session, expediente_id):
+    verificacion, vehiculo = await _obtener_expediente_y_vehiculo(
+        db, session, expediente_id, bloquear=False
+    )
+    if verificacion.estado not in ESTADOS_CON_RESULTADOS:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"El expediente está en estado {verificacion.estado}: todavía no tiene "
+                "resultados definitivos que imprimir."
+            ),
+        )
+    return verificacion, vehiculo
+
+
+@router.get("/resultados/{expediente_id}")
+async def resultados_complementarios(
+    expediente_id: uuid.UUID,
+    session: SessionContext = Depends(requiere_estacion(StationType.IMPRESION)),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """HU-074: PDF de resultados complementarios (inspección visual, OBD/SBD
+    si aplica y prueba), en hoja blanca, aparte del certificado."""
+
+    verificacion, vehiculo = await _expediente_con_resultados(db, session, expediente_id)
+    html = await _html_resultados_expediente(db, verificacion, vehiculo)
+    return Response(content=pdf_de_html(html), media_type="application/pdf")
+
+
+@router.post("/imprimir-resultados/{expediente_id}")
+async def imprimir_resultados_complementarios(
+    expediente_id: uuid.UUID,
+    session: SessionContext = Depends(requiere_estacion(StationType.IMPRESION)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """HU-074: envía los resultados complementarios a la impresora. No
+    consume folio ni cambia el estado del expediente; cada envío queda en la
+    bitácora (HU-093) y se puede repetir."""
+
+    verificacion, vehiculo = await _expediente_con_resultados(db, session, expediente_id)
+    html = await _html_resultados_expediente(db, verificacion, vehiculo)
+    exito = await imprimir_en_impresora(pdf_de_html(html))
+    await registrar_evento_con_sync(
+        db,
+        EventLog(
+            verificacion_id=verificacion.id,
+            estado_anterior=verificacion.estado,
+            estado_nuevo=verificacion.estado,
+            usuario_id=session.user_id,
+            modulo="impresion",
+            evento="resultados_complementarios_impresos"
+            if exito
+            else "resultados_complementarios_fallidos",
+            detalle_json={"exitoso": exito},
+        ),
+        verificacion=verificacion,
+    )
+    await db.commit()
+    if not exito:
+        raise HTTPException(status_code=502, detail="La impresora no respondió.")
+    return {"impreso": True}
 
 
 @router.post("/imprimir/{expediente_id}")

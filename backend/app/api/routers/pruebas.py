@@ -1,9 +1,10 @@
 import datetime
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -94,6 +95,64 @@ async def cola_prueba(
     return list(result.scalars().all())
 
 
+async def _tipo_prueba_por_defecto(
+    db: AsyncSession, session: SessionContext, verificacion: Verificacion
+) -> tuple[bool, bool, TipoPrueba, float | None, float | None]:
+    """Regla única del tipo de prueba por defecto, compartida por
+    `configurar_prueba` y `GET /configuracion/{id}` (así el frontend no la
+    replica). Devuelve (es_gasolina, excede_capacidad_dinamometro,
+    tipo_default, peso_kg, capacidad_kg)."""
+
+    es_gasolina = (verificacion.combustible_validado or "").upper() == "GASOLINA"
+
+    peso_kg = capacidad_kg = None
+    excede_capacidad_dinamometro = False
+    if es_gasolina:
+        vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
+        estacion = await db.get(Workstation, session.workstation_id)
+        peso_kg = vehiculo.peso_bruto_vehicular_kg if vehiculo is not None else None
+        capacidad_kg = estacion.capacidad_dinamometro_kg if estacion is not None else None
+        if peso_kg is not None and capacidad_kg is not None:
+            excede_capacidad_dinamometro = peso_kg > capacidad_kg
+
+    if not es_gasolina:
+        tipo_default = TipoPrueba.OPACIDAD
+    elif excede_capacidad_dinamometro:
+        tipo_default = TipoPrueba.ESTATICA
+    elif (await get_parametro(db, "gasolina_prueba_default")) == "estatica":
+        tipo_default = TipoPrueba.ESTATICA
+    else:
+        tipo_default = TipoPrueba.DINAMICA
+
+    return es_gasolina, excede_capacidad_dinamometro, tipo_default, peso_kg, capacidad_kg
+
+
+@router.get("/configuracion/{expediente_id}")
+async def configuracion_prueba(
+    expediente_id: uuid.UUID,
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Lo que la estación de Prueba necesita para ofrecer las opciones
+    correctas: tipo por defecto y si se permite el cambio manual a estática.
+    `/api/parametros` es solo de supervisor, por eso no sirve aquí."""
+
+    verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
+    es_gasolina, excede, tipo_default, _, _ = await _tipo_prueba_por_defecto(
+        db, session, verificacion
+    )
+    permite_cambio = (
+        es_gasolina
+        and tipo_default == TipoPrueba.DINAMICA
+        and (await get_parametro(db, "gasolina_permite_cambio_estatica")) == "true"
+    )
+    return {
+        "tipo_default": tipo_default,
+        "puede_cambiar_a_estatica": permite_cambio,
+        "excede_capacidad_dinamometro": excede,
+    }
+
+
 @router.post("/configurar/{expediente_id}")
 async def configurar_prueba(
     expediente_id: uuid.UUID,
@@ -162,25 +221,9 @@ async def configurar_prueba(
             ),
         )
 
-    es_gasolina = (verificacion.combustible_validado or "").upper() == "GASOLINA"
-
-    excede_capacidad_dinamometro = False
-    if es_gasolina:
-        vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
-        estacion = await db.get(Workstation, session.workstation_id)
-        peso_kg = vehiculo.peso_bruto_vehicular_kg if vehiculo is not None else None
-        capacidad_kg = estacion.capacidad_dinamometro_kg if estacion is not None else None
-        if peso_kg is not None and capacidad_kg is not None:
-            excede_capacidad_dinamometro = peso_kg > capacidad_kg
-
-    if not es_gasolina:
-        tipo_default = TipoPrueba.OPACIDAD
-    elif excede_capacidad_dinamometro:
-        tipo_default = TipoPrueba.ESTATICA
-    elif (await get_parametro(db, "gasolina_prueba_default")) == "estatica":
-        tipo_default = TipoPrueba.ESTATICA
-    else:
-        tipo_default = TipoPrueba.DINAMICA
+    es_gasolina, excede_capacidad_dinamometro, tipo_default, peso_kg, capacidad_kg = (
+        await _tipo_prueba_por_defecto(db, session, verificacion)
+    )
 
     if tipo_prueba != tipo_default:
         if not es_gasolina:
@@ -313,6 +356,74 @@ async def iniciar_prueba(
     )
     await db.commit()
     return {"estado_expediente": verificacion.estado}
+
+
+class InterrumpirPruebaInput(BaseModel):
+    causa: Literal["CANCELADA", "ERROR_EQUIPO"]
+    motivo: str
+    mensaje_tecnico: str | None = None
+
+
+@router.post("/interrumpir/{expediente_id}")
+async def interrumpir_prueba(
+    expediente_id: uuid.UUID,
+    payload: InterrumpirPruebaInput,
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """HU-045 (cancelar), HU-054/083 (error del equipo) y HU-084 (reintento):
+    una prueba configurada o en proceso se interrumpe sin generar resultado
+    — nunca se fabrica un resultado final — y el expediente vuelve a
+    LISTO_PARA_PRUEBA en la cola de su línea, desde donde se configura de
+    nuevo. El intento anterior (tipo, causa, motivo, mensaje técnico) queda
+    en `event_log`. Motivo obligatorio en ambos casos."""
+
+    verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
+
+    if verificacion.estado not in (
+        EstadoVerificacion.PRUEBA_CONFIGURADA,
+        EstadoVerificacion.PRUEBA_EN_PROCESO,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Solo se puede interrumpir una prueba configurada o en proceso; "
+                f"el expediente está en estado {verificacion.estado}."
+            ),
+        )
+    if not payload.motivo.strip():
+        raise HTTPException(status_code=422, detail="El motivo es obligatorio.")
+
+    intentos_previos = await db.scalar(
+        select(func.count())
+        .select_from(EventLog)
+        .where(
+            EventLog.verificacion_id == verificacion.id,
+            EventLog.evento.in_(("prueba_cancelada", "prueba_error_equipo")),
+        )
+    )
+    detalle = {
+        "estado_interrumpido": verificacion.estado.value,
+        "tipo_prueba": verificacion.tipo_prueba_final.value
+        if verificacion.tipo_prueba_final
+        else None,
+        "causa": payload.causa,
+        "motivo": payload.motivo.strip(),
+        "mensaje_tecnico": payload.mensaje_tecnico,
+        "intento": (intentos_previos or 0) + 1,
+    }
+    verificacion.tipo_prueba_final = None
+    await state_machine.transition(
+        db,
+        verificacion,
+        EstadoVerificacion.LISTO_PARA_PRUEBA,
+        usuario_id=session.user_id,
+        modulo="prueba",
+        evento="prueba_cancelada" if payload.causa == "CANCELADA" else "prueba_error_equipo",
+        detalle=detalle,
+    )
+    await db.commit()
+    return {"estado_expediente": verificacion.estado, "intento": detalle["intento"]}
 
 
 class ResultadoPruebaInput(BaseModel):

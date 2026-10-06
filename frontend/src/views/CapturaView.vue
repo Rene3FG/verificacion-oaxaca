@@ -199,7 +199,11 @@ async function crearExpediente() {
     await abrirExpediente(data.id);
     await cargarExpedientesEnCurso();
   } catch (err) {
-    error.value = err.response?.data?.detail || "No se pudo crear el expediente.";
+    // 422 de validación (HU-010, formato de placa) llega como lista de Pydantic.
+    const detail = err.response?.data?.detail;
+    error.value = Array.isArray(detail)
+      ? (detail[0]?.msg || "").replace(/^Value error, /, "")
+      : detail || "No se pudo crear el expediente.";
   } finally {
     creando.value = false;
   }

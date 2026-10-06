@@ -70,8 +70,11 @@ ALLOWED_TRANSITIONS: dict[E, set[E]] = {
     E.OBD_SOLICITADO: {E.OBD_RECIBIDO, E.ERROR_INTEGRACION},
     E.OBD_RECIBIDO: {E.LISTO_PARA_PRUEBA},
     E.LISTO_PARA_PRUEBA: {E.PRUEBA_CONFIGURADA},
-    E.PRUEBA_CONFIGURADA: {E.PRUEBA_EN_PROCESO},
-    E.PRUEBA_EN_PROCESO: {E.PRUEBA_FINALIZADA},
+    # HU-045/054/083/084: una prueba configurada o en proceso puede
+    # interrumpirse (cancelación operativa o error del equipo) y vuelve a la
+    # cola de su línea para reintentarse; el intento queda en la bitácora.
+    E.PRUEBA_CONFIGURADA: {E.PRUEBA_EN_PROCESO, E.LISTO_PARA_PRUEBA},
+    E.PRUEBA_EN_PROCESO: {E.PRUEBA_FINALIZADA, E.LISTO_PARA_PRUEBA},
     # El resultado de la prueba decide la cola: APROBADO -> PENDIENTE_IMPRESION,
     # RECHAZADO -> PENDIENTE_DE_IMPRESION_RECHAZO (ver pruebas.guardar_resultado).
     E.PRUEBA_FINALIZADA: {E.PENDIENTE_IMPRESION, E.PENDIENTE_DE_IMPRESION_RECHAZO},

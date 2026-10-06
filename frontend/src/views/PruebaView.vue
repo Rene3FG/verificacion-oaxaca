@@ -132,15 +132,33 @@ const evaluandoObd = ref(false);
 const solicitandoObd = ref(false);
 const guardandoObd = ref(false);
 const resultadoObd = ref("APROBADO");
+const mensajeObd = ref("");
+const OPCIONES_RESULTADO_OBD = [
+  { title: "Aprobado", value: "APROBADO" },
+  { title: "Rechazado", value: "RECHAZADO" },
+  { title: "Error", value: "ERROR" },
+  { title: "Sin comunicación", value: "SIN_COMUNICACION" },
+];
 
 // --- Prueba ---
 const combustible = computed(() => expediente.value?.vehiculo?.combustible ?? "");
 const esGasolina = computed(() => combustible.value.toUpperCase() === "GASOLINA");
-const tipoPruebaDefault = computed(() => (esGasolina.value ? "DINAMICA" : "OPACIDAD"));
+// El backend decide el default (combustible, parámetros de sistema y
+// capacidad del dinamómetro): GET /pruebas/configuracion/{id}. El cálculo
+// local solo es respaldo mientras carga o si la consulta falla.
+const configuracionPrueba = ref(null);
+const tipoPruebaDefault = computed(
+  () => configuracionPrueba.value?.tipo_default ?? (esGasolina.value ? "DINAMICA" : "OPACIDAD")
+);
+const puedeCambiarAEstatica = computed(() =>
+  configuracionPrueba.value
+    ? configuracionPrueba.value.puede_cambiar_a_estatica
+    : esGasolina.value
+);
 const cambioAEstatica = ref(false);
 const motivoCambio = ref("");
 const tipoPruebaElegido = computed(() =>
-  esGasolina.value && cambioAEstatica.value ? "ESTATICA" : tipoPruebaDefault.value
+  puedeCambiarAEstatica.value && cambioAEstatica.value ? "ESTATICA" : tipoPruebaDefault.value
 );
 const configurando = ref(false);
 const iniciando = ref(false);
@@ -262,6 +280,15 @@ async function abrirExpediente(id) {
     reiniciarChecklist();
     reiniciarPrueba();
     sincronizarVehiculoForm(data.vehiculo);
+    configuracionPrueba.value = null;
+    if (data.estado === "LISTO_PARA_PRUEBA") {
+      try {
+        configuracionPrueba.value = (await api.get(`/pruebas/configuracion/${id}`)).data;
+      } catch {
+        // Sin configuración del servidor se usa el cálculo local; el backend
+        // sigue validando al configurar.
+      }
+    }
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudo abrir el expediente.";
   } finally {
@@ -306,9 +333,10 @@ async function evaluarObd() {
   error.value = null;
   try {
     const { data } = await api.post(`/obd/evaluar/${expediente.value.id}`);
+    // HU-029: el servidor explica por qué aplica o no.
     aviso.value = data.aplica
-      ? "OBD/SBD aplica a este vehículo."
-      : "OBD/SBD no aplica; el expediente pasa directo a Prueba.";
+      ? `OBD/SBD aplica: ${data.motivo}`
+      : `OBD/SBD no aplica: ${data.motivo} El expediente pasa directo a Prueba.`;
     await recargarExpediente();
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudo evaluar OBD/SBD.";
@@ -335,7 +363,12 @@ async function guardarResultadoObd() {
   guardandoObd.value = true;
   error.value = null;
   try {
-    await api.post(`/obd/resultado/${expediente.value.id}`, { resultado: resultadoObd.value });
+    const sinComunicacion = resultadoObd.value === "SIN_COMUNICACION";
+    await api.post(`/obd/resultado/${expediente.value.id}`, {
+      resultado: sinComunicacion ? "ERROR" : resultadoObd.value,
+      sin_comunicacion: sinComunicacion,
+      mensaje_tecnico: sinComunicacion ? mensajeObd.value.trim() || null : null,
+    });
     aviso.value = "Resultado de OBD/SBD guardado. Expediente listo para prueba.";
     await recargarExpediente();
   } catch (err) {
@@ -362,6 +395,37 @@ async function configurarPrueba() {
     error.value = err.response?.data?.detail || "No se pudo configurar la prueba.";
   } finally {
     configurando.value = false;
+  }
+}
+
+const interrupcion = reactive({
+  abierto: false,
+  causa: "CANCELADA",
+  motivo: "",
+  mensajeTecnico: "",
+  enviando: false,
+});
+
+function abrirInterrupcion(causa) {
+  Object.assign(interrupcion, { abierto: true, causa, motivo: "", mensajeTecnico: "" });
+}
+
+async function interrumpirPrueba() {
+  interrupcion.enviando = true;
+  error.value = null;
+  try {
+    const { data } = await api.post(`/pruebas/interrumpir/${expediente.value.id}`, {
+      causa: interrupcion.causa,
+      motivo: interrupcion.motivo.trim(),
+      mensaje_tecnico: interrupcion.mensajeTecnico.trim() || null,
+    });
+    interrupcion.abierto = false;
+    aviso.value = `Prueba interrumpida (intento ${data.intento}). El expediente volvió a la cola.`;
+    await recargarExpediente();
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo interrumpir la prueba.";
+  } finally {
+    interrupcion.enviando = false;
   }
 }
 
@@ -603,11 +667,19 @@ onMounted(() => {
           <template v-else-if="expediente.estado === 'OBD_SOLICITADO'">
             <v-select
               v-model="resultadoObd"
-              :items="['APROBADO', 'RECHAZADO', 'ERROR']"
+              :items="OPCIONES_RESULTADO_OBD"
               label="Resultado OBD/SBD"
               variant="outlined"
               density="comfortable"
               style="max-width: 320px"
+            />
+            <v-text-field
+              v-if="resultadoObd === 'SIN_COMUNICACION'"
+              v-model="mensajeObd"
+              label="Mensaje técnico (opcional)"
+              variant="outlined"
+              density="comfortable"
+              style="max-width: 480px"
             />
             <v-btn color="primary" :loading="guardandoObd" @click="guardarResultadoObd">
               Guardar resultado
@@ -628,8 +700,14 @@ onMounted(() => {
               Combustible: <strong>{{ combustible || "sin dato" }}</strong> · Tipo por defecto:
               <strong>{{ tipoPruebaDefault }}</strong>
             </p>
+            <v-alert
+              v-if="configuracionPrueba?.excede_capacidad_dinamometro"
+              type="info" variant="tonal" density="compact" class="mb-2"
+            >
+              El peso bruto del vehículo excede la capacidad del dinamómetro de esta línea: la prueba es estática.
+            </v-alert>
             <v-switch
-              v-if="esGasolina"
+              v-if="puedeCambiarAEstatica"
               v-model="cambioAEstatica"
               label="Cambiar a prueba estática"
               color="primary"
@@ -747,8 +825,62 @@ onMounted(() => {
               Guardar resultado
             </v-btn>
           </template>
+
+          <!-- HU-045/054/083/084: cancelar o registrar error del equipo; el
+               expediente vuelve a la cola para reintentar, sin resultado. -->
+          <template v-if="['PRUEBA_CONFIGURADA', 'PRUEBA_EN_PROCESO'].includes(expediente.estado)">
+            <v-divider class="my-4" />
+            <div class="d-flex flex-wrap ga-2">
+              <v-btn variant="text" color="error" @click="abrirInterrupcion('CANCELADA')">
+                Cancelar prueba
+              </v-btn>
+              <v-btn variant="text" color="warning" @click="abrirInterrupcion('ERROR_EQUIPO')">
+                Registrar error del equipo
+              </v-btn>
+            </div>
+          </template>
         </v-card-text>
       </v-card>
+
+      <v-dialog v-model="interrupcion.abierto" max-width="480">
+        <v-card class="rounded-institucional-lg">
+          <v-card-title>
+            {{ interrupcion.causa === "CANCELADA" ? "Cancelar prueba" : "Error del equipo" }}
+          </v-card-title>
+          <v-card-text>
+            <p class="mb-3 text-body-2">
+              No se guarda resultado. El expediente vuelve a la cola de la línea para configurar la prueba de
+              nuevo; el intento queda en la bitácora.
+            </p>
+            <v-textarea
+              v-model="interrupcion.motivo"
+              label="Motivo (obligatorio)"
+              variant="outlined"
+              density="comfortable"
+              rows="2"
+            />
+            <v-text-field
+              v-if="interrupcion.causa === 'ERROR_EQUIPO'"
+              v-model="interrupcion.mensajeTecnico"
+              label="Mensaje técnico del equipo (opcional)"
+              variant="outlined"
+              density="comfortable"
+            />
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn variant="text" @click="interrupcion.abierto = false">Volver</v-btn>
+            <v-btn
+              color="primary"
+              :loading="interrupcion.enviando"
+              :disabled="!interrupcion.motivo.trim()"
+              @click="interrumpirPrueba"
+            >
+              Confirmar
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
     </template>
   </v-container>
 </template>

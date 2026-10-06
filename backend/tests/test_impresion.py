@@ -8,6 +8,7 @@ from app.models.enums import (
     ResultadoInspeccionVisual,
     StationType,
 )
+from app.models.event_log import EventLog
 from app.models.inspeccion_visual import InspeccionVisual
 from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
@@ -619,3 +620,80 @@ async def test_endpoints_restantes_expediente_de_linea_no_permitida_responden_40
         ruta.format(id=expediente.id), headers={"X-Session-Id": str(sesion.id)}
     )
     assert resp.status_code == 403
+
+
+async def test_vista_previa_incluye_paquete_documental(client, db_session, monkeypatch):
+    """HU-072: certificado + hoja de resultados complementarios."""
+
+    capturado = {}
+
+    def _paquete(*htmls):
+        capturado["htmls"] = htmls
+        return b"%PDF"
+
+    monkeypatch.setattr("app.api.routers.impresion.pdf_paquete", _paquete)
+
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.FOLIO_ASIGNADO, combustible="GASOLINA"
+    )
+    expediente.resultado_final = ResultadoFinal.APROBADO
+    expediente.certificado_tipo = "PARTICULAR"
+    db_session.add(expediente)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/impresion/vista-previa/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+    certificado, resultados = capturado["htmls"]
+    assert "@page { size: A4; margin: 0; }" in certificado
+    assert "Resultados de la verificación vehicular" in resultados
+
+
+async def test_resultados_complementarios_pdf_e_impresion_con_bitacora(client, db_session):
+    """HU-074: resultados en hoja aparte; imprimir no cambia estado ni pide
+    folio y deja evento en la bitácora."""
+
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO
+    )
+    db_session.add(
+        InspeccionVisual(
+            verificacion_id=expediente.id,
+            resultado=ResultadoInspeccionVisual.RECHAZADA,
+            checklist_json={"sistema_escape": "MALO"},
+            causales_rechazo={"observaciones": "Fuga en escape"},
+        )
+    )
+    await db_session.commit()
+    h = {"X-Session-Id": str(sesion.id)}
+
+    resp = await client.get(f"/api/impresion/resultados/{expediente.id}", headers=h)
+    assert resp.status_code == 200
+    assert resp.content.startswith(b"%PDF")
+
+    resp = await client.post(f"/api/impresion/imprimir-resultados/{expediente.id}", headers=h)
+    assert resp.status_code == 200
+    await db_session.refresh(expediente)
+    assert expediente.estado == EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO
+    eventos = (await db_session.execute(
+        select(EventLog).where(
+            EventLog.verificacion_id == expediente.id,
+            EventLog.evento == "resultados_complementarios_impresos",
+        )
+    )).scalars().all()
+    assert len(eventos) == 1
+
+
+async def test_resultados_complementarios_antes_de_terminar_prueba_responde_409(client, db_session):
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1, estado=EstadoVerificacion.LISTO_PARA_PRUEBA)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/impresion/resultados/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert resp.status_code == 409

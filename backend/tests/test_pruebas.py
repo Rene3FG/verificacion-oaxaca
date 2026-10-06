@@ -1414,3 +1414,77 @@ async def test_parametro_gasolina_permite_cambio_estatica_false_bloquea_el_cambi
     )
     assert resp.status_code == 409
     assert "configuración" in resp.json()["detail"]
+
+
+async def test_configuracion_prueba_refleja_los_parametros(client, db_session):
+    sesion, expediente = await _expediente_gasolina_listo(db_session)
+    await db_session.commit()
+    url = f"/api/pruebas/configuracion/{expediente.id}"
+    h = {"X-Session-Id": str(sesion.id)}
+
+    assert (await client.get(url, headers=h)).json() == {
+        "tipo_default": "DINAMICA",
+        "puede_cambiar_a_estatica": True,
+        "excede_capacidad_dinamometro": False,
+    }
+
+    await _fijar_parametro(db_session, "gasolina_permite_cambio_estatica", "false")
+    await db_session.commit()
+    assert (await client.get(url, headers=h)).json()["puede_cambiar_a_estatica"] is False
+
+    await _fijar_parametro(db_session, "gasolina_prueba_default", "estatica")
+    await db_session.commit()
+    body = (await client.get(url, headers=h)).json()
+    assert body["tipo_default"] == "ESTATICA"
+    assert body["puede_cambiar_a_estatica"] is False
+
+
+async def test_interrumpir_prueba_por_error_de_equipo_y_reintentar(client, db_session):
+    """HU-054/083/084: un error del equipo con la prueba en proceso no genera
+    resultado; el expediente vuelve a la cola y el reintento queda numerado."""
+
+    sesion, expediente = await _expediente_gasolina_listo(db_session)
+    await db_session.commit()
+    h = {"X-Session-Id": str(sesion.id)}
+
+    for intento in (1, 2):
+        assert (await client.post(
+            f"/api/pruebas/configurar/{expediente.id}?tipo_prueba=DINAMICA", headers=h
+        )).status_code == 200
+        assert (await client.post(f"/api/pruebas/iniciar/{expediente.id}", headers=h)).status_code == 200
+        resp = await client.post(
+            f"/api/pruebas/interrumpir/{expediente.id}",
+            json={"causa": "ERROR_EQUIPO", "motivo": "Analizador sin lectura",
+                  "mensaje_tecnico": "timeout puerto COM3"},
+            headers=h,
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"estado_expediente": "LISTO_PARA_PRUEBA", "intento": intento}
+
+    eventos = (await db_session.execute(
+        select(EventLog).where(
+            EventLog.verificacion_id == expediente.id,
+            EventLog.evento == "prueba_error_equipo",
+        )
+    )).scalars().all()
+    assert len(eventos) == 2
+    assert eventos[0].detalle_json["mensaje_tecnico"] == "timeout puerto COM3"
+    assert eventos[0].detalle_json["estado_interrumpido"] == "PRUEBA_EN_PROCESO"
+
+
+async def test_cancelar_prueba_exige_motivo_y_estado_valido(client, db_session):
+    """HU-045: cancelar exige motivo y solo aplica a prueba configurada o en proceso."""
+
+    sesion, expediente = await _expediente_gasolina_listo(db_session)
+    await db_session.commit()
+    h = {"X-Session-Id": str(sesion.id)}
+    url = f"/api/pruebas/interrumpir/{expediente.id}"
+
+    assert (await client.post(url, json={"causa": "CANCELADA", "motivo": "x"}, headers=h)).status_code == 409
+
+    await client.post(f"/api/pruebas/configurar/{expediente.id}?tipo_prueba=DINAMICA", headers=h)
+    assert (await client.post(url, json={"causa": "CANCELADA", "motivo": "  "}, headers=h)).status_code == 422
+    resp = await client.post(url, json={"causa": "CANCELADA", "motivo": "Vehículo se retiró"}, headers=h)
+    assert resp.status_code == 200
+    await db_session.refresh(expediente)
+    assert expediente.tipo_prueba_final is None

@@ -20,6 +20,15 @@ DEFAULTS = {
     # es solo informativa para el panel de Administración; se corrige aquí
     # para no mostrar un valor que contradice la arquitectura real.
     "folios_origen": "inventario_local",
+    # Plantillas de sobreimpresión del cliente (2026-10-05): datos fijos que
+    # las plantillas Word traían escritos a mano, más calibración de márgenes
+    # contra el papel preimpreso. Ver app.services.certificado.
+    "certificado_clave_centro": "CVV-06",
+    "certificado_marca_equipo": "OBERTECH",
+    "certificado_numero_equipo": "001",
+    "certificado_imprime_folio": "false",
+    "certificado_offset_x_mm": "0",
+    "certificado_offset_y_mm": "0",
 }
 
 DESCRIPCIONES = {
@@ -27,6 +36,12 @@ DESCRIPCIONES = {
     "gasolina_prueba_default": "Tipo de prueba con el que arranca un vehículo a gasolina (dinamica/estatica).",
     "gasolina_permite_cambio_estatica": "Si el operador puede cambiar de dinámica a estática con motivo (true/false).",
     "folios_origen": "Origen del inventario de folios (informativo; no se lee en el flujo real de folios.py).",
+    "certificado_clave_centro": "Clave del centro que se imprime en el certificado (p. ej. CVV-06).",
+    "certificado_marca_equipo": "Marca del equipo de medición que se imprime en el certificado.",
+    "certificado_numero_equipo": "Número de equipo que se imprime en el certificado.",
+    "certificado_imprime_folio": "Si el sistema sobreimprime el folio (false: el papel ya lo trae preimpreso).",
+    "certificado_offset_x_mm": "Calibración horizontal de la sobreimpresión en mm (+ derecha, − izquierda).",
+    "certificado_offset_y_mm": "Calibración vertical de la sobreimpresión en mm (+ abajo, − arriba).",
 }
 
 
@@ -56,7 +71,17 @@ def validar_valor(clave: str, valor: str) -> str | None:
     elif clave == "gasolina_prueba_default":
         if valor not in ("dinamica", "estatica"):
             return "gasolina_prueba_default debe ser 'dinamica' o 'estatica'."
-    elif clave in ("gasolina_permite_cambio_estatica",):
+    elif clave in ("certificado_offset_x_mm", "certificado_offset_y_mm"):
+        try:
+            numero = float(valor)
+        except ValueError:
+            return f"{clave} debe ser un número en milímetros (ej. -1.5)."
+        if abs(numero) > 20:
+            return f"{clave} debe estar entre -20 y 20 mm."
+    elif clave in ("certificado_clave_centro", "certificado_marca_equipo", "certificado_numero_equipo"):
+        if not valor.strip() or len(valor) > 30:
+            return f"{clave} no puede quedar vacío ni pasar de 30 caracteres."
+    elif clave in ("gasolina_permite_cambio_estatica", "certificado_imprime_folio"):
         if valor not in ("true", "false"):
             return f"{clave} debe ser 'true' o 'false'."
     return None

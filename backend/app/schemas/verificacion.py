@@ -1,7 +1,8 @@
 import datetime
+import re
 import uuid
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.models.enums import EstadoVerificacion, ResultadoFinal, TipoPrueba
 from app.schemas.vehiculo import VehiculoRead
@@ -14,6 +15,21 @@ class ExpedienteCreate(BaseModel):
     nombre de un usuario distinto al que realmente está operando."""
 
     placa: str
+
+    @field_validator("placa")
+    @classmethod
+    def validar_placa(cls, valor: str) -> str:
+        """HU-010: formato mínimo, no el catálogo oficial de placas por
+        entidad — 5 a 10 caracteres entre letras, dígitos y guiones, con al
+        menos un dígito. Se normaliza a mayúsculas sin espacios para que la
+        misma placa no se registre de dos formas (HU-089 compara por placa)."""
+
+        placa = re.sub(r"\s+", "", valor or "").upper()
+        if not re.fullmatch(r"[A-Z0-9-]{5,10}", placa) or not re.search(r"\d", placa):
+            raise ValueError(
+                "Placa inválida: de 5 a 10 letras, números o guiones, con al menos un número."
+            )
+        return placa
 
 
 class ExpedienteRead(BaseModel):
