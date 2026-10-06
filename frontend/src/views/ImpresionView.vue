@@ -22,6 +22,17 @@ const ESTADOS_IMPRIMIBLES = ["FOLIO_ASIGNADO", "IMPRESION_FALLIDA"];
 // backend/app/api/routers/impresion.py: calcular_tipo_certificado).
 const TIPOS_CERTIFICADO_APROBADO = ["PARTICULAR", "DOBLE_CERO", "INTENSIVO"];
 
+// N2 (Figma §5 y regla crítica #3): Tipo de verificación es un dato
+// independiente del tipo de certificado (Ordinaria, Extemporánea,
+// Voluntaria, Reposición). Si SIOX lo provee se muestra; si no, el
+// operador de Impresión lo captura obligatoriamente antes de imprimir.
+const TIPOS_VERIFICACION = [
+  { title: "Ordinaria (Calendario regular)", value: "ORDINARIA" },
+  { title: "Extemporánea (Con multa)", value: "EXTEMPORANEA" },
+  { title: "Voluntaria (Otros estados / No obligado)", value: "VOLUNTARIA" },
+  { title: "Reposición (Canje / Extravío)", value: "REPOSICION" },
+];
+
 const expedientes = ref([]);
 const cargandoLista = ref(false);
 const error = ref(null);
@@ -38,6 +49,11 @@ const cerrando = ref(false);
 const marcandoDanado = ref(false);
 
 const tipoCertificadoSeleccionado = ref(null);
+const tipoVerificacionSeleccionado = ref(null);
+
+const tipoVerificacionActivo = computed(
+  () => expediente.value?.tipo_verificacion || tipoVerificacionSeleccionado.value
+);
 
 const requiereSeleccionManual = computed(
   () => expediente.value?.resultado_final === "APROBADO"
@@ -86,7 +102,8 @@ const puedeImprimir = computed(
     expediente.value &&
     expediente.value.folio_externo &&
     ESTADOS_IMPRIMIBLES.includes(expediente.value.estado) &&
-    !reintentoRequiereSupervisor.value
+    !reintentoRequiereSupervisor.value &&
+    !!tipoVerificacionActivo.value
 );
 const puedeCerrar = computed(
   () =>
@@ -128,6 +145,8 @@ function abrirExpediente(exp) {
   error.value = null;
   aviso.value = null;
   expediente.value = exp;
+  tipoCertificadoSeleccionado.value = exp.certificado_tipo || null;
+  tipoVerificacionSeleccionado.value = exp.tipo_verificacion || "ORDINARIA";
 }
 
 function cerrarDetalle() {
@@ -253,6 +272,10 @@ async function imprimirResultados() {
 }
 
 async function imprimir() {
+  if (!tipoVerificacionActivo.value) {
+    error.value = "Selecciona el tipo de verificación antes de imprimir.";
+    return;
+  }
   imprimiendo.value = true;
   error.value = null;
   try {
@@ -403,6 +426,10 @@ onMounted(cargarCola);
                   <span>{{ expediente.certificado_tipo ?? "sin determinar" }}</span>
                 </v-col>
                 <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">Tipo de verificación</span>
+                  <span>{{ tipoVerificacionActivo ?? "sin capturar" }}</span>
+                </v-col>
+                <v-col cols="6">
                   <span class="text-caption text-medium-emphasis d-block">Placa</span>
                   <span>{{ expediente.placa }}</span>
                 </v-col>
@@ -462,8 +489,25 @@ onMounted(cargarCola);
           </v-card>
 
           <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
-            <v-card-title>Certificado</v-card-title>
+            <v-card-title>Certificado y tipo de verificación</v-card-title>
             <v-card-text>
+              <!-- N2 (Figma §5 y regla crítica #3): Tipo de verificación (Ordinaria,
+              Extemporánea, Voluntaria, Reposición). Si SIOX lo proveyó se muestra
+              fijo; si no viene, el Operador debe seleccionarlo obligatoriamente antes
+              de mandar a imprimir. -->
+              <v-select
+                v-if="!expediente.tipo_verificacion"
+                v-model="tipoVerificacionSeleccionado"
+                :items="TIPOS_VERIFICACION"
+                label="Tipo de verificación (obligatorio)"
+                density="compact"
+                class="mb-3"
+                :disabled="expediente.estado === 'IMPRESO' || !!expediente.cerrado_at"
+              />
+              <div v-else class="text-caption text-medium-emphasis mb-3">
+                Tipo de verificación (SIOX): <strong>{{ expediente.tipo_verificacion }}</strong>
+              </div>
+
               <!-- Solo APROBADO requiere selección manual (Particular/Doble
               Cero/Intensivo) — RECHAZADO se infiere solo (RECHAZO es el
               único tipo posible ahí), ver calcularTipoCertificado(). -->
