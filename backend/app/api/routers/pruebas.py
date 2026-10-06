@@ -94,6 +94,64 @@ async def cola_prueba(
     return list(result.scalars().all())
 
 
+async def _tipo_prueba_por_defecto(
+    db: AsyncSession, session: SessionContext, verificacion: Verificacion
+) -> tuple[bool, bool, TipoPrueba, float | None, float | None]:
+    """Regla única del tipo de prueba por defecto, compartida por
+    `configurar_prueba` y `GET /configuracion/{id}` (así el frontend no la
+    replica). Devuelve (es_gasolina, excede_capacidad_dinamometro,
+    tipo_default, peso_kg, capacidad_kg)."""
+
+    es_gasolina = (verificacion.combustible_validado or "").upper() == "GASOLINA"
+
+    peso_kg = capacidad_kg = None
+    excede_capacidad_dinamometro = False
+    if es_gasolina:
+        vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
+        estacion = await db.get(Workstation, session.workstation_id)
+        peso_kg = vehiculo.peso_bruto_vehicular_kg if vehiculo is not None else None
+        capacidad_kg = estacion.capacidad_dinamometro_kg if estacion is not None else None
+        if peso_kg is not None and capacidad_kg is not None:
+            excede_capacidad_dinamometro = peso_kg > capacidad_kg
+
+    if not es_gasolina:
+        tipo_default = TipoPrueba.OPACIDAD
+    elif excede_capacidad_dinamometro:
+        tipo_default = TipoPrueba.ESTATICA
+    elif (await get_parametro(db, "gasolina_prueba_default")) == "estatica":
+        tipo_default = TipoPrueba.ESTATICA
+    else:
+        tipo_default = TipoPrueba.DINAMICA
+
+    return es_gasolina, excede_capacidad_dinamometro, tipo_default, peso_kg, capacidad_kg
+
+
+@router.get("/configuracion/{expediente_id}")
+async def configuracion_prueba(
+    expediente_id: uuid.UUID,
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Lo que la estación de Prueba necesita para ofrecer las opciones
+    correctas: tipo por defecto y si se permite el cambio manual a estática.
+    `/api/parametros` es solo de supervisor, por eso no sirve aquí."""
+
+    verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
+    es_gasolina, excede, tipo_default, _, _ = await _tipo_prueba_por_defecto(
+        db, session, verificacion
+    )
+    permite_cambio = (
+        es_gasolina
+        and tipo_default == TipoPrueba.DINAMICA
+        and (await get_parametro(db, "gasolina_permite_cambio_estatica")) == "true"
+    )
+    return {
+        "tipo_default": tipo_default,
+        "puede_cambiar_a_estatica": permite_cambio,
+        "excede_capacidad_dinamometro": excede,
+    }
+
+
 @router.post("/configurar/{expediente_id}")
 async def configurar_prueba(
     expediente_id: uuid.UUID,
@@ -162,25 +220,9 @@ async def configurar_prueba(
             ),
         )
 
-    es_gasolina = (verificacion.combustible_validado or "").upper() == "GASOLINA"
-
-    excede_capacidad_dinamometro = False
-    if es_gasolina:
-        vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
-        estacion = await db.get(Workstation, session.workstation_id)
-        peso_kg = vehiculo.peso_bruto_vehicular_kg if vehiculo is not None else None
-        capacidad_kg = estacion.capacidad_dinamometro_kg if estacion is not None else None
-        if peso_kg is not None and capacidad_kg is not None:
-            excede_capacidad_dinamometro = peso_kg > capacidad_kg
-
-    if not es_gasolina:
-        tipo_default = TipoPrueba.OPACIDAD
-    elif excede_capacidad_dinamometro:
-        tipo_default = TipoPrueba.ESTATICA
-    elif (await get_parametro(db, "gasolina_prueba_default")) == "estatica":
-        tipo_default = TipoPrueba.ESTATICA
-    else:
-        tipo_default = TipoPrueba.DINAMICA
+    es_gasolina, excede_capacidad_dinamometro, tipo_default, peso_kg, capacidad_kg = (
+        await _tipo_prueba_por_defecto(db, session, verificacion)
+    )
 
     if tipo_prueba != tipo_default:
         if not es_gasolina:

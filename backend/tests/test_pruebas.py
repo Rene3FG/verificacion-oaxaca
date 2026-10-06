@@ -1414,3 +1414,26 @@ async def test_parametro_gasolina_permite_cambio_estatica_false_bloquea_el_cambi
     )
     assert resp.status_code == 409
     assert "configuración" in resp.json()["detail"]
+
+
+async def test_configuracion_prueba_refleja_los_parametros(client, db_session):
+    sesion, expediente = await _expediente_gasolina_listo(db_session)
+    await db_session.commit()
+    url = f"/api/pruebas/configuracion/{expediente.id}"
+    h = {"X-Session-Id": str(sesion.id)}
+
+    assert (await client.get(url, headers=h)).json() == {
+        "tipo_default": "DINAMICA",
+        "puede_cambiar_a_estatica": True,
+        "excede_capacidad_dinamometro": False,
+    }
+
+    await _fijar_parametro(db_session, "gasolina_permite_cambio_estatica", "false")
+    await db_session.commit()
+    assert (await client.get(url, headers=h)).json()["puede_cambiar_a_estatica"] is False
+
+    await _fijar_parametro(db_session, "gasolina_prueba_default", "estatica")
+    await db_session.commit()
+    body = (await client.get(url, headers=h)).json()
+    assert body["tipo_default"] == "ESTATICA"
+    assert body["puede_cambiar_a_estatica"] is False
