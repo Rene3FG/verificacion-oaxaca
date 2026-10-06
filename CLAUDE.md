@@ -2568,3 +2568,45 @@ deja de ser el HTML de trazabilidad y reproduce esas posiciones (`_LAYOUT_PARTIC
 Certificado anterior y las potencias TOTPOT), pedir las plantillas de Doble Cero y Rechazo si existen, y
 calibrar con una hoja real impresa. Lo demás sin cambios: reuniones con Luis/proveedor (5-7 oct), central de
 sync sin definir, integración de equipos, PR #1 sin revisión formal.
+
+## Auditoría Sheet + Figma y huecos cerrados (2026-10-05, 2ª sesión)
+
+**Fuentes revisadas.** Sheet "HU verificacion" (Drive, sin cambios desde 2026-08-04): las 110 HU de las 12
+etapas, leídas completas exportando el archivo a xlsx. Figma "Verificentros Oaxaca — Design System & Product
+UI": última edición hace ~1 mes según la lista de recientes de Figma → sin cambios posteriores a las revisiones
+del 24-ago y 28-sep; el canvas sigue sin poder leerse como texto.
+
+**Cerrado en esta sesión (todo con pruebas; 286 en total):**
+- **HU-045/054/083/084 — interrumpir y reintentar prueba.** `PRUEBA_EN_PROCESO` solo podía terminar en
+  `PRUEBA_FINALIZADA`. Nuevo `POST /api/pruebas/interrumpir/{id}` (`causa` CANCELADA | ERROR_EQUIPO, `motivo`
+  obligatorio, `mensaje_tecnico` opcional): desde `PRUEBA_CONFIGURADA`/`PRUEBA_EN_PROCESO` vuelve a
+  `LISTO_PARA_PRUEBA` sin resultado, limpia `tipo_prueba_final` y deja evento `prueba_cancelada`/
+  `prueba_error_equipo` con número de intento. `PruebaView.vue`: botones "Cancelar prueba" / "Registrar error
+  del equipo" con diálogo. "Pausar" no se hizo: sin equipo integrado no hay nada que pausar.
+- **HU-032 — bug real.** `POST /api/obd/resultado` solo dejaba el resultado en `event_log`; la fila de
+  `resultados_obd_sbd` se quedaba sin `resultado`/`codigos_error`/`datos_raw`/`recibido_at`. Ahora se escriben
+  (y `solicitado_at` al solicitar).
+- **HU-033/082 — OBD sin comunicación.** `sin_comunicacion=true` + `mensaje_tecnico` → resultado ERROR con la
+  evidencia en `datos_raw`; opción "Sin comunicación" en `PruebaView.vue`.
+- **HU-029 — motivo de aplica/no aplica OBD** en la respuesta de `/obd/evaluar` y en la bitácora.
+- **HU-072/074 — paquete documental** (`app/services/paquete_documental.py`): la vista previa ahora es
+  certificado + hoja de resultados complementarios (inspección visual, OBD/SBD, prueba con límites aplicados y
+  hash de integridad). `GET /api/impresion/resultados/{id}` y `POST /api/impresion/imprimir-resultados/{id}`
+  (hoja blanca, sin folio, sin cambio de estado, evento en bitácora). Botón "Imprimir resultados" en
+  `ImpresionView.vue` (único cambio en la vista de Sebas).
+- **HU-010 — formato mínimo de placa**: 5-10 letras/números/guiones con al menos un número, normalizada a
+  mayúsculas sin espacios (422 si no cumple; Captura muestra el mensaje legible).
+- **HU-004 — Top App Bar** muestra usuario y fecha/hora.
+- Verificado contra el servidor real (uvicorn + BD de dev) y en Chrome; expedientes de prueba borrados.
+
+**Huecos que siguen abiertos, sin dependencia externa:**
+- HU-056 a 060 y HU-090: filtros de la cola de Impresión (línea, resultado, estado de folio/impresión, errores)
+  y búsqueda por placa/expediente — `ImpresionView.vue` (Sebas, plan del jue 8-oct).
+- HU-016: "entidad federativa" de la placa no existe como campo.
+- HU-053: la cola de Impresión no muestra un tipo de certificado sugerido.
+- HU-105/109/110: estado de sincronización por registro (hoy solo el conteo global de la barra).
+- N2 (tipo de verificación) y N4 (pantalla Supervisión / Auditoría) del plan del 1-oct.
+
+**Bloqueados por terceros (sin cambio):** HU-041/043/044/046 (estado del equipo y lecturas en tiempo real,
+Equipment Integration Contract), Etapa 8/12 del Sheet todavía dice "sistema externo de folios" (N5, reescribir
+con Luis), inspección visual/OBD en Captura (Sheet/Figma) vs Prueba (código) — Q1 a Luis.

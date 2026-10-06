@@ -281,6 +281,21 @@ def generar_pdf_certificado(
     resultado_prueba: ResultadoPrueba | None = None,
     config: dict | None = None,
 ) -> bytes:
+    return HTML(
+        string=html_certificado(
+            verificacion, vehiculo, proyeccion, resultado_prueba=resultado_prueba, config=config
+        )
+    ).write_pdf()
+
+
+def html_certificado(
+    verificacion: Verificacion,
+    vehiculo: Vehiculo,
+    proyeccion: dict,
+    *,
+    resultado_prueba: ResultadoPrueba | None = None,
+    config: dict | None = None,
+) -> str:
     """'Certificate Result Projection Contract v1' (sección 4): las lecturas
     y el tipo se sobreimprimen EXCLUSIVAMENTE desde `proyeccion` — el
     snapshot congelado en `print_jobs.certificate_projection_json` (o su
@@ -371,4 +386,4 @@ def generar_pdf_certificado(
       <body>{"".join(piezas)}</body>
     </html>
     """
-    return HTML(string=html).write_pdf()
+    return html

@@ -1,3 +1,4 @@
+import datetime
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,7 +12,7 @@ from app.models.enums import EstadoVerificacion, ResultadoPruebaEnum, StationTyp
 from app.models.resultado_obd_sbd import ResultadoObdSbd
 from app.models.verificacion import Verificacion
 from app.services import state_machine
-from app.services.parametros import obd_aplica
+from app.services.parametros import get_parametro, obd_aplica
 
 router = APIRouter(prefix="/api/obd", tags=["obd"])
 
@@ -53,6 +54,23 @@ async def evaluar_obd(
 
     verificacion.combustible_validado = vehiculo.combustible
 
+    # HU-029: el motivo explica la decisión con las mismas 4 condiciones de
+    # `obd_aplica` (regla #4), en el orden en que se evalúan.
+    modelo_minimo = int(await get_parametro(db, "obd_modelo_minimo"))
+    if verificacion.estado != EstadoVerificacion.INSPECCION_VISUAL_APROBADA:
+        motivo = "La inspección visual no está aprobada."
+    elif vehiculo.tipo_vehiculo.lower() != "vehiculo":
+        motivo = f"El tipo de unidad ({vehiculo.tipo_vehiculo}) no es vehículo."
+    elif vehiculo.combustible.lower() != "gasolina":
+        motivo = f"El combustible ({vehiculo.combustible}) no es gasolina."
+    elif vehiculo.modelo < modelo_minimo:
+        motivo = f"Modelo {vehiculo.modelo} anterior al mínimo configurado ({modelo_minimo})."
+    else:
+        motivo = (
+            f"Vehículo a gasolina, modelo {vehiculo.modelo} (≥ {modelo_minimo}), "
+            "inspección visual aprobada."
+        )
+
     db.add(
         ResultadoObdSbd(verificacion_id=verificacion.id, aplica=aplica)
     )
@@ -67,7 +85,7 @@ async def evaluar_obd(
         usuario_id=session.user_id,
         modulo="obd",
         evento="obd_evaluado",
-        detalle={"aplica": aplica},
+        detalle={"aplica": aplica, "motivo": motivo},
     )
 
     if not aplica:
@@ -82,14 +100,30 @@ async def evaluar_obd(
         )
 
     await db.commit()
-    return {"aplica": aplica, "estado_expediente": verificacion.estado}
+    return {"aplica": aplica, "motivo": motivo, "estado_expediente": verificacion.estado}
 
 
 class ObdResultadoInput(BaseModel):
+    """HU-033/082: `sin_comunicacion=true` registra el intento fallido
+    (resultado ERROR, con el mensaje técnico como evidencia) en lugar de un
+    resultado del vehículo."""
+
     resultado: ResultadoPruebaEnum
     codigos_error: dict | None = None
     datos_raw: dict | None = None
     equipo_id: uuid.UUID | None = None
+    sin_comunicacion: bool = False
+    mensaje_tecnico: str | None = None
+
+
+async def _fila_obd(db: AsyncSession, verificacion_id: uuid.UUID) -> ResultadoObdSbd | None:
+    return (
+        await db.execute(
+            select(ResultadoObdSbd)
+            .where(ResultadoObdSbd.verificacion_id == verificacion_id)
+            .order_by(ResultadoObdSbd.created_at.desc())
+        )
+    ).scalars().first()
 
 
 @router.post("/solicitar/{expediente_id}")
@@ -120,6 +154,9 @@ async def solicitar_obd(
         modulo="obd",
         evento="obd_solicitado",
     )
+    fila = await _fila_obd(db, verificacion.id)
+    if fila is not None:
+        fila.solicitado_at = datetime.datetime.now(datetime.timezone.utc)
     await db.commit()
     return {"estado_expediente": verificacion.estado}
 
@@ -145,14 +182,36 @@ async def guardar_resultado_obd(
             ),
         )
 
+    # HU-032: el resultado vive en la fila de resultados_obd_sbd creada al
+    # evaluar (antes solo quedaba en la bitácora y la fila seguía sin
+    # resultado, códigos ni hora de recepción).
+    resultado = ResultadoPruebaEnum.ERROR if payload.sin_comunicacion else payload.resultado
+    datos_raw = dict(payload.datos_raw or {})
+    if payload.sin_comunicacion:
+        datos_raw.update(sin_comunicacion=True, mensaje_tecnico=payload.mensaje_tecnico)
+    fila = await _fila_obd(db, verificacion.id)
+    if fila is None:
+        fila = ResultadoObdSbd(verificacion_id=verificacion.id, aplica=True)
+        db.add(fila)
+    fila.resultado = resultado
+    fila.codigos_error = payload.codigos_error
+    fila.datos_raw = datos_raw or None
+    fila.equipo_id = payload.equipo_id
+    fila.operador_id = session.user_id
+    fila.recibido_at = datetime.datetime.now(datetime.timezone.utc)
+
     await state_machine.transition(
         db,
         verificacion,
         EstadoVerificacion.OBD_RECIBIDO,
         usuario_id=session.user_id,
         modulo="obd",
-        evento="obd_resultado_guardado",
-        detalle={"resultado": payload.resultado},
+        evento="obd_sin_comunicacion" if payload.sin_comunicacion else "obd_resultado_guardado",
+        detalle={
+            "resultado": resultado,
+            "sin_comunicacion": payload.sin_comunicacion,
+            "mensaje_tecnico": payload.mensaje_tecnico,
+        },
     )
     await state_machine.transition(
         db,

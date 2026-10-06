@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useSessionStore } from "../stores/session";
 
@@ -31,6 +31,16 @@ onMounted(() => {
   if (session.tieneSesionActiva) iniciarPolling();
 });
 onBeforeUnmount(detenerPolling);
+
+// HU-004: fecha/hora siempre visible junto al contexto de la estación.
+const ahora = ref(new Date());
+const reloj = setInterval(() => (ahora.value = new Date()), 30_000);
+onBeforeUnmount(() => clearInterval(reloj));
+const fechaHora = computed(() =>
+  ahora.value.toLocaleString("es-MX", {
+    day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+  })
+);
 
 function colorConexion(conexion, enError) {
   if (conexion === "en_linea") return "success";
@@ -78,6 +88,11 @@ function textoConexion(conexion, estadoSync) {
     >
       {{ textoConexion(session.conexion, session.estadoSync) }}
     </v-chip>
+
+    <span v-if="!enLogin && session.usuario" class="mr-3 text-body-2">
+      <v-icon icon="mdi-account" size="small" class="mr-1" />{{ session.usuario }}
+    </span>
+    <span v-if="!enLogin" class="mr-3 text-body-2">{{ fechaHora }}</span>
 
     <v-btn
       v-if="session.puedeSupervisar"

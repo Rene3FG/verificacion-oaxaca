@@ -1,3 +1,6 @@
+from sqlalchemy import select
+
+from app.models.resultado_obd_sbd import ResultadoObdSbd
 from app.models.enums import EstadoVerificacion, StationType
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa
 
@@ -192,3 +195,76 @@ async def test_evaluar_obd_expediente_otra_linea_responde_403(client, db_session
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp.status_code == 403
+
+
+async def _flujo_obd_hasta_solicitado(client, db_session):
+    sesion = await _sesion_prueba(db_session)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.INSPECCION_VISUAL_APROBADA,
+        tipo_vehiculo="vehiculo",
+        combustible="gasolina",
+        modelo=2020,
+    )
+    await db_session.commit()
+    h = {"X-Session-Id": str(sesion.id)}
+    resp = await client.post(f"/api/obd/evaluar/{expediente.id}", headers=h)
+    await client.post(f"/api/obd/solicitar/{expediente.id}", headers=h)
+    return h, expediente, resp.json()
+
+
+async def _fila(db_session, expediente):
+    return (await db_session.execute(
+        select(ResultadoObdSbd).where(ResultadoObdSbd.verificacion_id == expediente.id)
+    )).scalars().one()
+
+
+async def test_resultado_obd_se_guarda_en_la_tabla_con_codigos(client, db_session):
+    """HU-032 (bug corregido 2026-10-05): el resultado y los códigos se
+    guardan en resultados_obd_sbd, no solo en la bitácora."""
+
+    h, expediente, evaluacion = await _flujo_obd_hasta_solicitado(client, db_session)
+    assert "2020" in evaluacion["motivo"]  # HU-029
+
+    resp = await client.post(
+        f"/api/obd/resultado/{expediente.id}",
+        json={"resultado": "RECHAZADO", "codigos_error": {"P0420": "Catalizador"}},
+        headers=h,
+    )
+    assert resp.status_code == 200
+    fila = await _fila(db_session, expediente)
+    await db_session.refresh(fila)
+    assert fila.resultado.value == "RECHAZADO"
+    assert fila.codigos_error == {"P0420": "Catalizador"}
+    assert fila.solicitado_at is not None and fila.recibido_at is not None
+
+
+async def test_obd_sin_comunicacion_queda_como_error_con_evidencia(client, db_session):
+    """HU-033/082: sin comunicación se registra como ERROR con mensaje técnico."""
+
+    h, expediente, _ = await _flujo_obd_hasta_solicitado(client, db_session)
+    resp = await client.post(
+        f"/api/obd/resultado/{expediente.id}",
+        json={"resultado": "APROBADO", "sin_comunicacion": True, "mensaje_tecnico": "Sin respuesta del conector"},
+        headers=h,
+    )
+    assert resp.status_code == 200
+    fila = await _fila(db_session, expediente)
+    await db_session.refresh(fila)
+    assert fila.resultado.value == "ERROR"
+    assert fila.datos_raw == {"sin_comunicacion": True, "mensaje_tecnico": "Sin respuesta del conector"}
+
+
+async def test_evaluar_obd_explica_por_que_no_aplica(client, db_session):
+    sesion = await _sesion_prueba(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.INSPECCION_VISUAL_APROBADA,
+        tipo_vehiculo="vehiculo", combustible="diesel", modelo=2020,
+    )
+    await db_session.commit()
+    resp = await client.post(
+        f"/api/obd/evaluar/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert resp.json()["aplica"] is False
+    assert "diesel" in resp.json()["motivo"]

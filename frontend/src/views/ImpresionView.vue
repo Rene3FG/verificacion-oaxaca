@@ -237,6 +237,21 @@ async function verVistaPrevia() {
   }
 }
 
+const imprimiendoResultados = ref(false);
+
+async function imprimirResultados() {
+  imprimiendoResultados.value = true;
+  error.value = null;
+  try {
+    await api.post(`/impresion/imprimir-resultados/${expediente.value.id}`);
+    aviso.value = "Resultados complementarios impresos.";
+  } catch (err) {
+    error.value = await detalleDeError(err, "No se pudieron imprimir los resultados.");
+  } finally {
+    imprimiendoResultados.value = false;
+  }
+}
+
 async function imprimir() {
   imprimiendo.value = true;
   error.value = null;
@@ -531,6 +546,16 @@ onMounted(cargarCola);
                 @click="verVistaPrevia"
               >
                 Generar vista previa
+              </v-btn>
+              <!-- HU-074: resultados complementarios en hoja blanca, aparte del
+                   certificado; no consume folio ni cambia el estado. -->
+              <v-btn
+                class="ml-2"
+                variant="outlined"
+                :loading="imprimiendoResultados"
+                @click="imprimirResultados"
+              >
+                Imprimir resultados
               </v-btn>
             </v-card-text>
           </v-card>

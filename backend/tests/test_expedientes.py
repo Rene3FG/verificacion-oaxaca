@@ -1,7 +1,40 @@
 from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
 from app.models.event_log import EventLog
 from app.models.vehiculo import Vehiculo
+import pytest
+
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa
+
+
+@pytest.mark.parametrize("placa", ["", "   ", "AB1", "ABCDEF", "ABC 12$", "ABCDEFGHIJ1"])
+async def test_crear_expediente_rechaza_placa_sin_formato_minimo(client, db_session, placa):
+    """HU-010: placa obligatoria con formato mínimo (5-10 letras/números/
+    guiones, al menos un número)."""
+
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/expedientes", json={"placa": placa}, headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert resp.status_code == 422
+
+
+async def test_crear_expediente_normaliza_placa(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/expedientes", json={"placa": " thj 389b "}, headers={"X-Session-Id": str(sesion.id)}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["placa"] == "THJ389B"
 
 
 async def test_crear_expediente_hereda_centro_y_linea_de_la_sesion(client, db_session):
