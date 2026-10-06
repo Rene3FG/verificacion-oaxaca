@@ -145,3 +145,102 @@ def test_pdf_escapa_html_de_campos_de_texto_libre(monkeypatch):
     assert "&lt;img" in capturado["html"]
     assert "<b>X</b>" not in capturado["html"]
     assert "A&amp;B" in capturado["html"]
+
+
+def _capturar_html(monkeypatch) -> dict:
+    capturado = {}
+
+    class _HTML:
+        def __init__(self, string):
+            capturado["html"] = string
+
+        def write_pdf(self):
+            return b"%PDF"
+
+    monkeypatch.setattr("app.services.certificado.HTML", _HTML)
+    return capturado
+
+
+def _vehiculo_completo() -> Vehiculo:
+    return _vehiculo(
+        niv="3N1EB31S0ZK000001",
+        razon_social="JUAN PEREZ LOPEZ",
+        tarjeta_circulacion="TC-998877",
+        propietario_estado="OAXACA",
+        propietario_municipio="OAXACA DE JUAREZ",
+        propietario_codigo_postal="68000",
+        propietario_colonia="CENTRO",
+        propietario_calle="REFORMA",
+        propietario_numero_exterior="101",
+    )
+
+
+def test_plantilla_particular_tres_copias_con_lecturas_y_placa_grande(monkeypatch):
+    """Plantilla `Particular.doc` del cliente (2026-10-05): sobreimpresión
+    en 3 copias por hoja, lecturas RALENTÍ/CRUCERO, tipo real en vez del
+    texto fijo, datos fijos del centro y la placa en grande en la 2ª copia."""
+
+    capturado = _capturar_html(monkeypatch)
+    proyeccion = {
+        "certificate_type": "DOBLE_CERO",
+        "semestre": 2,
+        "method": "GAS_DYNAMIC",
+        "generated_at": "2026-10-05T18:00:00+00:00",
+        "fields": {
+            "ralenti": {"hc_ppm": 51, "co_pct": 0.31, "co2_pct": 14.2, "co_co2_pct": 14.51,
+                        "o2_pct": 0.8, "nox_ppm": 610, "speed_kph": 24},
+            "crucero": {"hc_ppm": 42, "co_pct": 0.22, "co2_pct": 14.4, "co_co2_pct": 14.62,
+                        "o2_pct": 0.7, "nox_ppm": 590, "speed_kph": 40},
+        },
+    }
+
+    generar_pdf_certificado(_verificacion(), _vehiculo_completo(), proyeccion)
+    html = capturado["html"]
+
+    for texto in ("JUAN PEREZ LOPEZ", "TC-998877", "3N1EB31S0ZK000001", "REFORMA 101",
+                  "DOBLE CERO", "2do Semestre 2026", "CVV-06  Línea: 1", "OBERTECH",
+                  "14.51", "14.62", "610", "NOx ppm"):
+        assert html.count(texto) == 3, texto
+    assert "PARTICULAR" not in html
+    assert html.count("TST0001") == 4  # 3 copias + placa grande
+    assert 'class="c grande"' in html
+    assert "COEFICIENTE" not in html
+
+
+def test_plantilla_intensivo_para_diesel(monkeypatch):
+    capturado = _capturar_html(monkeypatch)
+    proyeccion = {
+        "certificate_type": "INTENSIVO",
+        "semestre": 1,
+        "method": "DIESEL_OPACITY",
+        "generated_at": "2026-03-01T18:00:00+00:00",
+        "fields": {"coefficient_absorption_final_k_m1": 1.27},
+    }
+
+    generar_pdf_certificado(_verificacion(), _vehiculo_completo(), proyeccion)
+    html = capturado["html"]
+
+    assert html.count("1.27") == 3
+    assert html.count("ABSORCION m-1") == 3
+    assert html.count("1er Semestre 2026") == 3
+    assert "HC ppm" not in html
+
+
+def test_config_imprime_folio_y_calibracion(monkeypatch):
+    """`certificado_imprime_folio=true` vuelve a sobreimprimir el folio
+    (la regla vigente es no hacerlo); el offset desplaza todo el layout."""
+
+    capturado = _capturar_html(monkeypatch)
+    proyeccion = {"certificate_type": "PARTICULAR", "method": "GAS_STATIC", "fields": {}}
+
+    generar_pdf_certificado(_verificacion(), _vehiculo(), proyeccion)
+    assert "OAX-000001" not in capturado["html"]
+    sin_offset = capturado["html"]
+
+    generar_pdf_certificado(
+        _verificacion(), _vehiculo(), proyeccion,
+        config={"imprime_folio": True, "offset_x_mm": 10, "clave_centro": "CVV-11"},
+    )
+    assert capturado["html"].count("OAX-000001") == 3
+    assert "CVV-11" in capturado["html"]
+    assert "left:349.2pt" in sin_offset and "left:377.5pt" in capturado["html"]

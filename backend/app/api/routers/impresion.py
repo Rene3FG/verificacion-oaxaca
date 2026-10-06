@@ -30,6 +30,7 @@ from app.services.certificado import (
     TipoCertificadoRequiereSeleccionManual,
     campos_obligatorios_faltantes,
     determinar_tipo_certificado,
+    cargar_config_certificado,
     generar_pdf_certificado,
 )
 from app.services.folio_inventario import SinFolioDisponible, asignar_siguiente_folio
@@ -189,7 +190,19 @@ async def _imprimir_y_registrar(
     de tipo) — la mecánica de "generar → enviar → registrar intento" es
     idéntica en los tres casos, solo cambia qué folio/tipo se imprime."""
 
-    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, print_job.certificate_projection_json)
+    proyeccion = print_job.certificate_projection_json
+    resultado_prueba = (
+        await db.get(ResultadoPrueba, uuid.UUID(proyeccion["test_result_id"]))
+        if proyeccion.get("test_result_id")
+        else None
+    )
+    pdf_bytes = generar_pdf_certificado(
+        verificacion,
+        vehiculo,
+        proyeccion,
+        resultado_prueba=resultado_prueba,
+        config=await cargar_config_certificado(db),
+    )
     exito = await imprimir_en_impresora(pdf_bytes)
 
     db.add(
@@ -348,7 +361,13 @@ async def vista_previa_certificado(
     except LayoutSinMapeo as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    pdf_bytes = generar_pdf_certificado(verificacion, vehiculo, proyeccion)
+    pdf_bytes = generar_pdf_certificado(
+        verificacion,
+        vehiculo,
+        proyeccion,
+        resultado_prueba=resultado_prueba,
+        config=await cargar_config_certificado(db),
+    )
     return Response(content=pdf_bytes, media_type="application/pdf")
 
 

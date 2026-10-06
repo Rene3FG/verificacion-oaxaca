@@ -136,11 +136,22 @@ const resultadoObd = ref("APROBADO");
 // --- Prueba ---
 const combustible = computed(() => expediente.value?.vehiculo?.combustible ?? "");
 const esGasolina = computed(() => combustible.value.toUpperCase() === "GASOLINA");
-const tipoPruebaDefault = computed(() => (esGasolina.value ? "DINAMICA" : "OPACIDAD"));
+// El backend decide el default (combustible, parámetros de sistema y
+// capacidad del dinamómetro): GET /pruebas/configuracion/{id}. El cálculo
+// local solo es respaldo mientras carga o si la consulta falla.
+const configuracionPrueba = ref(null);
+const tipoPruebaDefault = computed(
+  () => configuracionPrueba.value?.tipo_default ?? (esGasolina.value ? "DINAMICA" : "OPACIDAD")
+);
+const puedeCambiarAEstatica = computed(() =>
+  configuracionPrueba.value
+    ? configuracionPrueba.value.puede_cambiar_a_estatica
+    : esGasolina.value
+);
 const cambioAEstatica = ref(false);
 const motivoCambio = ref("");
 const tipoPruebaElegido = computed(() =>
-  esGasolina.value && cambioAEstatica.value ? "ESTATICA" : tipoPruebaDefault.value
+  puedeCambiarAEstatica.value && cambioAEstatica.value ? "ESTATICA" : tipoPruebaDefault.value
 );
 const configurando = ref(false);
 const iniciando = ref(false);
@@ -262,6 +273,15 @@ async function abrirExpediente(id) {
     reiniciarChecklist();
     reiniciarPrueba();
     sincronizarVehiculoForm(data.vehiculo);
+    configuracionPrueba.value = null;
+    if (data.estado === "LISTO_PARA_PRUEBA") {
+      try {
+        configuracionPrueba.value = (await api.get(`/pruebas/configuracion/${id}`)).data;
+      } catch {
+        // Sin configuración del servidor se usa el cálculo local; el backend
+        // sigue validando al configurar.
+      }
+    }
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudo abrir el expediente.";
   } finally {
@@ -628,8 +648,14 @@ onMounted(() => {
               Combustible: <strong>{{ combustible || "sin dato" }}</strong> · Tipo por defecto:
               <strong>{{ tipoPruebaDefault }}</strong>
             </p>
+            <v-alert
+              v-if="configuracionPrueba?.excede_capacidad_dinamometro"
+              type="info" variant="tonal" density="compact" class="mb-2"
+            >
+              El peso bruto del vehículo excede la capacidad del dinamómetro de esta línea: la prueba es estática.
+            </v-alert>
             <v-switch
-              v-if="esGasolina"
+              v-if="puedeCambiarAEstatica"
               v-model="cambioAEstatica"
               label="Cambiar a prueba estática"
               color="primary"

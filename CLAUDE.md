@@ -2523,3 +2523,48 @@ los lee con `get_parametro`: `gasolina_prueba_default=estatica` hace ESTATICA el
 vehículo exceda la capacidad del dinamómetro (imposibilidad física). Con los defaults de siempre
 (dinamica/true) el comportamiento no cambia. Pendiente: `PruebaView.vue` sigue calculando el default de
 gasolina fijo (dinámica) y solo muestra el 409 como texto; falta exponer los parámetros al frontend. 267 pruebas.
+
+## `PruebaView.vue` lee el tipo de prueba del backend (2026-10-05)
+
+Cierra el pendiente de la sección anterior. `GET /api/pruebas/configuracion/{id}` (`requiere_estacion(PRUEBA)`)
+devuelve `tipo_default`, `puede_cambiar_a_estatica` y `excede_capacidad_dinamometro`, calculados con el mismo
+helper que usa `configurar_prueba` (`_tipo_prueba_por_defecto`) — la regla ya no se replica en Vue.
+`/api/parametros` no servía: es solo de supervisor. `PruebaView.vue` lo consulta al abrir un expediente en
+`LISTO_PARA_PRUEBA`, oculta el switch de cambio a estática cuando no se permite y avisa cuando el peso excede
+el dinamómetro; si la consulta falla cae al cálculo local de antes. 268 pruebas.
+
+## Certificado como sobreimpresión de las plantillas del cliente (2026-10-05) — supuestos
+
+El cliente mandó las plantillas Word que usa hoy el sistema de verificación (`~/Descargas/Particular.doc`
+gasolina, `~/Descargas/IntensivoDie.doc` diésel). Son formatos de **sobreimpresión** sobre papel preimpreso:
+solo los datos, 3 copias por hoja A4, y la 2ª copia lleva además la placa en grande. `generar_pdf_certificado`
+deja de ser el HTML de trazabilidad y reproduce esas posiciones (`_LAYOUT_PARTICULAR`/`_LAYOUT_INTENSIVO` en
+`app/services/certificado.py`).
+
+- Coordenadas medidas del render de LibreOffice de las plantillas (`pdftotext -bbox`), con desfase propio
+  por copia y por bloque (las 3 copias no son traslaciones exactas). Comparado por superposición contra la
+  plantilla: coinciden las 6 copias. **Word puede desplazar unos puntos** respecto a LibreOffice → calibrar
+  contra el papel real con `certificado_offset_x_mm`/`certificado_offset_y_mm` (±20 mm) en Parámetros.
+- Parámetros nuevos en `cat_parametros_sistema` (editables en Administración): `certificado_clave_centro`
+  (CVV-06), `certificado_marca_equipo` (OBERTECH), `certificado_numero_equipo` (001) — texto que las
+  plantillas traían escrito a mano —, `certificado_imprime_folio` (false) y los dos offsets.
+  `cargar_config_certificado(db)` los resuelve; `generar_pdf_certificado` sigue siendo pura.
+- Supuestos (reversibles):
+  - Layout por **método**: diésel → Intensivo, todo lo demás (incluido rechazo visual sin lecturas) →
+    Particular. El texto fijo "PARTICULAR" se reemplaza por el tipo real; no hay plantilla de Doble Cero ni
+    de Rechazo.
+  - Mapeo de marcadores: `<NombrePropietario…>` ← `razon_social` (no se captura nombre/apellidos
+    separados), `<PoblacionPro>` ← colonia, `<Serie1>` ← NIV, `<SubMarca>` ← línea, `<Linea>` ← número de
+    línea, `<Fecha>` ← fin de la prueba, `<Hora> / <HoraFIN>` ← creación del expediente / fin de la prueba,
+    Km/h ← `speed_kph`.
+  - `<CertificadoAnt>`, `<Multa>`, `<TOTPOT5024>`/`<TOTPOT2540>` no existen en el sistema → en blanco.
+  - `<FOLIO>` aparece en la plantilla pero la regla del cliente del 2026-10-01 es no imprimirlo (viene
+    preimpreso) → apagado por defecto, `certificado_imprime_folio=true` lo activa sin tocar código.
+  - Texto largo (p. ej. "OAXACA DE JUAREZ" en municipio) se imprime con letra más chica (mín. 5 pt) hasta
+    caber en su hueco, en vez de encimarse con el campo siguiente.
+- 3 pruebas nuevas en `tests/test_certificado_pdf.py`. 271 pruebas.
+
+**Pendiente real**: confirmar con el cliente los supuestos de arriba (sobre todo `<FOLIO>`, Multa,
+Certificado anterior y las potencias TOTPOT), pedir las plantillas de Doble Cero y Rechazo si existen, y
+calibrar con una hoja real impresa. Lo demás sin cambios: reuniones con Luis/proveedor (5-7 oct), central de
+sync sin definir, integración de equipos, PR #1 sin revisión formal.
