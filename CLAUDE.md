@@ -2629,3 +2629,14 @@ con Luis), inspección visual/OBD en Captura (Sheet/Figma) vs Prueba (código) �
   `estado` SINCRONIZADO / PENDIENTE / ERROR / SIN_REGISTROS con conteos. `ExpedienteHeader.vue` muestra el
   chip (se refresca al cambiar `updated_at`). Sigue sin central real: sin `CENTRAL_SYNC_URL` las filas quedan
   PENDIENTE/ERROR. No probado visualmente en navegador (solo build + pruebas). 288 pruebas.
+
+## N2 — tipo de verificación (2026-10-06)
+
+- `verificaciones.tipo_verificacion` (texto validado por `TipoVerificacion`: ORDINARIA/EXTEMPORANEA/VOLUNTARIA/
+  REPOSICION; migración `c3e8a5d1f7b2`), expuesto en `ExpedienteRead`. `POST /api/impresion/tipo-certificado/{id}`
+  acepta `?tipo_verificacion=`: si el expediente ya lo trae queda fijo (se ignora lo enviado); si no, es
+  obligatorio (422) y se persiste. SIOX hoy no lo importa, así que en la práctica siempre lo captura Impresión.
+- Merge de `frontend-impresion-central` (Sebas: selector N2, buscador, filtros, chip de tipo sugerido) y
+  `ImpresionView.vue` ahora manda el valor. **Ojo:** el `tipoCertificadoSugerido()` de Sebas infiere
+  INTENSIVO/DOBLE_CERO/PARTICULAR por combustible y año-modelo; esa elegibilidad NO está en el handoff (la
+  deja al operador) — el backend solo sugiere RECHAZO. A confirmar con él/Luis. 289 pruebas.

@@ -284,12 +284,18 @@ async function calcularTipoCertificado() {
     const params = requiereSeleccionManual.value
       ? { tipo_certificado: tipoCertificadoSeleccionado.value }
       : {};
+    // N2: si SIOX no trajo el tipo de verificación, el backend lo exige y lo
+    // persiste en esta misma llamada.
+    if (!expediente.value.tipo_verificacion) {
+      params.tipo_verificacion = tipoVerificacionActivo.value;
+    }
     const { data } = await api.post(
       `/impresion/tipo-certificado/${expediente.value.id}`,
       null,
       { params }
     );
     expediente.value.certificado_tipo = data.certificado_tipo;
+    expediente.value.tipo_verificacion = data.tipo_verificacion;
     aviso.value = `Tipo de certificado: ${data.certificado_tipo}`;
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudo determinar el tipo de certificado.";
