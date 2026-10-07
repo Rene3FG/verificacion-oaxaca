@@ -15,7 +15,7 @@ from app.api.deps import (
     requiere_estacion,
     requiere_supervisor,
 )
-from app.models.enums import EstadoFolio, EstadoPrintJob, EstadoVerificacion, StationType, TipoCertificado
+from app.models.enums import EstadoFolio, EstadoPrintJob, EstadoVerificacion, StationType, TipoCertificado, TipoVerificacion
 from app.models.event_log import EventLog
 from app.models.folio import Folio
 from app.models.inspeccion_visual import InspeccionVisual
@@ -249,10 +249,16 @@ async def _imprimir_y_registrar(
 async def calcular_tipo_certificado(
     expediente_id: uuid.UUID,
     tipo_certificado: TipoCertificado | None = None,
+    tipo_verificacion: TipoVerificacion | None = None,
     session: SessionContext = Depends(requiere_estacion(StationType.IMPRESION)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """HU-061: determina certificado_tipo (ver app.services.certificado) y
+    """N2: `tipo_verificacion` (Ordinaria/Extemporánea/Voluntaria/
+    Reposición) es obligatorio antes de determinar el certificado: si el
+    expediente ya lo tiene (p.ej. lo trajo SIOX) queda fijo y el valor
+    enviado se ignora; si no, hay que mandarlo (422) y se persiste aquí.
+
+    HU-061: determina certificado_tipo (ver app.services.certificado) y
     lo persiste en el expediente. Un resultado RECHAZADO se infiere solo;
     uno APROBADO requiere que el Operador mande `tipo_certificado`
     (Particular/Doble Cero/Intensivo) — no hay regla de elegibilidad
@@ -276,6 +282,14 @@ async def calcular_tipo_certificado(
                 "desde /tipo-certificado-post-impresion (exclusivo de Supervisor)."
             ),
         )
+
+    if verificacion.tipo_verificacion is None:
+        if tipo_verificacion is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Falta el tipo de verificación (Ordinaria, Extemporánea, Voluntaria o Reposición).",
+            )
+        verificacion.tipo_verificacion = tipo_verificacion.value
 
     try:
         tipo = await determinar_tipo_certificado(db, verificacion, tipo_certificado)
@@ -327,7 +341,11 @@ async def calcular_tipo_certificado(
     verificacion.certificado_tipo = tipo.value
     db.add(verificacion)
     await db.commit()
-    return {"certificado_tipo": tipo.value, "folio_externo": verificacion.folio_externo}
+    return {
+        "certificado_tipo": tipo.value,
+        "tipo_verificacion": verificacion.tipo_verificacion,
+        "folio_externo": verificacion.folio_externo,
+    }
 
 
 @router.get("/vista-previa/{expediente_id}")

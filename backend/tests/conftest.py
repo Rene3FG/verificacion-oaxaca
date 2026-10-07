@@ -212,6 +212,7 @@ async def crear_expediente(
     peso_bruto_vehicular_kg: float | None = None,
     combustible_validado: str | None = None,
     datos_certificado_completos: bool = True,
+    tipo_verificacion: str | None = "ORDINARIA",
 ) -> Verificacion:
     """`datos_certificado_completos=True` (default) llena de una vez los
     campos de propietario/domicilio/PBV/Tracción que el certificado exige
@@ -254,6 +255,7 @@ async def crear_expediente(
         linea_id=linea_id,
         estado=estado,
         combustible_validado=combustible_validado,
+        tipo_verificacion=tipo_verificacion,
     )
     db_session.add(verificacion)
     await db_session.flush()

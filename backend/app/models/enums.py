@@ -111,6 +111,17 @@ class EstadoPrintJob(str, enum.Enum):
     REINTENTO = "REINTENTO"
 
 
+class TipoVerificacion(str, enum.Enum):
+    """N2 (Figma §5, regla crítica #3): motivo/modalidad de la verificación.
+    Si SIOX lo provee queda fijo; si no, Impresión lo captura antes del
+    certificado. Se guarda como texto validado, no como ENUM de Postgres."""
+
+    ORDINARIA = "ORDINARIA"
+    EXTEMPORANEA = "EXTEMPORANEA"
+    VOLUNTARIA = "VOLUNTARIA"
+    REPOSICION = "REPOSICION"
+
+
 class TipoCertificado(str, enum.Enum):
     """Revisión Figma 2026-08-24: los 4 tipos reales de folio/certificado —
     reemplaza los nombres inventados (APROBACION/RECHAZO_VISUAL/

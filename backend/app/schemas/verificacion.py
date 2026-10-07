@@ -44,6 +44,7 @@ class ExpedienteRead(BaseModel):
     tipo_prueba_final: TipoPrueba | None
     resultado_final: ResultadoFinal | None
     certificado_tipo: str | None
+    tipo_verificacion: str | None
     folio_externo: str | None
     folio_asignado_at: datetime.datetime | None
     cerrado_at: datetime.datetime | None

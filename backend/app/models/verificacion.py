@@ -46,6 +46,7 @@ class Verificacion(Base, UUIDPKMixin, TimestampMixin):
         Enum(ResultadoFinal, name="resultado_final")
     )
     certificado_tipo: Mapped[str | None] = mapped_column(String(60))
+    tipo_verificacion: Mapped[str | None] = mapped_column(String(30))
     folio_externo: Mapped[str | None] = mapped_column(String(60))
     folio_asignado_at: Mapped[datetime.datetime | None] = mapped_column()
     cerrado_at: Mapped[datetime.datetime | None] = mapped_column()

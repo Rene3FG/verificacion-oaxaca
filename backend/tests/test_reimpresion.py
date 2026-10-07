@@ -701,3 +701,40 @@ async def test_corregir_tipo_post_impresion_mismo_tipo_responde_409(client, db_s
         headers={"X-Session-Id": str(sesion_supervisor.id)},
     )
     assert resp.status_code == 409
+
+
+async def test_tipo_certificado_exige_tipo_verificacion_y_lo_persiste(client, db_session):
+    """N2: sin tipo de verificación (y sin que SIOX lo haya traído) → 422;
+    con él se persiste; si ya existe, queda fijo y lo enviado se ignora."""
+
+    estacion = await crear_estacion(
+        db_session,
+        station_type=StationType.IMPRESION,
+        center_id="OAX-01",
+        line_id=None,
+        is_centralized=True,
+        allowed_line_ids=[1],
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    exp = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO,
+        tipo_verificacion=None,
+    )
+    exp.resultado_final = ResultadoFinal.RECHAZADO
+    await db_session.commit()
+    headers = {"X-Session-Id": str(sesion.id)}
+    url = f"/api/impresion/tipo-certificado/{exp.id}"
+
+    assert (await client.post(url, headers=headers)).status_code == 422
+
+    resp = await client.post(url, params={"tipo_verificacion": "VOLUNTARIA"}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["tipo_verificacion"] == "VOLUNTARIA"
+
+    resp = await client.post(url, params={"tipo_verificacion": "REPOSICION"}, headers=headers)
+    assert resp.json()["tipo_verificacion"] == "VOLUNTARIA"
+
+    resp = await client.post(url, params={"tipo_verificacion": "NOPE"}, headers=headers)
+    assert resp.status_code == 422
