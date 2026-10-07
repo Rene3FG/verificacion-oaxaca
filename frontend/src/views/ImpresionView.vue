@@ -22,6 +22,17 @@ const ESTADOS_IMPRIMIBLES = ["FOLIO_ASIGNADO", "IMPRESION_FALLIDA"];
 // backend/app/api/routers/impresion.py: calcular_tipo_certificado).
 const TIPOS_CERTIFICADO_APROBADO = ["PARTICULAR", "DOBLE_CERO", "INTENSIVO"];
 
+// N2 (Figma §5 y regla crítica #3): Tipo de verificación es un dato
+// independiente del tipo de certificado (Ordinaria, Extemporánea,
+// Voluntaria, Reposición). Si SIOX lo provee se muestra; si no, el
+// operador de Impresión lo captura obligatoriamente antes de imprimir.
+const TIPOS_VERIFICACION = [
+  { title: "Ordinaria (Calendario regular)", value: "ORDINARIA" },
+  { title: "Extemporánea (Con multa)", value: "EXTEMPORANEA" },
+  { title: "Voluntaria (Otros estados / No obligado)", value: "VOLUNTARIA" },
+  { title: "Reposición (Canje / Extravío)", value: "REPOSICION" },
+];
+
 const expedientes = ref([]);
 const cargandoLista = ref(false);
 const error = ref(null);
@@ -38,10 +49,129 @@ const cerrando = ref(false);
 const marcandoDanado = ref(false);
 
 const tipoCertificadoSeleccionado = ref(null);
+const tipoVerificacionSeleccionado = ref(null);
+
+const tipoVerificacionActivo = computed(
+  () => expediente.value?.tipo_verificacion || tipoVerificacionSeleccionado.value
+);
 
 const requiereSeleccionManual = computed(
   () => expediente.value?.resultado_final === "APROBADO"
 );
+
+// --- Búsqueda y Filtros de la Cola de Impresión (HU-053, HU-056 a 060 y HU-090) ---
+const busquedaCola = ref("");
+const filtroEstadoCola = ref("TODOS");
+const filtroLineaCola = ref("TODAS");
+
+const OPCIONES_FILTRO_ESTADO = [
+  { title: "Todos los estados", value: "TODOS" },
+  { title: "Pendientes de folio", value: "PENDIENTE" },
+  { title: "Folio asignado (listos)", value: "FOLIO_ASIGNADO" },
+  { title: "Incidencias / Errores", value: "INCIDENCIAS" },
+];
+
+function tipoCertificadoSugerido(exp) {
+  if (exp.certificado_tipo) return exp.certificado_tipo;
+  if (exp.resultado_final === "RECHAZADO" || exp.estado === "PENDIENTE_DE_IMPRESION_RECHAZO") {
+    return "RECHAZO";
+  }
+  if (exp.resultado_final === "APROBADO") {
+    const comb = exp.vehiculo?.combustible?.toUpperCase() || "";
+    if (comb === "DIESEL") return "INTENSIVO";
+    const mod = Number(exp.vehiculo?.modelo);
+    if (mod && mod >= 2025) return "DOBLE_CERO";
+    return "PARTICULAR";
+  }
+  return "POR DETERMINAR";
+}
+
+function colorCertificado(tipo) {
+  switch (tipo) {
+    case "DOBLE_CERO":
+      return "success";
+    case "INTENSIVO":
+      return "warning";
+    case "RECHAZO":
+      return "error";
+    default:
+      return "primary";
+  }
+}
+
+const conteosPorEstado = computed(() => {
+  const lista = expedientes.value || [];
+  return {
+    todos: lista.length,
+    pendientes: lista.filter((e) =>
+      ["PENDIENTE_IMPRESION", "PENDIENTE_DE_IMPRESION_RECHAZO"].includes(e.estado)
+    ).length,
+    asignados: lista.filter((e) => e.estado === "FOLIO_ASIGNADO").length,
+    incidencias: lista.filter((e) =>
+      ["FOLIO_ERROR", "IMPRESION_FALLIDA"].includes(e.estado)
+    ).length,
+  };
+});
+
+const opcionesFiltroLinea = computed(() => {
+  const permitidas = session.estacion?.allowed_line_ids || [1, 2];
+  const items = [{ title: "Todas las líneas", value: "TODAS" }];
+  permitidas.forEach((l) => {
+    items.push({ title: `Línea ${l}`, value: String(l) });
+  });
+  return items;
+});
+
+const expedientesFiltrados = computed(() => {
+  let lista = expedientes.value || [];
+
+  // 1. Filtro por Estado (HU-058 / HU-090)
+  if (filtroEstadoCola.value === "PENDIENTE") {
+    lista = lista.filter((e) =>
+      ["PENDIENTE_IMPRESION", "PENDIENTE_DE_IMPRESION_RECHAZO"].includes(e.estado)
+    );
+  } else if (filtroEstadoCola.value === "FOLIO_ASIGNADO") {
+    lista = lista.filter((e) => e.estado === "FOLIO_ASIGNADO");
+  } else if (filtroEstadoCola.value === "INCIDENCIAS") {
+    lista = lista.filter((e) =>
+      ["FOLIO_ERROR", "IMPRESION_FALLIDA"].includes(e.estado)
+    );
+  }
+
+  // 2. Filtro por Línea
+  if (filtroLineaCola.value !== "TODAS") {
+    lista = lista.filter((e) => String(e.linea_id) === filtroLineaCola.value);
+  }
+
+  // 3. Búsqueda reactiva por placa, expediente, folio o NIV (HU-056)
+  const q = busquedaCola.value.trim().toLowerCase();
+  if (q) {
+    lista = lista.filter((e) => {
+      const placa = (e.placa || "").toLowerCase();
+      const id = (e.id || "").toLowerCase();
+      const niv = (e.vehiculo?.niv || "").toLowerCase();
+      const marca = (e.vehiculo?.marca || "").toLowerCase();
+      const linea = (e.vehiculo?.linea || "").toLowerCase();
+      const folio = (e.folio_externo || "").toLowerCase();
+      return (
+        placa.includes(q) ||
+        id.includes(q) ||
+        niv.includes(q) ||
+        marca.includes(q) ||
+        linea.includes(q) ||
+        folio.includes(q)
+      );
+    });
+  }
+
+  return lista;
+});
+
+function limpiarFiltros() {
+  busquedaCola.value = "";
+  filtroEstadoCola.value = "TODOS";
+  filtroLineaCola.value = "TODAS";
+}
 
 // Concatenan solo las partes presentes (los campos de propietario son
 // opcionales a nivel de esquema, ver comentario en el template) sin dejar
@@ -86,7 +216,8 @@ const puedeImprimir = computed(
     expediente.value &&
     expediente.value.folio_externo &&
     ESTADOS_IMPRIMIBLES.includes(expediente.value.estado) &&
-    !reintentoRequiereSupervisor.value
+    !reintentoRequiereSupervisor.value &&
+    !!tipoVerificacionActivo.value
 );
 const puedeCerrar = computed(
   () =>
@@ -128,6 +259,8 @@ function abrirExpediente(exp) {
   error.value = null;
   aviso.value = null;
   expediente.value = exp;
+  tipoCertificadoSeleccionado.value = exp.certificado_tipo || null;
+  tipoVerificacionSeleccionado.value = exp.tipo_verificacion || "ORDINARIA";
 }
 
 function cerrarDetalle() {
@@ -253,6 +386,10 @@ async function imprimirResultados() {
 }
 
 async function imprimir() {
+  if (!tipoVerificacionActivo.value) {
+    error.value = "Selecciona el tipo de verificación antes de imprimir.";
+    return;
+  }
   imprimiendo.value = true;
   error.value = null;
   try {
@@ -332,27 +469,231 @@ onMounted(cargarCola);
 <template>
   <v-container>
     <template v-if="!expediente">
-      <p class="mb-4">
-        Impresión Central · Centro {{ session.estacion?.center_id }} · Líneas
-        {{ session.estacion?.allowed_line_ids }}
-      </p>
+      <div class="d-flex align-center justify-space-between flex-wrap ga-2 mb-4">
+        <div>
+          <h1 class="text-h5 font-weight-bold">Cola de Impresión Central</h1>
+          <p class="text-caption text-medium-emphasis mb-0">
+            Centro {{ session.estacion?.center_id }} · Estación {{ session.estacion?.workstation_id || 'IMPRESION-01' }} · Líneas
+            {{ session.estacion?.allowed_line_ids?.join(', ') || '1, 2' }}
+          </p>
+        </div>
+        <v-btn
+          variant="outlined"
+          prepend-icon="mdi-refresh"
+          :loading="cargandoLista"
+          @click="cargarCola"
+        >
+          Actualizar cola
+        </v-btn>
+      </div>
 
       <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = null">
         {{ error }}
       </v-alert>
 
-      <v-progress-circular v-if="cargandoLista" indeterminate class="mb-4" />
+      <!-- Panel de Búsqueda y Filtros de la Cola (HU-056, HU-058, HU-090) -->
+      <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
+        <v-card-text>
+          <v-row dense class="align-center">
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="busquedaCola"
+                label="Buscar en la cola"
+                placeholder="Por placa, folio, NIV o ID..."
+                prepend-inner-icon="mdi-magnify"
+                variant="outlined"
+                density="compact"
+                clearable
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-select
+                v-model="filtroEstadoCola"
+                :items="OPCIONES_FILTRO_ESTADO"
+                label="Estado / Incidencia"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-select
+                v-model="filtroLineaCola"
+                :items="opcionesFiltroLinea"
+                label="Línea"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+          </v-row>
+
+          <!-- Chips de acceso rápido por estado con contadores (HU-058 / HU-090) -->
+          <div class="d-flex align-center flex-wrap ga-2 mt-3 pt-2 border-t">
+            <span class="text-caption text-medium-emphasis mr-1">Filtro rápido:</span>
+            <v-chip
+              size="small"
+              :variant="filtroEstadoCola === 'TODOS' ? 'flat' : 'outlined'"
+              :color="filtroEstadoCola === 'TODOS' ? 'primary' : undefined"
+              @click="filtroEstadoCola = 'TODOS'"
+            >
+              Todos ({{ conteosPorEstado.todos }})
+            </v-chip>
+            <v-chip
+              size="small"
+              :variant="filtroEstadoCola === 'PENDIENTE' ? 'flat' : 'outlined'"
+              :color="filtroEstadoCola === 'PENDIENTE' ? 'primary' : undefined"
+              @click="filtroEstadoCola = 'PENDIENTE'"
+            >
+              Pendientes de folio ({{ conteosPorEstado.pendientes }})
+            </v-chip>
+            <v-chip
+              size="small"
+              :variant="filtroEstadoCola === 'FOLIO_ASIGNADO' ? 'flat' : 'outlined'"
+              :color="filtroEstadoCola === 'FOLIO_ASIGNADO' ? 'primary' : undefined"
+              @click="filtroEstadoCola = 'FOLIO_ASIGNADO'"
+            >
+              Folio asignado ({{ conteosPorEstado.asignados }})
+            </v-chip>
+            <v-chip
+              size="small"
+              :variant="filtroEstadoCola === 'INCIDENCIAS' ? 'flat' : 'outlined'"
+              :color="filtroEstadoCola === 'INCIDENCIAS' ? 'error' : undefined"
+              @click="filtroEstadoCola = 'INCIDENCIAS'"
+            >
+              Incidencias / Errores ({{ conteosPorEstado.incidencias }})
+            </v-chip>
+
+            <v-spacer />
+
+            <v-btn
+              v-if="busquedaCola || filtroEstadoCola !== 'TODOS' || filtroLineaCola !== 'TODAS'"
+              variant="text"
+              size="small"
+              color="error"
+              prepend-icon="mdi-filter-remove"
+              @click="limpiarFiltros"
+            >
+              Limpiar filtros
+            </v-btn>
+          </div>
+        </v-card-text>
+      </v-card>
+
+      <v-progress-circular v-if="cargandoLista" indeterminate class="my-4" />
       <template v-else>
-        <p v-if="expedientes.length === 0" class="text-medium-emphasis">
-          No hay expedientes pendientes de impresión en las líneas de este centro.
-        </p>
-        <ExpedienteHeader
-          v-for="exp in expedientes"
-          :key="exp.id"
-          :expediente="exp"
-          style="cursor: pointer"
-          @click="abrirExpediente(exp)"
-        />
+        <div v-if="expedientes.length === 0" class="text-medium-emphasis py-4 text-center">
+          <v-icon icon="mdi-printer-check" size="48" class="mb-2 text-disabled" />
+          <p>No hay expedientes pendientes de impresión en las líneas de este centro.</p>
+        </div>
+
+        <div v-else-if="expedientesFiltrados.length === 0" class="py-4">
+          <v-alert type="info" variant="tonal" class="rounded-institucional-lg mb-2">
+            No se encontraron expedientes que coincidan con los criterios de búsqueda o filtros seleccionados.
+          </v-alert>
+          <v-btn variant="outlined" size="small" @click="limpiarFiltros">
+            Mostrar todos los expedientes
+          </v-btn>
+        </div>
+
+        <template v-else>
+          <div class="d-flex align-center justify-space-between mb-2">
+            <span class="text-caption text-medium-emphasis">
+              Mostrando <strong>{{ expedientesFiltrados.length }}</strong> de
+              <strong>{{ expedientes.length }}</strong> expedientes en cola
+            </span>
+          </div>
+
+          <!-- Lista de expedientes con chip de certificado sugerido (HU-053) -->
+          <div
+            v-for="exp in expedientesFiltrados"
+            :key="exp.id"
+            class="mb-3 position-relative"
+          >
+            <!-- Tarjeta interactiva con metadatos de impresión -->
+            <v-card
+              class="rounded-institucional-lg elevation-institucional-0"
+              variant="flat"
+              style="cursor: pointer"
+              @click="abrirExpediente(exp)"
+            >
+              <div class="px-4 pt-3 pb-1 d-flex align-center flex-wrap ga-2 border-b bg-grey-lighten-5">
+                <span class="text-caption font-weight-bold text-medium-emphasis">
+                  Línea {{ exp.linea_id }}
+                </span>
+                <span class="text-caption text-disabled">·</span>
+
+                <!-- HU-053: Tipo de certificado sugerido / asignado -->
+                <v-chip
+                  size="x-small"
+                  variant="tonal"
+                  :color="colorCertificado(tipoCertificadoSugerido(exp))"
+                  prepend-icon="mdi-certificate-outline"
+                >
+                  <template v-if="exp.certificado_tipo">
+                    Certificado: <strong>{{ exp.certificado_tipo }}</strong>
+                  </template>
+                  <template v-else>
+                    Sugerido: <strong>{{ tipoCertificadoSugerido(exp) }}</strong>
+                  </template>
+                </v-chip>
+
+                <!-- Estado del folio -->
+                <v-chip
+                  v-if="exp.folio_externo"
+                  size="x-small"
+                  variant="flat"
+                  color="secondary"
+                  prepend-icon="mdi-barcode"
+                >
+                  Folio: {{ exp.folio_externo }}
+                </v-chip>
+                <v-chip
+                  v-else-if="exp.estado === 'FOLIO_ERROR'"
+                  size="x-small"
+                  variant="flat"
+                  color="error"
+                  prepend-icon="mdi-alert-circle"
+                >
+                  Sin folio disponible
+                </v-chip>
+                <v-chip
+                  v-else
+                  size="x-small"
+                  variant="outlined"
+                  class="text-medium-emphasis"
+                >
+                  Folio pendiente
+                </v-chip>
+
+                <!-- Tipo de verificación si existe -->
+                <v-chip
+                  v-if="exp.tipo_verificacion"
+                  size="x-small"
+                  variant="outlined"
+                  color="primary"
+                >
+                  {{ exp.tipo_verificacion }}
+                </v-chip>
+
+                <v-spacer />
+
+                <v-btn
+                  size="small"
+                  variant="text"
+                  color="primary"
+                  append-icon="mdi-chevron-right"
+                  @click.stop="abrirExpediente(exp)"
+                >
+                  Atender
+                </v-btn>
+              </div>
+
+              <ExpedienteHeader :expediente="exp" class="mb-0" style="border: none !important" />
+            </v-card>
+          </div>
+        </template>
       </template>
     </template>
 
@@ -401,6 +742,10 @@ onMounted(cargarCola);
                 <v-col cols="6">
                   <span class="text-caption text-medium-emphasis d-block">Tipo de certificado</span>
                   <span>{{ expediente.certificado_tipo ?? "sin determinar" }}</span>
+                </v-col>
+                <v-col cols="6">
+                  <span class="text-caption text-medium-emphasis d-block">Tipo de verificación</span>
+                  <span>{{ tipoVerificacionActivo ?? "sin capturar" }}</span>
                 </v-col>
                 <v-col cols="6">
                   <span class="text-caption text-medium-emphasis d-block">Placa</span>
@@ -462,8 +807,25 @@ onMounted(cargarCola);
           </v-card>
 
           <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
-            <v-card-title>Certificado</v-card-title>
+            <v-card-title>Certificado y tipo de verificación</v-card-title>
             <v-card-text>
+              <!-- N2 (Figma §5 y regla crítica #3): Tipo de verificación (Ordinaria,
+              Extemporánea, Voluntaria, Reposición). Si SIOX lo proveyó se muestra
+              fijo; si no viene, el Operador debe seleccionarlo obligatoriamente antes
+              de mandar a imprimir. -->
+              <v-select
+                v-if="!expediente.tipo_verificacion"
+                v-model="tipoVerificacionSeleccionado"
+                :items="TIPOS_VERIFICACION"
+                label="Tipo de verificación (obligatorio)"
+                density="compact"
+                class="mb-3"
+                :disabled="expediente.estado === 'IMPRESO' || !!expediente.cerrado_at"
+              />
+              <div v-else class="text-caption text-medium-emphasis mb-3">
+                Tipo de verificación (SIOX): <strong>{{ expediente.tipo_verificacion }}</strong>
+              </div>
+
               <!-- Solo APROBADO requiere selección manual (Particular/Doble
               Cero/Intensivo) — RECHAZADO se infiere solo (RECHAZO es el
               único tipo posible ahí), ver calcularTipoCertificado(). -->
@@ -536,12 +898,22 @@ onMounted(cargarCola);
             <v-card-title>Vista previa</v-card-title>
             <v-card-subtitle class="text-wrap">Certificado y resultados</v-card-subtitle>
             <v-card-text>
-              <p v-if="!expediente.certificado_tipo" class="text-caption text-medium-emphasis mb-2">
+              <v-alert
+                v-if="expediente.estado === 'FOLIO_ERROR'"
+                type="error"
+                variant="tonal"
+                class="mb-3"
+                icon="mdi-alert-circle-outline"
+              >
+                <div class="font-weight-bold">No se puede generar vista previa</div>
+                No quedan folios disponibles en la lista del tipo seleccionado. La impresión queda bloqueada hasta que existan nuevos folios disponibles.
+              </v-alert>
+              <p v-else-if="!expediente.certificado_tipo" class="text-caption text-medium-emphasis mb-2">
                 Calcula el tipo de certificado para poder generar la vista previa.
               </p>
               <v-btn
                 variant="outlined"
-                :disabled="!expediente.certificado_tipo"
+                :disabled="!expediente.certificado_tipo || expediente.estado === 'FOLIO_ERROR'"
                 :loading="cargandoVistaPrevia"
                 @click="verVistaPrevia"
               >
@@ -563,8 +935,23 @@ onMounted(cargarCola);
       </v-row>
 
       <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
-        <v-card-title>Impresión</v-card-title>
+        <v-card-title>
+          {{ expediente.estado === "IMPRESION_FALLIDA" ? "Error de impresora" : "Impresión" }}
+        </v-card-title>
+        <v-card-subtitle v-if="expediente.estado === 'IMPRESION_FALLIDA'" class="text-wrap">
+          Folio {{ expediente.folio_externo ?? "—" }} asignado · sin certificado físico válido
+        </v-card-subtitle>
         <v-card-text>
+          <v-alert
+            v-if="expediente.estado === 'IMPRESION_FALLIDA'"
+            type="error"
+            variant="tonal"
+            class="mb-3"
+            icon="mdi-printer-alert"
+          >
+            <div class="font-weight-bold">No fue posible imprimir</div>
+            La impresión falló y no se obtuvo un certificado físico válido. El folio permanece asignado. El reintento técnico conserva el mismo folio y la Hora Salida original, pero solo puede ejecutarlo un Supervisor.
+          </v-alert>
           <!-- Hora Salida (regla 2 del frame "Cierre y reimpresión"): se
           fija una sola vez, en el primer clic EXITOSO de Imprimir; ningún
           camino posterior (reintento, cierre, reimpresión, corrección) la
@@ -594,13 +981,31 @@ onMounted(cargarCola);
       ver nota en puedeMarcarFolioDanado arriba. -->
 
       <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
-        <v-card-title>Cierre</v-card-title>
+        <v-card-title>
+          {{ expediente.estado === "IMPRESO" ? "Salida enviada a impresora" : "Cierre" }}
+        </v-card-title>
+        <v-card-subtitle v-if="expediente.estado === 'IMPRESO'" class="text-wrap">
+          Pendiente de confirmación física por el operador
+        </v-card-subtitle>
         <v-card-text>
+          <v-alert
+            v-if="expediente.estado === 'IMPRESO'"
+            type="success"
+            variant="tonal"
+            class="mb-3"
+            icon="mdi-check-circle-outline"
+          >
+            <div class="font-weight-bold">Impresión completada</div>
+            El certificado y los resultados fueron impresos. El expediente todavía requiere cierre.
+          </v-alert>
+          <p v-if="expediente.estado === 'IMPRESO'" class="text-caption text-medium-emphasis mb-3">
+            La salida fue enviada a impresora. Verifica físicamente el certificado; al cerrar se registrarán IMPRESO + CERRADO.
+          </p>
           <p v-if="expediente.cerrado_at" class="text-caption text-medium-emphasis mb-2">
             Cerrado el {{ formatearFecha(expediente.cerrado_at) }}
           </p>
           <v-btn
-            color="success"
+            color="primary"
             :disabled="!puedeCerrar"
             :loading="cerrando"
             @click="cerrarExpediente"
