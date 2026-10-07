@@ -255,6 +255,7 @@ async def test_actualizar_vehiculo_guarda_propietario_domicilio_pbv_traccion(
         f"/api/expedientes/{expediente.id}/vehiculo",
         json={
             "tarjeta_circulacion": "TC-1234567",
+            "entidad_federativa": "Puebla",
             "propietario_estado": "Oaxaca",
             "propietario_municipio": "Oaxaca de Juárez",
             "propietario_codigo_postal": "68000",
@@ -270,6 +271,7 @@ async def test_actualizar_vehiculo_guarda_propietario_domicilio_pbv_traccion(
     assert resp.status_code == 200
     body = resp.json()
     assert body["tarjeta_circulacion"] == "TC-1234567"
+    assert body["entidad_federativa"] == "Puebla"
     assert body["propietario_estado"] == "Oaxaca"
     assert body["propietario_municipio"] == "Oaxaca de Juárez"
     assert body["propietario_codigo_postal"] == "68000"

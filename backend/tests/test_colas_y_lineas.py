@@ -163,3 +163,32 @@ async def test_impresion_filtro_linea_no_puede_ampliar_acceso(client, db_session
 async def test_sin_session_id_responde_401(client, db_session):
     resp = await client.get("/api/pruebas/cola")
     assert resp.status_code in (401, 422)
+
+
+async def test_impresion_cola_sugiere_rechazo_solo_en_la_cola_de_rechazo(client, db_session):
+    """HU-053: el único tipo que el sistema determina solo es RECHAZO; para
+    aprobados no se sugiere ninguno (la elección es del operador)."""
+
+    estacion = await crear_estacion(
+        db_session,
+        station_type=StationType.IMPRESION,
+        center_id="OAX-01",
+        line_id=None,
+        is_centralized=True,
+        allowed_line_ids=[1],
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    aprobado = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION
+    )
+    rechazado = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO
+    )
+    await db_session.commit()
+
+    resp = await client.get("/api/impresion/cola", headers={"X-Session-Id": str(sesion.id)})
+
+    assert resp.status_code == 200
+    sugerido = {e["id"]: e["tipo_certificado_sugerido"] for e in resp.json()}
+    assert sugerido[str(aprobado.id)] is None
+    assert sugerido[str(rechazado.id)] == "RECHAZO"

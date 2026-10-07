@@ -14,6 +14,7 @@ class VehiculoBase(BaseModel):
     tipo_vehiculo: str | None = None
     combustible: str | None = None
     razon_social: str | None = None
+    entidad_federativa: str | None = None
     tarjeta_circulacion: str | None = None
     propietario_estado: str | None = None
     propietario_municipio: str | None = None
@@ -49,6 +50,7 @@ class VehiculoUpdate(BaseModel):
     tipo_vehiculo: str | None = None
     combustible: str | None = None
     razon_social: str | None = None
+    entidad_federativa: str | None = None
     tarjeta_circulacion: str | None = None
     propietario_estado: str | None = None
     propietario_municipio: str | None = None

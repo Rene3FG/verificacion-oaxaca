@@ -2610,3 +2610,14 @@ del 24-ago y 28-sep; el canvas sigue sin poder leerse como texto.
 **Bloqueados por terceros (sin cambio):** HU-041/043/044/046 (estado del equipo y lecturas en tiempo real,
 Equipment Integration Contract), Etapa 8/12 del Sheet todavía dice "sistema externo de folios" (N5, reescribir
 con Luis), inspección visual/OBD en Captura (Sheet/Figma) vs Prueba (código) — Q1 a Luis.
+
+## Entidad federativa y tipo sugerido en la cola (2026-10-06)
+
+- **HU-016**: `vehiculos.entidad_federativa` (migración `b9d4f7a2c6e1`), en schemas, PATCH de vehículo
+  (con auditoría/origen como el resto) y campo en `CapturaView.vue`/`PruebaView.vue`. Texto libre, sin
+  catálogo de entidades; distinto de `propietario_estado` (domicilio).
+- **HU-053**: `ExpedienteCompleto.tipo_certificado_sugerido` (campo calculado). Solo sugiere `RECHAZO`
+  (estado `PENDIENTE_DE_IMPRESION_RECHAZO` o resultado RECHAZADO); en aprobados es `null` porque el handoff
+  deja Particular/Doble Cero/Intensivo a criterio del operador. **No se muestra aún en `ImpresionView.vue`**
+  (vista de Sebas): el dato ya viene en `/api/impresion/cola`.
+- 287 pruebas.

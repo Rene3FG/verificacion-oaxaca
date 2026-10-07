@@ -16,6 +16,9 @@ class Vehiculo(Base, UUIDPKMixin, TimestampMixin):
     tipo_vehiculo: Mapped[str | None] = mapped_column(String(60))
     combustible: Mapped[str | None] = mapped_column(String(30))
     razon_social: Mapped[str | None] = mapped_column(String(200))
+    # HU-016: entidad federativa de emisión de la placa (distinta de
+    # `propietario_estado`, que es el domicilio del propietario).
+    entidad_federativa: Mapped[str | None] = mapped_column(String(60))
 
     # Sección 7 del handoff (revisión Figma 2026-08-24): datos de propietario/
     # domicilio y del vehículo que el certificado exige y hoy no se capturan.

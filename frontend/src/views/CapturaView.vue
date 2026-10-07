@@ -32,6 +32,7 @@ const VEHICULO_CAMPOS = [
   "peso_bruto_vehicular_kg",
   "traccion",
   "razon_social",
+  "entidad_federativa",
   "tarjeta_circulacion",
   "propietario_estado",
   "propietario_municipio",
@@ -71,6 +72,7 @@ const vehiculoForm = reactive({
   peso_bruto_vehicular_kg: null,
   traccion: null,
   razon_social: null,
+  entidad_federativa: null,
   tarjeta_circulacion: null,
   propietario_estado: null,
   propietario_municipio: null,
@@ -544,6 +546,16 @@ onMounted(cargarExpedientesEnCurso);
         <v-card-title>Propietario y domicilio</v-card-title>
         <v-card-text>
           <v-row dense>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="vehiculoForm.entidad_federativa"
+                label="Entidad federativa de la placa"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('entidad_federativa') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
             <v-col cols="12" md="6">
               <v-text-field
                 v-model="vehiculoForm.razon_social"

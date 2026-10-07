@@ -2,7 +2,7 @@ import datetime
 import re
 import uuid
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
 from app.models.enums import EstadoVerificacion, ResultadoFinal, TipoPrueba
 from app.schemas.vehiculo import VehiculoRead
@@ -57,3 +57,18 @@ class ExpedienteCompleto(ExpedienteRead):
     el módulo de prueba recibe el expediente COMPLETO, nunca solo placa."""
 
     vehiculo: VehiculoRead
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def tipo_certificado_sugerido(self) -> str | None:
+        """HU-053: solo RECHAZO se sugiere — es el único tipo que el sistema
+        determina solo. Para aprobados, Particular/Doble Cero/Intensivo queda
+        bajo responsabilidad del operador (handoff, sin validación de
+        elegibilidad), así que no se sugiere ninguno."""
+
+        if (
+            self.estado == EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO
+            or self.resultado_final == ResultadoFinal.RECHAZADO
+        ):
+            return "RECHAZO"
+        return None

@@ -58,6 +58,7 @@ const CAMPOS_VEHICULO = [
   "peso_bruto_vehicular_kg",
   "traccion",
   "razon_social",
+  "entidad_federativa",
   "tarjeta_circulacion",
   "propietario_estado",
   "propietario_municipio",
@@ -558,6 +559,7 @@ onMounted(() => {
           </p>
           <v-row dense>
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.razon_social" label="Razón social" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.entidad_federativa" label="Entidad federativa de la placa" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.tarjeta_circulacion" label="Tarjeta de circulación" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="4"><v-text-field v-model="vehiculoForm.propietario_estado" label="Estado" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="4"><v-text-field v-model="vehiculoForm.propietario_municipio" label="Municipio" variant="outlined" density="compact" /></v-col>
