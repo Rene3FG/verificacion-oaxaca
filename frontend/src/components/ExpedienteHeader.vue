@@ -1,5 +1,6 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
+import { api } from "../api/client";
 import { useSessionStore } from "../stores/session";
 import { formatearFecha } from "../utils/format";
 import { colorEstado, iconoEstado, textoEstado } from "../utils/estado";
@@ -15,6 +16,29 @@ const modeloAuto = computed(() => {
   if (!v) return null;
   return [v.marca, v.linea].filter(Boolean).join(" ") || null;
 });
+
+// HU-105/109/110: estado de sincronización de este expediente. Se vuelve a
+// consultar cuando cambia su estado o updated_at (cada acción encola filas).
+const sync = ref(null);
+const SYNC_UI = {
+  SINCRONIZADO: { color: "success", icon: "mdi-cloud-check", texto: "Sincronizado" },
+  PENDIENTE: { color: "warning", icon: "mdi-cloud-upload", texto: "Pendiente de sincronizar" },
+  ERROR: { color: "error", icon: "mdi-cloud-alert", texto: "Error de sincronización" },
+  SIN_REGISTROS: { color: "default", icon: "mdi-cloud-outline", texto: "Sin sincronizar" },
+};
+const syncUi = computed(() => (sync.value ? SYNC_UI[sync.value.estado] : null));
+watch(
+  () => [props.expediente.id, props.expediente.updated_at],
+  async ([id]) => {
+    if (!id) return;
+    try {
+      sync.value = (await api.get(`/sync/expediente/${id}`)).data;
+    } catch {
+      sync.value = null;
+    }
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -23,6 +47,16 @@ const modeloAuto = computed(() => {
       <div class="d-flex align-center flex-wrap ga-3 mb-3">
         <span class="text-h6">Expediente #{{ props.expediente.id?.slice(0, 8) }}</span>
         <v-spacer />
+        <v-chip
+          v-if="syncUi"
+          :color="syncUi.color"
+          :prepend-icon="syncUi.icon"
+          class="rounded-institucional-full"
+          variant="tonal"
+          :title="`${sync.pendientes} pendientes · ${sync.en_error} con error · ${sync.sincronizados} enviados`"
+        >
+          {{ syncUi.texto }}
+        </v-chip>
         <v-chip
           :color="colorEstado(props.expediente.estado)"
           :prepend-icon="iconoEstado(props.expediente.estado)"

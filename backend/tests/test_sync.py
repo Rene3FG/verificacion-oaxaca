@@ -288,3 +288,42 @@ async def test_enviar_uno_a_central_sin_url_sigue_lanzando(monkeypatch):
     monkeypatch.setattr(settings, "central_sync_url", "")
     with pytest.raises(NotImplementedError):
         await sync_mod.enviar_uno_a_central(None)
+
+
+async def test_estado_por_expediente_resume_sus_filas(client, db_session):
+    """HU-105/109/110: el estado se calcula solo con las filas del
+    expediente (snapshot + eventos ligados por verificacion_id)."""
+
+    from tests.conftest import crear_expediente
+
+    estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA)
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    expediente = await crear_expediente(db_session, linea_id=sesion.line_id or 1)
+    await db_session.commit()
+    headers = {"X-Session-Id": str(sesion.id)}
+    url = f"/api/sync/expediente/{expediente.id}"
+
+    resp = await client.get(url, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["estado"] == "SIN_REGISTROS"
+
+    sync_ok = await _encolar(
+        db_session, entity_uuid=uuid.uuid4(), payload={"verificacion_id": str(expediente.id)}
+    )
+    sync_ok.sync_status = SyncStatus.SYNCED
+    await _encolar(db_session, entity_type="verificacion", entity_uuid=expediente.id)
+    ajeno = await _encolar(db_session, payload={"verificacion_id": str(uuid.uuid4())})
+    ajeno.sync_status = SyncStatus.ERROR
+    await db_session.commit()
+
+    body = (await client.get(url, headers=headers)).json()
+    assert (body["estado"], body["total"], body["pendientes"], body["sincronizados"]) == (
+        "PENDIENTE", 2, 1, 1,
+    )
+
+    sync_ok.sync_status = SyncStatus.ERROR
+    await db_session.commit()
+    assert (await client.get(url, headers=headers)).json()["estado"] == "ERROR"
+
+    resp = await client.get(f"/api/sync/expediente/{uuid.uuid4()}", headers=headers)
+    assert resp.status_code == 404

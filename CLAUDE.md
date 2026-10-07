@@ -2621,3 +2621,11 @@ con Luis), inspección visual/OBD en Captura (Sheet/Figma) vs Prueba (código) �
   deja Particular/Doble Cero/Intensivo a criterio del operador. **No se muestra aún en `ImpresionView.vue`**
   (vista de Sebas): el dato ya viene en `/api/impresion/cola`.
 - 287 pruebas.
+
+## Estado de sincronización por expediente (2026-10-06)
+
+- **HU-105/109/110**: `GET /api/sync/expediente/{id}` (cualquier sesión con acceso a la línea) resume las filas
+  de `sync_outbox` del expediente — snapshot (`entity_uuid`) y eventos (`payload.verificacion_id`) — en
+  `estado` SINCRONIZADO / PENDIENTE / ERROR / SIN_REGISTROS con conteos. `ExpedienteHeader.vue` muestra el
+  chip (se refresca al cambiar `updated_at`). Sigue sin central real: sin `CENTRAL_SYNC_URL` las filas quedan
+  PENDIENTE/ERROR. No probado visualmente en navegador (solo build + pruebas). 288 pruebas.
