@@ -72,18 +72,9 @@ const OPCIONES_FILTRO_ESTADO = [
 ];
 
 function tipoCertificadoSugerido(exp) {
-  if (exp.certificado_tipo) return exp.certificado_tipo;
-  if (exp.resultado_final === "RECHAZADO" || exp.estado === "PENDIENTE_DE_IMPRESION_RECHAZO") {
-    return "RECHAZO";
-  }
-  if (exp.resultado_final === "APROBADO") {
-    const comb = exp.vehiculo?.combustible?.toUpperCase() || "";
-    if (comb === "DIESEL") return "INTENSIVO";
-    const mod = Number(exp.vehiculo?.modelo);
-    if (mod && mod >= 2025) return "DOBLE_CERO";
-    return "PARTICULAR";
-  }
-  return "POR DETERMINAR";
+  // El backend solo sugiere RECHAZO; en aprobados la elección Particular /
+  // Doble Cero / Intensivo es del operador (handoff), no se infiere aquí.
+  return exp.certificado_tipo || exp.tipo_certificado_sugerido || "POR DETERMINAR";
 }
 
 function colorCertificado(tipo) {

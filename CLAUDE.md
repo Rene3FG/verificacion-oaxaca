@@ -2640,3 +2640,9 @@ con Luis), inspección visual/OBD en Captura (Sheet/Figma) vs Prueba (código) �
   `ImpresionView.vue` ahora manda el valor. **Ojo:** el `tipoCertificadoSugerido()` de Sebas infiere
   INTENSIVO/DOBLE_CERO/PARTICULAR por combustible y año-modelo; esa elegibilidad NO está en el handoff (la
   deja al operador) — el backend solo sugiere RECHAZO. A confirmar con él/Luis. 289 pruebas.
+
+## Tipo sugerido en la cola usa el del backend (2026-10-07)
+
+`ImpresionView.vue::tipoCertificadoSugerido` ya no infiere INTENSIVO/DOBLE_CERO/PARTICULAR por combustible y
+año-modelo (esa elegibilidad no está en el handoff): muestra `certificado_tipo` o el `tipo_certificado_sugerido`
+del backend (solo RECHAZO) y, si no hay, "POR DETERMINAR". Cierra el "Ojo" de la sección N2. 289 pruebas, build limpio.
