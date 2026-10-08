@@ -2646,3 +2646,14 @@ con Luis), inspección visual/OBD en Captura (Sheet/Figma) vs Prueba (código) �
 `ImpresionView.vue::tipoCertificadoSugerido` ya no infiere INTENSIVO/DOBLE_CERO/PARTICULAR por combustible y
 año-modelo (esa elegibilidad no está en el handoff): muestra `certificado_tipo` o el `tipo_certificado_sugerido`
 del backend (solo RECHAZO) y, si no hay, "POR DETERMINAR". Cierra el "Ojo" de la sección N2. 289 pruebas, build limpio.
+
+## N4 — Supervisión / Auditoría (2026-10-07)
+
+- `GET /api/supervision/auditoria` (`requiere_supervisor`): bitácora global (`event_log`) del centro de la sesión,
+  más reciente primero. Filtros: `desde`/`hasta` (fechas inclusivas, día calendario de Oaxaca; 422 si
+  `desde > hasta`), `usuario_id`, `placa` (parcial, ilike), `modulo` (exacto). Paginación `limite` (1-500, def. 100)
+  y `desplazamiento`; devuelve `{total, items}` con placa del expediente y `usuario_nombre`.
+- Pestaña "Auditoría" en `SupervisorView.vue` (filtros, tabla, paginación de 50). Módulos del selector: los que
+  realmente escriben en `event_log` (captura, visual, obd, prueba, folios, impresion, supervision; los eventos de
+  SIOX se registran como `captura`).
+- 293 pruebas. Sin cambios de migración. No probado visualmente en navegador (solo build + pruebas).

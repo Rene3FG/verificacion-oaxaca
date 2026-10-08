@@ -498,8 +498,50 @@ async function corregirTipoPostImpresion() {
   }
 }
 
+// --- Auditoría (N4) ---
+const MODULOS_AUDITORIA = [
+  "captura", "visual", "obd", "prueba", "folios", "impresion", "supervision",
+];
+const POR_PAGINA = 50;
+const auditoria = ref({ total: 0, items: [] });
+const cargandoAuditoria = ref(false);
+const paginaAuditoria = ref(1);
+const filtrosAuditoria = reactive({ desde: "", hasta: "", usuario_id: null, placa: "", modulo: null });
+
+async function cargarAuditoria() {
+  cargandoAuditoria.value = true;
+  const params = {
+    limite: POR_PAGINA,
+    desplazamiento: (paginaAuditoria.value - 1) * POR_PAGINA,
+  };
+  for (const [clave, valor] of Object.entries(filtrosAuditoria)) {
+    if (valor) params[clave] = valor;
+  }
+  try {
+    const { data } = await api.get("/supervision/auditoria", { params });
+    auditoria.value = data;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo cargar la auditoría.";
+  } finally {
+    cargandoAuditoria.value = false;
+  }
+}
+
+function filtrarAuditoria() {
+  paginaAuditoria.value = 1;
+  cargarAuditoria();
+}
+
+function limpiarFiltrosAuditoria() {
+  Object.assign(filtrosAuditoria, { desde: "", hasta: "", usuario_id: null, placa: "", modulo: null });
+  filtrarAuditoria();
+}
+
+const paginasAuditoria = computed(() => Math.max(1, Math.ceil(auditoria.value.total / POR_PAGINA)));
+
 onMounted(() => {
   cargarMonitor();
+  cargarAuditoria();
   cargarUsuarios();
   cargarPermisos();
   cargarEstadoSync();
@@ -527,6 +569,7 @@ onMounted(() => {
       <v-tab value="monitor">Monitor</v-tab>
       <v-tab value="sincronizacion">Sincronización</v-tab>
       <v-tab value="reimpresion">Reimpresión</v-tab>
+      <v-tab value="auditoria">Auditoría</v-tab>
       <v-tab value="administracion">Administración</v-tab>
     </v-tabs>
 
@@ -657,6 +700,105 @@ onMounted(() => {
 
 
 
+
+      <v-window-item value="auditoria">
+        <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
+          <v-card-title class="d-flex align-center ga-2">
+            Auditoría del centro
+            <v-spacer />
+            <v-btn
+              variant="text"
+              icon="mdi-refresh"
+              :loading="cargandoAuditoria"
+              @click="cargarAuditoria"
+            />
+          </v-card-title>
+          <v-card-text>
+            <v-row dense class="mb-2">
+              <v-col cols="12" sm="6" md="2">
+                <v-text-field v-model="filtrosAuditoria.desde" type="date" label="Desde" @update:model-value="filtrarAuditoria" />
+              </v-col>
+              <v-col cols="12" sm="6" md="2">
+                <v-text-field v-model="filtrosAuditoria.hasta" type="date" label="Hasta" @update:model-value="filtrarAuditoria" />
+              </v-col>
+              <v-col cols="12" sm="6" md="3">
+                <v-select
+                  v-model="filtrosAuditoria.usuario_id"
+                  :items="usuarios"
+                  item-title="nombre_completo"
+                  item-value="id"
+                  label="Usuario"
+                  clearable
+                  @update:model-value="filtrarAuditoria"
+                />
+              </v-col>
+              <v-col cols="12" sm="6" md="2">
+                <v-text-field
+                  v-model="filtrosAuditoria.placa"
+                  label="Placa"
+                  clearable
+                  @keyup.enter="filtrarAuditoria"
+                  @click:clear="filtrarAuditoria"
+                />
+              </v-col>
+              <v-col cols="12" sm="6" md="2">
+                <v-select
+                  v-model="filtrosAuditoria.modulo"
+                  :items="MODULOS_AUDITORIA"
+                  label="Módulo"
+                  clearable
+                  @update:model-value="filtrarAuditoria"
+                />
+              </v-col>
+              <v-col cols="12" md="1" class="d-flex align-center">
+                <v-btn variant="text" @click="limpiarFiltrosAuditoria">Limpiar</v-btn>
+              </v-col>
+            </v-row>
+
+            <v-progress-linear v-if="cargandoAuditoria" indeterminate class="mb-2" />
+            <p v-if="!cargandoAuditoria && auditoria.items.length === 0" class="text-body-2 text-medium-emphasis">
+              No hay eventos con esos filtros.
+            </p>
+            <v-table v-else density="compact">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Placa</th>
+                  <th>Módulo</th>
+                  <th>Evento</th>
+                  <th>Estado</th>
+                  <th>Usuario</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="ev in auditoria.items" :key="ev.id">
+                  <td>{{ new Date(ev.created_at).toLocaleString() }}</td>
+                  <td>{{ ev.placa }}</td>
+                  <td>{{ ev.modulo }}</td>
+                  <td>{{ ev.evento }}</td>
+                  <td>
+                    <template v-if="ev.estado_nuevo">
+                      {{ ev.estado_anterior ? textoEstado(ev.estado_anterior) + " → " : "" }}{{ textoEstado(ev.estado_nuevo) }}
+                    </template>
+                  </td>
+                  <td>{{ ev.usuario_nombre || "—" }}</td>
+                </tr>
+              </tbody>
+            </v-table>
+            <div class="d-flex align-center justify-space-between mt-3">
+              <span class="text-caption text-medium-emphasis">{{ auditoria.total }} eventos</span>
+              <v-pagination
+                v-if="paginasAuditoria > 1"
+                v-model="paginaAuditoria"
+                :length="paginasAuditoria"
+                :total-visible="5"
+                density="comfortable"
+                @update:model-value="cargarAuditoria"
+              />
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
 
       <v-window-item value="administracion">
         <AdministracionPanel>

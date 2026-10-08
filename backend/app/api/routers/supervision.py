@@ -1,9 +1,9 @@
 import datetime
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,11 +11,12 @@ from app.api.deps import SessionContext, get_db, requiere_supervisor
 from app.models.enums import EstadoVerificacion
 from app.models.event_log import EventLog
 from app.models.prorroga_semestre import ProrrogaSemestre
+from app.models.usuario import CatUsuario
 from app.models.verificacion import Verificacion
-from app.schemas.event_log import EventLogRead
+from app.schemas.event_log import AuditoriaPagina, AuditoriaRead, EventLogRead
 from app.schemas.verificacion import ExpedienteCompleto, ExpedienteRead
 from app.services.proyeccion_certificado import calcular_semestre
-from app.services.semestre import hoy_oaxaca, obtener_prorroga_activa
+from app.services.semestre import ZONA_OAXACA, hoy_oaxaca, obtener_prorroga_activa
 
 router = APIRouter(prefix="/api/supervision", tags=["supervision"])
 
@@ -112,6 +113,81 @@ async def bitacora_expediente(
         .order_by(EventLog.created_at)
     )
     return list(result.scalars().all())
+
+
+@router.get("/auditoria", response_model=AuditoriaPagina)
+async def auditoria_centro(
+    desde: datetime.date | None = None,
+    hasta: datetime.date | None = None,
+    usuario_id: uuid.UUID | None = None,
+    placa: str | None = None,
+    modulo: str | None = None,
+    limite: int = Query(100, ge=1, le=500),
+    desplazamiento: int = Query(0, ge=0),
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> AuditoriaPagina:
+    """N4 (Figma §12, pantalla 'Supervisión / Auditoría'): bitácora global
+    del centro de la sesión, filtrable por fecha (inclusive en ambos
+    extremos), usuario, placa/expediente y módulo. A diferencia de
+    `bitacora_expediente`, no exige conocer el expediente de antemano.
+    Más reciente primero. Acotada al centro del supervisor, igual que
+    monitor/buscar."""
+
+    if session.center_id is None:
+        raise HTTPException(status_code=400, detail="La sesión no tiene centro asociado.")
+    if desde and hasta and desde > hasta:
+        raise HTTPException(status_code=422, detail="'desde' no puede ser posterior a 'hasta'.")
+
+    filtros = [Verificacion.centro_id == session.center_id]
+    if desde:
+        filtros.append(
+            EventLog.created_at
+            >= datetime.datetime.combine(desde, datetime.time.min, tzinfo=ZONA_OAXACA)
+        )
+    if hasta:
+        filtros.append(
+            EventLog.created_at
+            < datetime.datetime.combine(
+                hasta + datetime.timedelta(days=1), datetime.time.min, tzinfo=ZONA_OAXACA
+            )
+        )
+    if usuario_id:
+        filtros.append(EventLog.usuario_id == usuario_id)
+    if modulo and modulo.strip():
+        filtros.append(EventLog.modulo == modulo.strip())
+    if placa and placa.strip():
+        filtros.append(Verificacion.placa.ilike(f"%{placa.strip()}%"))
+
+    base = (
+        select(EventLog, Verificacion.placa, CatUsuario.nombre_completo)
+        .join(Verificacion, Verificacion.id == EventLog.verificacion_id)
+        .outerjoin(CatUsuario, CatUsuario.id == EventLog.usuario_id)
+        .where(*filtros)
+    )
+    total = await db.scalar(
+        select(func.count())
+        .select_from(EventLog)
+        .join(Verificacion, Verificacion.id == EventLog.verificacion_id)
+        .where(*filtros)
+    )
+    filas = await db.execute(
+        base.order_by(EventLog.created_at.desc(), EventLog.id)
+        .limit(limite)
+        .offset(desplazamiento)
+    )
+    return AuditoriaPagina(
+        total=total or 0,
+        items=[
+            AuditoriaRead(
+                **EventLogRead.model_validate(ev).model_dump(),
+                verificacion_id=ev.verificacion_id,
+                placa=placa_exp,
+                usuario_nombre=nombre,
+            )
+            for ev, placa_exp, nombre in filas.all()
+        ],
+    )
 
 
 class SemestreRead(BaseModel):

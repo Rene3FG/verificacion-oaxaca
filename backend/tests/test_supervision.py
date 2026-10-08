@@ -248,3 +248,90 @@ async def test_configurar_prorroga_con_fecha_pasada_la_desactiva(client, db_sess
     )
     assert resp.status_code == 200
     assert resp.json()["prorroga_activa"] is False
+
+
+async def _evento(db_session, expediente, *, modulo, evento="x", usuario_id=None, creado=None):
+    from app.models.event_log import EventLog
+
+    ev = EventLog(
+        verificacion_id=expediente.id, evento=evento, modulo=modulo, usuario_id=usuario_id
+    )
+    if creado:
+        ev.created_at = creado
+    db_session.add(ev)
+    await db_session.flush()
+    return ev
+
+
+async def test_auditoria_exige_supervisor(client, db_session):
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+
+    resp = await client.get("/api/supervision/auditoria", headers={"X-Session-Id": str(sesion.id)})
+    assert resp.status_code == 403
+
+
+async def test_auditoria_solo_del_centro_y_mas_reciente_primero(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session, center_id="OAX-01")
+    propio = await crear_expediente(db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.CREADO)
+    ajeno = await crear_expediente(db_session, linea_id=1, centro_id="OAX-02", estado=EstadoVerificacion.CREADO)
+    hoy = datetime.datetime.now(datetime.timezone.utc)
+    await _evento(db_session, propio, modulo="captura", evento="viejo", creado=hoy - datetime.timedelta(hours=2))
+    await _evento(db_session, propio, modulo="prueba", evento="nuevo", creado=hoy)
+    await _evento(db_session, ajeno, modulo="captura", evento="ajeno")
+    await db_session.commit()
+
+    resp = await client.get("/api/supervision/auditoria", headers={"X-Session-Id": str(sesion.id)})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 2
+    assert [i["evento"] for i in body["items"]] == ["nuevo", "viejo"]
+    assert body["items"][0]["placa"] == propio.placa
+
+
+async def test_auditoria_filtra_por_modulo_placa_y_usuario(client, db_session):
+    import uuid
+
+    sesion = await crear_sesion_supervisor(db_session, center_id="OAX-01")
+    a = await crear_expediente(db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.CREADO)
+    b = await crear_expediente(db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.CREADO)
+    uid = uuid.uuid4()
+    await _evento(db_session, a, modulo="captura", usuario_id=uid)
+    await _evento(db_session, a, modulo="prueba")
+    await _evento(db_session, b, modulo="captura")
+    await db_session.commit()
+    h = {"X-Session-Id": str(sesion.id)}
+
+    por_modulo = (await client.get("/api/supervision/auditoria?modulo=prueba", headers=h)).json()
+    assert por_modulo["total"] == 1
+
+    por_placa = (await client.get(f"/api/supervision/auditoria?placa={b.placa}", headers=h)).json()
+    assert por_placa["total"] == 1
+    assert por_placa["items"][0]["verificacion_id"] == str(b.id)
+
+    por_usuario = (await client.get(f"/api/supervision/auditoria?usuario_id={uid}", headers=h)).json()
+    assert por_usuario["total"] == 1
+
+
+async def test_auditoria_rango_de_fechas_inclusivo_y_paginacion(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session, center_id="OAX-01")
+    exp = await crear_expediente(db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.CREADO)
+    zona = datetime.timezone(datetime.timedelta(hours=-6))
+    await _evento(db_session, exp, modulo="captura", evento="d1", creado=datetime.datetime(2026, 3, 1, 23, 30, tzinfo=zona))
+    await _evento(db_session, exp, modulo="captura", evento="d2", creado=datetime.datetime(2026, 3, 2, 8, 0, tzinfo=zona))
+    await _evento(db_session, exp, modulo="captura", evento="d3", creado=datetime.datetime(2026, 3, 3, 8, 0, tzinfo=zona))
+    await db_session.commit()
+    h = {"X-Session-Id": str(sesion.id)}
+
+    r = (await client.get("/api/supervision/auditoria?desde=2026-03-01&hasta=2026-03-02", headers=h)).json()
+    assert [i["evento"] for i in r["items"]] == ["d2", "d1"]
+
+    pag = (await client.get("/api/supervision/auditoria?limite=1&desplazamiento=1", headers=h)).json()
+    assert pag["total"] == 3 and len(pag["items"]) == 1
+
+    invertido = await client.get("/api/supervision/auditoria?desde=2026-03-05&hasta=2026-03-01", headers=h)
+    assert invertido.status_code == 422
