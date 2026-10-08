@@ -2657,3 +2657,19 @@ del backend (solo RECHAZO) y, si no hay, "POR DETERMINAR". Cierra el "Ojo" de la
   realmente escriben en `event_log` (captura, visual, obd, prueba, folios, impresion, supervision; los eventos de
   SIOX se registran como `captura`).
 - 293 pruebas. Sin cambios de migración. No probado visualmente en navegador (solo build + pruebas).
+
+## N4 verificado en Chrome + carrera de respuestas en filtros de Auditoría (2026-10-08)
+
+Prueba visual de la pestaña Auditoría (login `supervisor1` en `CAPTURA-REFORMA-L1`; en una estación de
+Prueba recibe el 403 "Sin permiso", correcto). Filtros probados contra el backend real: placa (parcial,
+sin distinguir mayúsculas, Enter), módulo, usuario, desde/hasta, rango de un solo día, Limpiar, estado vacío.
+
+- **Bug corregido**: cada cambio de filtro dispara `cargarAuditoria` sin cancelar la consulta anterior; si
+  una consulta vieja respondía después, pintaba la tabla con filtros obsoletos (visto en vivo: "desde" + placa
+  borrada mostraba 0 eventos en vez de 1). Ahora un contador de consulta descarta respuestas que no son la
+  última. Verificado retrasando a propósito la consulta obsoleta. Es el único filtro de la app que consulta al
+  servidor en cada cambio (los de Impresión filtran en cliente; Reimpresión busca con Enter).
+- Dato de dev: `event_log` de la BD de desarrollo tiene muy pocas filas (los expedientes de `seed_demo` no
+  generan eventos), así que la tabla se ve casi vacía sin actividad real. No es un bug.
+- Los chips de estado del Monitor salen grises porque todos los expedientes demo están en estados
+  "pendiente" (`estadoColors.pendiente = grey`, a la espera de un tono en el Figma). Tampoco es un bug.

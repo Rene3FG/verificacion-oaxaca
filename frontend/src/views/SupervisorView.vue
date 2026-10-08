@@ -507,8 +507,12 @@ const auditoria = ref({ total: 0, items: [] });
 const cargandoAuditoria = ref(false);
 const paginaAuditoria = ref(1);
 const filtrosAuditoria = reactive({ desde: "", hasta: "", usuario_id: null, placa: "", modulo: null });
+// Cambiar dos filtros seguidos dispara dos consultas; solo la última puede
+// pintar la tabla, aunque una anterior responda después.
+let consultaAuditoria = 0;
 
 async function cargarAuditoria() {
+  const consulta = ++consultaAuditoria;
   cargandoAuditoria.value = true;
   const params = {
     limite: POR_PAGINA,
@@ -519,11 +523,13 @@ async function cargarAuditoria() {
   }
   try {
     const { data } = await api.get("/supervision/auditoria", { params });
-    auditoria.value = data;
+    if (consulta === consultaAuditoria) auditoria.value = data;
   } catch (err) {
-    error.value = err.response?.data?.detail || "No se pudo cargar la auditoría.";
+    if (consulta === consultaAuditoria) {
+      error.value = err.response?.data?.detail || "No se pudo cargar la auditoría.";
+    }
   } finally {
-    cargandoAuditoria.value = false;
+    if (consulta === consultaAuditoria) cargandoAuditoria.value = false;
   }
 }
 
