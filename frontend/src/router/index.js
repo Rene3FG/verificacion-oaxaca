@@ -45,6 +45,12 @@ router.beforeEach((to) => {
     return { name: "login" };
   }
   if (to.meta.requiereSupervisor && !session.puedeSupervisar) {
+    // QA-E2E-03: un operador con sesión válida que abre /supervisor vuelve
+    // a su propio módulo, no al login.
+    const propio = session.estacion?.station_type;
+    if (session.tieneSesionActiva && routes.some((r) => r.name === propio)) {
+      return { name: propio };
+    }
     return { name: "login" };
   }
 });

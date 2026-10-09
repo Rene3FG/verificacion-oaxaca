@@ -45,10 +45,20 @@ class SessionContext:
 
 
 async def get_current_session(
-    x_session_id: Annotated[uuid.UUID, Header(alias="X-Session-Id")],
+    x_session_id: Annotated[str | None, Header(alias="X-Session-Id")] = None,
     db: AsyncSession = Depends(get_db),
 ) -> SessionContext:
-    sesion = await db.get(StationSession, x_session_id)
+    # Sin encabezado (p. ej. la pantalla siguió abierta tras cerrar sesión)
+    # o con un valor que no es UUID: es falta de sesión, no un error de
+    # validación — 401 para que el cliente regrese al login, no 422.
+    try:
+        session_uuid = uuid.UUID(x_session_id) if x_session_id else None
+    except ValueError:
+        session_uuid = None
+    if session_uuid is None:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+
+    sesion = await db.get(StationSession, session_uuid)
     if sesion is None or sesion.status != "activa" or sesion.logout_at is not None:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
 

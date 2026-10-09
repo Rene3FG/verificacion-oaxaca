@@ -115,6 +115,13 @@ export const useSessionStore = defineStore("session", {
           // Sesión ya inválida del lado del servidor: no bloquear el logout local.
         }
       }
+      this.descartarSesionLocal();
+    },
+
+    // Limpia la sesión sin hablar con el servidor (el interceptor de 401 de
+    // api/client.js la usa cuando el servidor ya la dio por inválida). La
+    // navegación al login la hace App.vue al ver tieneSesionActiva en false.
+    descartarSesionLocal() {
       this.sesion = null;
       this.usuario = null;
       this.estadoSync = null;

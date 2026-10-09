@@ -162,7 +162,12 @@ async def test_impresion_filtro_linea_no_puede_ampliar_acceso(client, db_session
 
 async def test_sin_session_id_responde_401(client, db_session):
     resp = await client.get("/api/pruebas/cola")
-    assert resp.status_code in (401, 422)
+    assert resp.status_code == 401
+
+
+async def test_session_id_que_no_es_uuid_responde_401(client, db_session):
+    resp = await client.get("/api/pruebas/cola", headers={"X-Session-Id": "basura"})
+    assert resp.status_code == 401
 
 
 async def test_impresion_cola_sugiere_rechazo_solo_en_la_cola_de_rechazo(client, db_session):

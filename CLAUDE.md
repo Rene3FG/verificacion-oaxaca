@@ -2673,3 +2673,21 @@ sin distinguir mayúsculas, Enter), módulo, usuario, desde/hasta, rango de un s
   generan eventos), así que la tabla se ve casi vacía sin actividad real. No es un bug.
 - Los chips de estado del Monitor salen grises porque todos los expedientes demo están en estados
   "pendiente" (`estadoColors.pendiente = grey`, a la espera de un tono en el Figma). Tampoco es un bug.
+
+## Auditoría QA de Sebastián: ciclo de vida de sesión (2026-10-08)
+
+Sebastián entregó `TEST_AUDIT_REPORT.md` (Puppeteer) con 3 hallazgos; los 3 se confirmaron en el código y
+se corrigieron. Verificado con Chrome headless (puppeteer-core) contra uvicorn + vite reales:
+
+- **QA-E2E-01 (logout no navegaba)**: `cerrarSesion()` limpiaba Pinia pero el guard del router solo corre al
+  navegar, así que la vista operativa quedaba abierta. `App.vue` ahora observa `tieneSesionActiva` y regresa
+  al login ante cualquier pérdida de sesión (botón de salida o 401). Se eligió el watcher en vez del parche
+  propuesto (importar `router` dentro de `session.js`) para no cerrar el ciclo router ↔ store.
+- **Raíz del 422**: `get_current_session` declaraba `X-Session-Id` como `uuid.UUID` obligatorio, así que
+  sin encabezado FastAPI respondía 422 de validación. Ahora es opcional y sin él (o con un valor que no es
+  UUID) responde **401**, igual que una sesión inválida. `test_sin_session_id_responde_401` deja de aceptar 422.
+- **401 global**: interceptor de respuesta en `api/client.js` → `session.descartarSesionLocal()` (no
+  vuelve a llamar a `/logout`), excepto en `/estaciones/login`, donde 401 es contraseña incorrecta.
+- **QA-E2E-02 (JSON crudo en v-alert)**: el mismo interceptor convierte `detail` en arreglo (422 de Pydantic)
+  a texto, sin el prefijo `Value error, `. Cubre las ~58 lecturas de `data?.detail` sin tocar cada vista.
+- **QA-E2E-03**: operador con sesión válida que abre `/supervisor` vuelve a su módulo, no al login.
