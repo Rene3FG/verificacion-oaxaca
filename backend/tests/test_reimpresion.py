@@ -173,9 +173,10 @@ async def test_imprimir_genera_proyeccion_de_certificado(client, db_session):
     assert proyeccion["fields"]["ralenti"]["co_co2_pct"] == 10.3
     assert proyeccion["fields"]["crucero"]["hc_ppm"] == 40
     # Campos de equipo fuera del contrato de sobreimpresión (RPM, lambda,
-    # etc.) no están aquí: fields solo trae lo que sí se sobreimprime.
+    # etc.) no están aquí: fields solo trae lo que sí se sobreimprime
+    # (incluida la potencia del dinamómetro, fila TOTPOT del certificado).
     assert set(proyeccion["fields"]["ralenti"].keys()) == {
-        "hc_ppm", "co_pct", "co2_pct", "co_co2_pct", "o2_pct", "nox_ppm", "speed_kph",
+        "hc_ppm", "co_pct", "co2_pct", "co_co2_pct", "o2_pct", "nox_ppm", "speed_kph", "potencia",
     }
 
 

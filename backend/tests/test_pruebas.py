@@ -12,6 +12,8 @@ from app.models.event_log import EventLog
 from app.models.limite_emision import LimiteEmision
 from app.models.resultado_prueba import ResultadoPrueba
 from app.models.sync_outbox import SyncOutbox
+from app.models.vehiculo import Vehiculo
+from app.services.proyeccion_certificado import generar_proyeccion_certificado
 from app.services.integridad import calcular_hash_resultado_prueba
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa, crear_sesion_supervisor
 
@@ -1426,6 +1428,8 @@ async def test_configuracion_prueba_refleja_los_parametros(client, db_session):
         "tipo_default": "DINAMICA",
         "puede_cambiar_a_estatica": True,
         "excede_capacidad_dinamometro": False,
+        # Sin cilindros ni carrocería capturados no se asume potencia.
+        "potencia_aplicada_bhp": {"ralenti": None, "crucero": None},
     }
 
     await _fijar_parametro(db_session, "gasolina_permite_cambio_estatica", "false")
@@ -1488,3 +1492,76 @@ async def test_cancelar_prueba_exige_motivo_y_estado_valido(client, db_session):
     assert resp.status_code == 200
     await db_session.refresh(expediente)
     assert expediente.tipo_prueba_final is None
+
+
+async def _expediente_en_proceso_con_motor(db_session, tipo_prueba: TipoPrueba):
+    sesion = await _sesion_prueba(db_session)
+    metodo = MetodoPrueba.GAS_DYNAMIC if tipo_prueba == TipoPrueba.DINAMICA else MetodoPrueba.GAS_STATIC
+    await _cargar_limites_gasolina(db_session, metodo)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.PRUEBA_EN_PROCESO,
+        combustible_validado="GASOLINA",
+    )
+    expediente.tipo_prueba_final = tipo_prueba
+    vehiculo = await db_session.get(Vehiculo, expediente.vehiculo_id)
+    vehiculo.numero_cilindros = 4
+    vehiculo.clasificacion_carroceria = "CERRADA"
+    await db_session.commit()
+    return sesion, expediente
+
+
+async def test_guardar_resultado_dinamica_asigna_potencia_por_norma(client, db_session):
+    """TOTPOT5024/TOTPOT2540 (cliente, 2026-10-09): la potencia la asigna el
+    sistema por norma y queda congelada con las lecturas."""
+
+    sesion, expediente = await _expediente_en_proceso_con_motor(db_session, TipoPrueba.DINAMICA)
+
+    resp = await client.post(
+        f"/api/pruebas/resultado/{expediente.id}",
+        json={"normalized_payload": _payload_gasolina()},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+
+    resultado = await db_session.scalar(
+        select(ResultadoPrueba).where(ResultadoPrueba.verificacion_id == expediente.id)
+    )
+    assert resultado.valores_medidos_json["potencia_aplicada_bhp"] == {"ralenti": 13.4, "crucero": 3.5}
+
+    proyeccion = generar_proyeccion_certificado(expediente, resultado)
+    assert proyeccion["fields"]["ralenti"]["potencia"] == 13.4
+    assert proyeccion["fields"]["crucero"]["potencia"] == 3.5
+
+
+async def test_guardar_resultado_estatica_no_asigna_potencia(client, db_session):
+    sesion, expediente = await _expediente_en_proceso_con_motor(db_session, TipoPrueba.ESTATICA)
+
+    resp = await client.post(
+        f"/api/pruebas/resultado/{expediente.id}",
+        json={"normalized_payload": _payload_gasolina()},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 200
+
+    resultado = await db_session.scalar(
+        select(ResultadoPrueba).where(ResultadoPrueba.verificacion_id == expediente.id)
+    )
+    assert "potencia_aplicada_bhp" not in resultado.valores_medidos_json
+
+
+async def test_configuracion_prueba_expone_potencia_del_dinamometro(client, db_session):
+    sesion, expediente = await _expediente_gasolina_listo(db_session)
+    vehiculo = await db_session.get(Vehiculo, expediente.vehiculo_id)
+    vehiculo.numero_cilindros = 6
+    vehiculo.clasificacion_carroceria = "PICK_UP"
+    await db_session.commit()
+
+    body = (
+        await client.get(
+            f"/api/pruebas/configuracion/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
+        )
+    ).json()
+
+    assert body["potencia_aplicada_bhp"] == {"ralenti": 16.4, "crucero": 7.6}

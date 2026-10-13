@@ -49,6 +49,8 @@ class ExpedienteRead(BaseModel):
     folio_asignado_at: datetime.datetime | None
     cerrado_at: datetime.datetime | None
     hora_salida: datetime.datetime | None
+    folio_multa: str | None = None
+    certificado_anterior: str | None = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 

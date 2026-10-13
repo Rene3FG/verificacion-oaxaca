@@ -3,9 +3,11 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { api } from "../api/client";
 import ExpedienteHeader from "../components/ExpedienteHeader.vue";
 import { useSessionStore } from "../stores/session";
+import { esOaxaca, limpiarPayload, useCatalogos } from "../utils/catalogos";
 import { textoEstado } from "../utils/estado";
 
 const session = useSessionStore();
+const { entidades, municipiosOaxaca, carrocerias } = useCatalogos();
 
 // Estados que le corresponden a esta estación (Inspección Visual y OBD/SBD
 // corren aquí, decisión de negocio 2026-08-07 — ver CLAUDE.md). Fuera de
@@ -57,6 +59,8 @@ const CAMPOS_VEHICULO = [
   "pbv",
   "peso_bruto_vehicular_kg",
   "traccion",
+  "numero_cilindros",
+  "clasificacion_carroceria",
   "razon_social",
   "entidad_federativa",
   "tarjeta_circulacion",
@@ -66,20 +70,30 @@ const CAMPOS_VEHICULO = [
   "propietario_colonia",
   "propietario_calle",
   "propietario_numero_exterior",
+  "propietario_poblacion",
 ];
 const vehiculoForm = reactive(Object.fromEntries(CAMPOS_VEHICULO.map((c) => [c, null])));
 const guardandoVehiculo = ref(false);
 const editandoVehiculo = ref(false);
 
+// Folio de multa y certificado anterior: del expediente, no del vehículo.
+const certificadoForm = reactive({ folio_multa: null, certificado_anterior: null });
+
 function sincronizarVehiculoForm(vehiculo) {
   for (const campo of CAMPOS_VEHICULO) vehiculoForm[campo] = vehiculo?.[campo] ?? null;
+  certificadoForm.folio_multa = expediente.value?.folio_multa ?? null;
+  certificadoForm.certificado_anterior = expediente.value?.certificado_anterior ?? null;
 }
 
 async function guardarVehiculo() {
   guardandoVehiculo.value = true;
   error.value = null;
   try {
-    await api.patch(`/expedientes/${expediente.value.id}/vehiculo`, { ...vehiculoForm });
+    await api.patch(`/expedientes/${expediente.value.id}/vehiculo`, limpiarPayload(vehiculoForm));
+    await api.patch(`/expedientes/${expediente.value.id}/datos-certificado`, {
+      folio_multa: certificadoForm.folio_multa || null,
+      certificado_anterior: certificadoForm.certificado_anterior || null,
+    });
     aviso.value = "Datos del vehículo corregidos.";
     editandoVehiculo.value = false;
     await recargarExpediente();
@@ -157,6 +171,10 @@ const puedeCambiarAEstatica = computed(() =>
     : esGasolina.value
 );
 const cambioAEstatica = ref(false);
+const potenciaCompleta = computed(() => {
+  const p = configuracionPrueba.value?.potencia_aplicada_bhp;
+  return p?.ralenti != null && p?.crucero != null;
+});
 const motivoCambio = ref("");
 const tipoPruebaElegido = computed(() =>
   puedeCambiarAEstatica.value && cambioAEstatica.value ? "ESTATICA" : tipoPruebaDefault.value
@@ -553,20 +571,28 @@ onMounted(() => {
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.pbv" label="Peso bruto vehicular (PBV)" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="6"><v-text-field v-model.number="vehiculoForm.peso_bruto_vehicular_kg" label="Peso bruto vehicular (kg)" type="number" variant="outlined" density="compact" hint="Numérico, para evaluar opacidad (NOM-045)" persistent-hint /></v-col>
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.traccion" label="Tracción" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model.number="vehiculoForm.numero_cilindros" label="Número de cilindros" type="number" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-select v-model="vehiculoForm.clasificacion_carroceria" :items="carrocerias" label="Clasificación / carrocería" variant="outlined" density="compact" clearable /></v-col>
           </v-row>
           <p class="text-caption text-medium-emphasis mb-1 mt-2">
             Propietario y domicilio (obligatorios para imprimir el certificado)
           </p>
           <v-row dense>
-            <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.razon_social" label="Razón social" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.razon_social" label="Nombre completo / razón social" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.entidad_federativa" label="Entidad federativa de la placa" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.tarjeta_circulacion" label="Tarjeta de circulación" variant="outlined" density="compact" /></v-col>
-            <v-col cols="12" sm="4"><v-text-field v-model="vehiculoForm.propietario_estado" label="Estado" variant="outlined" density="compact" /></v-col>
-            <v-col cols="12" sm="4"><v-text-field v-model="vehiculoForm.propietario_municipio" label="Municipio" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="4"><v-combobox v-model="vehiculoForm.propietario_estado" :items="entidades" label="Estado" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="4"><v-combobox v-model="vehiculoForm.propietario_municipio" :items="esOaxaca(vehiculoForm.propietario_estado) ? municipiosOaxaca : []" label="Municipio" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="4"><v-text-field v-model="vehiculoForm.propietario_colonia" label="Colonia" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="5"><v-text-field v-model="vehiculoForm.propietario_calle" label="Calle" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="3"><v-text-field v-model="vehiculoForm.propietario_numero_exterior" label="No. exterior" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="4"><v-text-field v-model="vehiculoForm.propietario_codigo_postal" label="Código postal" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="8"><v-text-field v-model="vehiculoForm.propietario_poblacion" label="Población (localidad; vacío = municipio)" variant="outlined" density="compact" /></v-col>
+          </v-row>
+          <p class="text-caption text-medium-emphasis mb-1 mt-2">Datos del certificado (opcionales)</p>
+          <v-row dense>
+            <v-col cols="12" sm="6"><v-text-field v-model="certificadoForm.folio_multa" label="Folio de multa" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="6"><v-text-field v-model="certificadoForm.certificado_anterior" label="Folio del certificado anterior" variant="outlined" density="compact" /></v-col>
           </v-row>
           <v-btn color="primary" :loading="guardandoVehiculo" @click="guardarVehiculo">
             Guardar corrección
@@ -708,6 +734,20 @@ onMounted(() => {
             >
               El peso bruto del vehículo excede la capacidad del dinamómetro de esta línea: la prueba es estática.
             </v-alert>
+            <template v-if="configuracionPrueba?.potencia_aplicada_bhp && tipoPruebaElegido === 'DINAMICA'">
+              <v-alert
+                v-if="potenciaCompleta"
+                type="info" variant="tonal" density="compact" class="mb-2"
+              >
+                Potencia que debe aplicar el dinamómetro (asignada por norma):
+                fase 5024 <strong>{{ configuracionPrueba.potencia_aplicada_bhp.ralenti }} BHP</strong> ·
+                fase 2540 <strong>{{ configuracionPrueba.potencia_aplicada_bhp.crucero }} BHP</strong>
+              </v-alert>
+              <v-alert v-else type="warning" variant="tonal" density="compact" class="mb-2">
+                Faltan número de cilindros o clasificación/carrocería en "Datos del vehículo": sin ellos el
+                sistema no puede asignar la potencia del dinamómetro y el certificado la deja en blanco.
+              </v-alert>
+            </template>
             <v-switch
               v-if="puedeCambiarAEstatica"
               v-model="cambioAEstatica"

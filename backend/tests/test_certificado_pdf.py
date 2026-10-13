@@ -100,9 +100,10 @@ def test_pdf_rechazo_por_inspeccion_visual_sin_bloque_de_mediciones():
     assert pdf.startswith(b"%PDF")
 
 
-def test_pdf_no_imprime_el_folio(monkeypatch):
-    """Regla del cliente (2026-10-01): el folio viene preimpreso en el papel
-    del certificado; el sistema no debe sobreimprimirlo."""
+def test_pdf_imprime_el_folio_en_los_tres_tantos(monkeypatch):
+    """Respuesta del cliente (2026-10-09, corrige la regla del 2026-10-01):
+    el folio SÍ se sobreimprime en la fila "Folio Certificado" de cada
+    tanto (no en la esquina, donde ya viene preimpreso)."""
 
     capturado = {}
 
@@ -117,8 +118,7 @@ def test_pdf_no_imprime_el_folio(monkeypatch):
 
     generar_pdf_certificado(_verificacion(), _vehiculo(), {"certificate_type": "PARTICULAR"})
 
-    assert "OAX-000001" not in capturado["html"]
-    assert "Folio" not in capturado["html"]
+    assert capturado["html"].count("OAX-000001") == 3
 
 
 def test_pdf_escapa_html_de_campos_de_texto_libre(monkeypatch):
@@ -227,20 +227,78 @@ def test_plantilla_intensivo_para_diesel(monkeypatch):
 
 
 def test_config_imprime_folio_y_calibracion(monkeypatch):
-    """`certificado_imprime_folio=true` vuelve a sobreimprimir el folio
-    (la regla vigente es no hacerlo); el offset desplaza todo el layout."""
+    """`certificado_imprime_folio=false` apaga el folio (por defecto se
+    imprime); el offset desplaza todo el layout."""
 
     capturado = _capturar_html(monkeypatch)
     proyeccion = {"certificate_type": "PARTICULAR", "method": "GAS_STATIC", "fields": {}}
 
-    generar_pdf_certificado(_verificacion(), _vehiculo(), proyeccion)
+    generar_pdf_certificado(
+        _verificacion(), _vehiculo(), proyeccion, config={"imprime_folio": False}
+    )
     assert "OAX-000001" not in capturado["html"]
     sin_offset = capturado["html"]
 
     generar_pdf_certificado(
         _verificacion(), _vehiculo(), proyeccion,
-        config={"imprime_folio": True, "offset_x_mm": 10, "clave_centro": "CVV-11"},
+        config={"offset_x_mm": 10, "clave_centro": "CVV-11"},
     )
     assert capturado["html"].count("OAX-000001") == 3
     assert "CVV-11" in capturado["html"]
     assert "left:349.2pt" in sin_offset and "left:377.5pt" in capturado["html"]
+
+
+def test_domicilio_poblacion_y_claves_inegi(monkeypatch):
+    """Respuesta del cliente (2026-10-09) y certificado real en operación:
+    Domicilio = calle, número y colonia; Población en texto; Mpio. = clave
+    INEGI del municipio (67) y Estado = clave de la entidad (20)."""
+
+    capturado = _capturar_html(monkeypatch)
+    vehiculo = _vehiculo_completo()
+    vehiculo.propietario_municipio = "Oaxaca de Juárez"
+    vehiculo.propietario_estado = "Oaxaca"
+
+    generar_pdf_certificado(_verificacion(), vehiculo, {"certificate_type": "PARTICULAR"})
+    html = capturado["html"]
+
+    assert html.count("REFORMA 101, CENTRO") == 3
+    assert html.count(">Oaxaca de Juárez<") == 3  # Población (sin `propietario_poblacion`)
+    assert html.count(">67<") == 3
+    assert html.count(">20<") == 3
+    assert ">CENTRO<" not in html  # la colonia ya no va en Población
+
+
+def test_poblacion_capturada_y_entidad_sin_clave(monkeypatch):
+    capturado = _capturar_html(monkeypatch)
+    vehiculo = _vehiculo_completo()
+    vehiculo.propietario_poblacion = "SANTA LUCIA DEL CAMINO"
+    vehiculo.propietario_estado = "TEXAS"
+    vehiculo.propietario_municipio = "HOUSTON"
+
+    generar_pdf_certificado(_verificacion(), vehiculo, {"certificate_type": "PARTICULAR"})
+    html = capturado["html"]
+
+    assert html.count("SANTA LUCIA DEL CAMINO") == 3
+    # Sin clave reconocida se imprime el texto capturado.
+    assert html.count("TEXAS") == 3 and html.count("HOUSTON") == 3
+
+
+def test_multa_certificado_anterior_y_potencia(monkeypatch):
+    capturado = _capturar_html(monkeypatch)
+    verificacion = _verificacion(folio_multa="M-5521", certificado_anterior="028811430")
+    proyeccion = {
+        "certificate_type": "PARTICULAR",
+        "method": "GAS_DYNAMIC",
+        "fields": {
+            "ralenti": {"hc_ppm": 28, "co_pct": 0.29, "co2_pct": 15, "co_co2_pct": 15.29,
+                        "o2_pct": 0.06, "nox_ppm": 51, "speed_kph": 23.7, "potencia": 13.4},
+            "crucero": {"hc_ppm": 56, "co_pct": 0.19, "co2_pct": 14.9, "co_co2_pct": 15.09,
+                        "o2_pct": 0.05, "nox_ppm": 56, "speed_kph": 39.3, "potencia": 3.5},
+        },
+    }
+
+    generar_pdf_certificado(verificacion, _vehiculo_completo(), proyeccion)
+    html = capturado["html"]
+
+    for texto in ("M-5521", "028811430", ">13.4<", ">3.5<"):
+        assert html.count(texto) == 3, texto

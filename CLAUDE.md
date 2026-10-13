@@ -2691,3 +2691,43 @@ se corrigieron. Verificado con Chrome headless (puppeteer-core) contra uvicorn +
 - **QA-E2E-02 (JSON crudo en v-alert)**: el mismo interceptor convierte `detail` en arreglo (422 de Pydantic)
   a texto, sin el prefijo `Value error, `. Cubre las ~58 lecturas de `data?.detail` sin tocar cada vista.
 - **QA-E2E-03**: operador con sesión válida que abre `/supervisor` vuelve a su módulo, no al login.
+
+## Certificado: respuestas del cliente del 2026-10-09 (2026-10-12)
+
+El cliente contestó las dudas de la plantilla (WhatsApp con foto de un certificado real impreso por el
+sistema en operación, el formato de rechazo y las Tablas 1/2 de potencia). Lo que no depende de nada más
+quedó hecho; 343 pruebas, build limpio.
+
+- **Folio**: SÍ se sobreimprime en la fila "Folio Certificado" de los 3 tantos (corrige la regla del
+  2026-10-01). Default de `certificado_imprime_folio` → `true`; la migración `d7a2f9c4e3b1` cambia la fila
+  existente solo si seguía en `false`. El sistema actual imprime el folio sin el cero inicial (29303258 vs
+  029303258 preimpreso); nosotros imprimimos el texto completo.
+- **Folio de multa y certificado anterior**: `Verificacion.folio_multa`/`certificado_anterior` (opcionales).
+  `PATCH /api/expedientes/{id}/datos-certificado` (Captura o Prueba; 409 una vez impreso; evento
+  `datos_certificado_actualizados`). Card "Datos del certificado" en Captura y campos en el panel de
+  corrección de Prueba. Se incluyen en el snapshot de sync.
+- **Domicilio / Población / Mpio. / Estado**: Domicilio = calle, número y colonia; Población = nuevo
+  `Vehiculo.propietario_poblacion` (o el nombre del municipio si está vacío; antes se imprimía la colonia);
+  Mpio. y Estado = **claves INEGI** sin ceros (67, 20), igual que el certificado real.
+  `app/services/catalogo_inegi.py` + `app/data/municipios_oaxaca.json` (570 municipios del Marco
+  Geoestadístico de INEGI, `gaia.inegi.org.mx/wscatgeo/v2/mgem/20`). La clave se deriva del nombre al
+  imprimir (no se guarda); sin clave reconocida se imprime el texto. Solo hay catálogo de municipios de
+  Oaxaca. `GET /api/catalogos/{entidades,municipios,carrocerias}` alimenta comboboxes en Captura/Prueba
+  (`frontend/src/utils/catalogos.js`).
+- **Potencia del dinamómetro (`<TOTPOT5024>`/`<TOTPOT2540>`)**: `app/services/potencia_dinamometro.py`
+  con las Tablas 1 (clasificación/carrocería × cilindros) y 2 (cilindros). Campos nuevos
+  `Vehiculo.numero_cilindros` y `clasificacion_carroceria`. Se asigna al guardar el resultado de una prueba
+  **dinámica** (`valores_medidos_json.potencia_aplicada_bhp`, cubierto por el hash) y se proyecta a
+  `fields.{ralenti,crucero}.potencia` — en el certificado real la fase 5024 va en la columna RALENTÍ y la
+  2540 en CRUCERO (23.7/39.3 km/h). `GET /api/pruebas/configuracion/{id}` la expone y Prueba la muestra (o
+  avisa si faltan cilindros/carrocería). No bloquea: sin esos datos la fila queda en blanco.
+- **Plantilla única** para Particular/Intensivo/Doble Cero confirmada (ya era el supuesto).
+
+**Pendiente con el cliente:**
+1. Plantilla Word del **certificado de rechazo** (formato propio, sin holograma) y la regla de la **fecha
+   límite para la siguiente verificación**. Mientras tanto el rechazo sigue saliendo en el layout Particular.
+2. Su sistema imprimió **7.8** en la fase 5024 de una Tucson 2016 de 4 cilindros; la Tabla 1 da 11.4-14.1
+   para 4 cilindros (7.8 no está en la tabla). Nosotros seguimos la tabla.
+3. El "001" cae en la fila **Técnico** (lo tenemos como número de equipo fijo): ¿es el técnico?
+4. Sebas reportó estos puntos como "resueltos" en su avance del 09-oct, pero en `79cccd5` no había código:
+   eran los acuerdos con Luis. Lo implementado es esta sección.

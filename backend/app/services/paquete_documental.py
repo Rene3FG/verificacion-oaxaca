@@ -106,10 +106,13 @@ def _seccion_prueba(resultado: ResultadoPrueba | None) -> str:
     limites = resultado.limites_aplicados_json or {}
     cuerpo = ""
     if "ralenti" in valores or "crucero" in valores:
+        potencias = valores.get("potencia_aplicada_bhp") or {}
         for fase, titulo in (("ralenti", "Ralentí"), ("crucero", "Crucero")):
             if isinstance(valores.get(fase), dict):
                 lim = limites.get(fase) if isinstance(limites.get(fase), dict) else {}
                 cuerpo += f"<h3>{titulo}</h3>{_tabla_lecturas(valores[fase], lim)}"
+                if potencias.get(fase) is not None:
+                    cuerpo += f"<p>Potencia aplicada por el dinamómetro: {_e(potencias[fase])} BHP</p>"
     else:
         cuerpo = _tabla_lecturas(valores, limites)
     return f"""

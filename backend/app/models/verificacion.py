@@ -51,5 +51,10 @@ class Verificacion(Base, UUIDPKMixin, TimestampMixin):
     folio_asignado_at: Mapped[datetime.datetime | None] = mapped_column()
     cerrado_at: Mapped[datetime.datetime | None] = mapped_column()
     hora_salida: Mapped[datetime.datetime | None] = mapped_column()
+    # Respuesta del cliente (2026-10-09): el certificado lleva folio de multa
+    # (si la hay) y folio del certificado anterior; se capturan y pueden
+    # quedar en blanco.
+    folio_multa: Mapped[str | None] = mapped_column(String(30))
+    certificado_anterior: Mapped[str | None] = mapped_column(String(30))
 
     vehiculo: Mapped["Vehiculo"] = relationship()

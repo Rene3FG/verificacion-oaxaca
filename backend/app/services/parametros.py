@@ -26,7 +26,7 @@ DEFAULTS = {
     "certificado_clave_centro": "CVV-06",
     "certificado_marca_equipo": "OBERTECH",
     "certificado_numero_equipo": "001",
-    "certificado_imprime_folio": "false",
+    "certificado_imprime_folio": "true",
     "certificado_offset_x_mm": "0",
     "certificado_offset_y_mm": "0",
 }
@@ -39,7 +39,7 @@ DESCRIPCIONES = {
     "certificado_clave_centro": "Clave del centro que se imprime en el certificado (p. ej. CVV-06).",
     "certificado_marca_equipo": "Marca del equipo de medición que se imprime en el certificado.",
     "certificado_numero_equipo": "Número de equipo que se imprime en el certificado.",
-    "certificado_imprime_folio": "Si el sistema sobreimprime el folio (false: el papel ya lo trae preimpreso).",
+    "certificado_imprime_folio": "Si el sistema sobreimprime el folio en la fila \"Folio Certificado\" de los 3 tantos (cliente, 2026-10-09).",
     "certificado_offset_x_mm": "Calibración horizontal de la sobreimpresión en mm (+ derecha, − izquierda).",
     "certificado_offset_y_mm": "Calibración vertical de la sobreimpresión en mm (+ abajo, − arriba).",
 }

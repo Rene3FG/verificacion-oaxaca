@@ -20,6 +20,7 @@ from app.models.inspeccion_visual import InspeccionVisual
 from app.models.resultado_prueba import ResultadoPrueba
 from app.models.vehiculo import Vehiculo
 from app.models.verificacion import Verificacion
+from app.services.catalogo_inegi import clave_entidad, clave_impresa, clave_municipio
 from app.services.semestre import ZONA_OAXACA
 
 
@@ -108,15 +109,24 @@ async def determinar_tipo_certificado(
 # código. Supuestos (reversibles, ver CLAUDE.md):
 # - el layout depende del MÉTODO (diésel → Intensivo, todo lo demás →
 #   Particular); el texto "PARTICULAR" fijo de la plantilla se reemplaza por
-#   el tipo real (Particular/Doble Cero/Intensivo/Rechazo), porque no hay
-#   plantilla propia de Doble Cero ni de Rechazo;
+#   el tipo real. Confirmado por el cliente (2026-10-09): la plantilla de
+#   gasolina/diésel es la misma para Particular, Intensivo y Doble Cero.
+#   PENDIENTE: el RECHAZO usa un formato distinto (sin holograma, con
+#   "fecha límite para la siguiente verificación") — falta su plantilla
+#   Word; mientras tanto se imprime sobre el layout Particular;
 # - `<NombrePropietario> <ApellidoPatPro> <ApellidoMatPro>` ← `razon_social`
-#   (no se captura el nombre separado), `<PoblacionPro>` ← colonia,
-#   `<Serie1>` ← NIV, `<SubMarca>` ← línea del vehículo;
-# - `<CertificadoAnt>`, `<Multa>`, `<TOTPOT5024>`/`<TOTPOT2540>` no se
-#   capturan en el sistema → quedan en blanco;
-# - `<FOLIO>` NO se imprime por defecto (regla del cliente 2026-10-01: el
-#   folio viene preimpreso); `certificado_imprime_folio=true` lo activa.
+#   (nombre completo / razón social, confirmado), `<Serie1>` ← NIV,
+#   `<SubMarca>` ← línea del vehículo;
+# - Domicilio = calle, número y colonia; Población = localidad en texto
+#   (`propietario_poblacion`, o el nombre del municipio si no se capturó);
+#   Mpio. y Estado = claves INEGI (67, 20), confirmado por el cliente y por
+#   el certificado real en operación (ver app.services.catalogo_inegi);
+# - `<CertificadoAnt>`/`<Multa>` ← `Verificacion.certificado_anterior`/
+#   `folio_multa` (opcionales); `<TOTPOT5024>`/`<TOTPOT2540>` ← potencia
+#   asignada por norma (fila sin etiqueta bajo Km/h; ver
+#   app.services.potencia_dinamometro);
+# - `<FOLIO>` SÍ se imprime en la fila "Folio Certificado" de los 3 tantos
+#   (cliente, 2026-10-09; corrige la regla del 2026-10-01).
 
 _PT_POR_MM = 72 / 25.4
 
@@ -192,7 +202,7 @@ CONFIG_CERTIFICADO_DEFAULT = {
     "clave_centro": "CVV-06",
     "marca_equipo": "OBERTECH",
     "numero_equipo": "001",
-    "imprime_folio": False,
+    "imprime_folio": True,
     "offset_x_mm": 0.0,
     "offset_y_mm": 0.0,
 }
@@ -318,9 +328,13 @@ def html_certificado(
     fin = _a_oaxaca(resultado_prueba.finished_at if resultado_prueba else None) or momento_generado
 
     nombre = vehiculo.razon_social
-    calle = " ".join(
+    calle_numero = " ".join(
         p for p in (vehiculo.propietario_calle, vehiculo.propietario_numero_exterior) if p
     )
+    calle = ", ".join(p for p in (calle_numero, vehiculo.propietario_colonia) if p)
+    poblacion = getattr(vehiculo, "propietario_poblacion", None) or vehiculo.propietario_municipio
+    clave_ent = clave_entidad(vehiculo.propietario_estado)
+    clave_mun = clave_municipio(vehiculo.propietario_municipio, vehiculo.propietario_estado)
     horas = " / ".join(m.strftime("%H:%M") for m in (inicio, fin) if m is not None)
     valores = {
         "nombre": _txt(nombre),
@@ -331,17 +345,21 @@ def html_certificado(
         "serie": _txt(vehiculo.niv),
         "submarca": _txt(vehiculo.linea),
         "tipo": _txt(_ETIQUETA_TIPO.get(proyeccion.get("certificate_type") or "", "")),
-        "poblacion": _txt(vehiculo.propietario_colonia),
+        "poblacion": _txt(poblacion),
         "cp": _txt(vehiculo.propietario_codigo_postal),
-        "estado": _txt(vehiculo.propietario_estado),
-        "municipio": _txt(vehiculo.propietario_municipio),
+        # Sin clave reconocida se imprime el texto capturado, para no dejar
+        # el hueco vacío.
+        "estado": _txt(clave_impresa(clave_ent) if clave_ent else vehiculo.propietario_estado),
+        "municipio": _txt(
+            clave_impresa(clave_mun) if clave_mun else vehiculo.propietario_municipio
+        ),
         "modelo": _txt(vehiculo.modelo),
         "semestre": _txt(_texto_semestre(proyeccion.get("semestre"), momento_generado.year)),
         "cvv_linea": _txt(f"{cfg['clave_centro']}  Línea: {verificacion.linea_id}"),
         "equipo_marca": _txt(cfg["marca_equipo"]),
         "equipo_numero": _txt(cfg["numero_equipo"]),
-        "certificado_anterior": "",
-        "multa": "",
+        "certificado_anterior": _txt(getattr(verificacion, "certificado_anterior", None)),
+        "multa": _txt(getattr(verificacion, "folio_multa", None)),
         "fecha": fin.strftime("%d/%m/%Y"),
         "horas": _txt(horas),
         "folio": _txt(verificacion.folio_externo) if cfg["imprime_folio"] else "",

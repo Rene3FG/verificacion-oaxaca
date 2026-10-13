@@ -59,6 +59,9 @@ def _redondear(valor: float | None, decimales: int = 2) -> float | None:
 
 
 def _campos_gasolina(valores_medidos: dict) -> dict:
+    # Potencia del dinamómetro asignada por el sistema al guardar el
+    # resultado (solo prueba dinámica; ver app.services.potencia_dinamometro).
+    potencias = valores_medidos.get("potencia_aplicada_bhp") or {}
     campos = {}
     for fase in ("ralenti", "crucero"):
         lectura = valores_medidos[fase]
@@ -70,6 +73,7 @@ def _campos_gasolina(valores_medidos: dict) -> dict:
             "o2_pct": lectura["o2_pct"],
             "nox_ppm": lectura.get("nox_ppm"),
             "speed_kph": lectura.get("speed_kph"),
+            "potencia": potencias.get(fase),
         }
     return campos
 

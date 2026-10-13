@@ -32,6 +32,10 @@ class Vehiculo(Base, UUIDPKMixin, TimestampMixin):
     propietario_colonia: Mapped[str | None] = mapped_column(String(100))
     propietario_calle: Mapped[str | None] = mapped_column(String(150))
     propietario_numero_exterior: Mapped[str | None] = mapped_column(String(20))
+    # Respuesta del cliente (2026-10-09): en "Población" va el nombre de la
+    # localidad (p. ej. OAXACA DE JUAREZ); si no se captura se imprime el
+    # nombre del municipio. La colonia va dentro de "Domicilio".
+    propietario_poblacion: Mapped[str | None] = mapped_column(String(100))
     pbv: Mapped[str | None] = mapped_column(String(30))
     traccion: Mapped[str | None] = mapped_column(String(30))
 
@@ -41,6 +45,12 @@ class Vehiculo(Base, UUIDPKMixin, TimestampMixin):
     # 2026-09-02). Columna numérica separada, opcional, solo para esa
     # comparación; `pbv` no se toca ni se deriva de aquí.
     peso_bruto_vehicular_kg: Mapped[float | None] = mapped_column(Float)
+
+    # Para asignar la potencia del dinamómetro (TOTPOT5024/TOTPOT2540, ver
+    # app.services.potencia_dinamometro): cilindros del motor y
+    # clasificación/carrocería de la Tabla 1 de la norma.
+    numero_cilindros: Mapped[int | None] = mapped_column()
+    clasificacion_carroceria: Mapped[str | None] = mapped_column(String(20))
 
     fuente_datos: Mapped[FuenteDatos] = mapped_column(
         Enum(FuenteDatos, name="fuente_datos"), default=FuenteDatos.MANUAL

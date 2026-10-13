@@ -495,3 +495,116 @@ async def test_listar_expedientes_rechaza_linea_id_ajena(client, db_session):
     )
 
     assert resp.status_code == 403
+
+
+async def _sesion(db_session, station_type=StationType.CAPTURA):
+    estacion = await crear_estacion(
+        db_session, station_type=station_type, center_id="OAX-01", line_id=1
+    )
+    return await crear_sesion_activa(db_session, estacion=estacion)
+
+
+async def test_datos_certificado_folio_multa_y_certificado_anterior(client, db_session):
+    """Respuesta del cliente (2026-10-09): folio de multa y certificado
+    anterior se capturan con el expediente; pueden quedar en blanco."""
+
+    from sqlalchemy import select
+
+    sesion = await _sesion(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+    url = f"/api/expedientes/{expediente.id}/datos-certificado"
+    h = {"X-Session-Id": str(sesion.id)}
+
+    resp = await client.patch(
+        url, json={"folio_multa": " M-5521 ", "certificado_anterior": "028811430"}, headers=h
+    )
+    assert resp.status_code == 200
+    assert resp.json()["folio_multa"] == "M-5521"
+    assert resp.json()["certificado_anterior"] == "028811430"
+
+    # Cadena vacía = en blanco; el campo no enviado no se toca.
+    resp = await client.patch(url, json={"folio_multa": ""}, headers=h)
+    assert resp.json()["folio_multa"] is None
+    assert resp.json()["certificado_anterior"] == "028811430"
+
+    eventos = (
+        await db_session.execute(
+            select(EventLog).where(
+                EventLog.verificacion_id == expediente.id,
+                EventLog.evento == "datos_certificado_actualizados",
+            )
+        )
+    ).scalars().all()
+    assert len(eventos) == 2
+
+
+async def test_datos_certificado_desde_prueba_ok_desde_impresion_403(client, db_session):
+    expediente = await crear_expediente(db_session, linea_id=1)
+    sesion_prueba = await _sesion(db_session, StationType.PRUEBA)
+    sesion_impresion = await _sesion(db_session, StationType.IMPRESION)
+    await db_session.commit()
+    url = f"/api/expedientes/{expediente.id}/datos-certificado"
+
+    ok = await client.patch(url, json={"folio_multa": "M-1"}, headers={"X-Session-Id": str(sesion_prueba.id)})
+    denegado = await client.patch(
+        url, json={"folio_multa": "M-2"}, headers={"X-Session-Id": str(sesion_impresion.id)}
+    )
+
+    assert ok.status_code == 200
+    assert denegado.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "estado", [EstadoVerificacion.IMPRESO, EstadoVerificacion.CERRADO_APROBADO]
+)
+async def test_datos_certificado_ya_impreso_responde_409(client, db_session, estado):
+    sesion = await _sesion(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1, estado=estado)
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"/api/expedientes/{expediente.id}/datos-certificado",
+        json={"folio_multa": "M-1"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 409
+
+
+async def test_vehiculo_cilindros_y_carroceria_validados(client, db_session):
+    sesion = await _sesion(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+    url = f"/api/expedientes/{expediente.id}/vehiculo"
+    h = {"X-Session-Id": str(sesion.id)}
+
+    ok = await client.patch(
+        url,
+        json={"numero_cilindros": 4, "clasificacion_carroceria": "CERRADA",
+              "propietario_poblacion": "OAXACA DE JUAREZ"},
+        headers=h,
+    )
+    assert ok.status_code == 200
+    assert ok.json()["numero_cilindros"] == 4
+    assert ok.json()["propietario_poblacion"] == "OAXACA DE JUAREZ"
+
+    assert (await client.patch(url, json={"numero_cilindros": 0}, headers=h)).status_code == 422
+    assert (
+        await client.patch(url, json={"clasificacion_carroceria": "TANQUE"}, headers=h)
+    ).status_code == 422
+
+
+async def test_catalogos_requieren_sesion_y_devuelven_datos(client, db_session):
+    sesion = await _sesion(db_session)
+    await db_session.commit()
+    h = {"X-Session-Id": str(sesion.id)}
+
+    assert (await client.get("/api/catalogos/municipios")).status_code == 401
+    municipios = (await client.get("/api/catalogos/municipios", headers=h)).json()
+    entidades = (await client.get("/api/catalogos/entidades", headers=h)).json()
+    carrocerias = (await client.get("/api/catalogos/carrocerias", headers=h)).json()
+
+    assert len(municipios) == 570
+    assert {"clave": "20", "nombre": "Oaxaca"} in entidades
+    assert {c["clave"] for c in carrocerias} >= {"SEDAN", "CERRADA", "PLATAFORMA"}

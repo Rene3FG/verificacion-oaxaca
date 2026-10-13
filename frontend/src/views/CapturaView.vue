@@ -4,9 +4,11 @@ import { api } from "../api/client";
 import ExpedienteHeader from "../components/ExpedienteHeader.vue";
 import { estadoColors } from "../plugins/vuetify";
 import { useSessionStore } from "../stores/session";
+import { esOaxaca, limpiarPayload, useCatalogos } from "../utils/catalogos";
 import { textoEstado } from "../utils/estado";
 
 const session = useSessionStore();
+const { entidades, municipiosOaxaca, carrocerias } = useCatalogos();
 
 // Estados en los que el expediente sigue siendo "de Captura". A partir de
 // DATOS_NORMALIZADOS pasa a Inspección Visual, que corre en la estación de
@@ -31,6 +33,8 @@ const VEHICULO_CAMPOS = [
   "pbv",
   "peso_bruto_vehicular_kg",
   "traccion",
+  "numero_cilindros",
+  "clasificacion_carroceria",
   "razon_social",
   "entidad_federativa",
   "tarjeta_circulacion",
@@ -40,6 +44,7 @@ const VEHICULO_CAMPOS = [
   "propietario_colonia",
   "propietario_calle",
   "propietario_numero_exterior",
+  "propietario_poblacion",
 ];
 
 const pasos = [
@@ -71,6 +76,8 @@ const vehiculoForm = reactive({
   pbv: null,
   peso_bruto_vehicular_kg: null,
   traccion: null,
+  numero_cilindros: null,
+  clasificacion_carroceria: null,
   razon_social: null,
   entidad_federativa: null,
   tarjeta_circulacion: null,
@@ -80,7 +87,12 @@ const vehiculoForm = reactive({
   propietario_colonia: null,
   propietario_calle: null,
   propietario_numero_exterior: null,
+  propietario_poblacion: null,
 });
+// Folio de multa y certificado anterior (respuesta del cliente 2026-10-09):
+// son del expediente, no del vehículo — se guardan aparte.
+const certificadoForm = reactive({ folio_multa: null, certificado_anterior: null });
+const guardandoCertificado = ref(false);
 const vehiculoOriginal = ref({});
 const guardandoVehiculo = ref(false);
 const confirmando = ref(false);
@@ -183,6 +195,8 @@ async function abrirExpediente(id) {
     const { data } = await api.get(`/expedientes/${id}`);
     expediente.value = data;
     sincronizarVehiculoForm(data.vehiculo);
+    certificadoForm.folio_multa = data.folio_multa ?? null;
+    certificadoForm.certificado_anterior = data.certificado_anterior ?? null;
     await cargarHistorialSiox();
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudo abrir el expediente.";
@@ -237,7 +251,7 @@ async function capturaManual() {
   guardandoVehiculo.value = true;
   error.value = null;
   try {
-    await api.post(`/siox/captura-manual/${expediente.value.id}`, { ...vehiculoForm });
+    await api.post(`/siox/captura-manual/${expediente.value.id}`, limpiarPayload(vehiculoForm));
     aviso.value = "Captura manual registrada.";
     await abrirExpediente(expediente.value.id);
   } catch (err) {
@@ -251,13 +265,30 @@ async function guardarVehiculo() {
   guardandoVehiculo.value = true;
   error.value = null;
   try {
-    await api.patch(`/expedientes/${expediente.value.id}/vehiculo`, { ...vehiculoForm });
+    await api.patch(`/expedientes/${expediente.value.id}/vehiculo`, limpiarPayload(vehiculoForm));
     aviso.value = "Datos del vehículo guardados.";
     await abrirExpediente(expediente.value.id);
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudieron guardar los datos.";
   } finally {
     guardandoVehiculo.value = false;
+  }
+}
+
+async function guardarDatosCertificado() {
+  guardandoCertificado.value = true;
+  error.value = null;
+  try {
+    await api.patch(`/expedientes/${expediente.value.id}/datos-certificado`, {
+      folio_multa: certificadoForm.folio_multa || null,
+      certificado_anterior: certificadoForm.certificado_anterior || null,
+    });
+    aviso.value = "Datos del certificado guardados.";
+    await abrirExpediente(expediente.value.id);
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudieron guardar los datos del certificado.";
+  } finally {
+    guardandoCertificado.value = false;
   }
 }
 
@@ -529,6 +560,31 @@ onMounted(cargarExpedientesEnCurso);
                 :append-inner-icon="esCampoEditado('traccion') ? 'mdi-pencil' : undefined"
               />
             </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model.number="vehiculoForm.numero_cilindros"
+                label="Número de cilindros"
+                type="number"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+                hint="Junto con la carrocería, define la potencia del dinamómetro (prueba dinámica)."
+                persistent-hint
+                :append-inner-icon="esCampoEditado('numero_cilindros') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-select
+                v-model="vehiculoForm.clasificacion_carroceria"
+                :items="carrocerias"
+                label="Clasificación / carrocería"
+                variant="outlined"
+                density="comfortable"
+                clearable
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('clasificacion_carroceria') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
           </v-row>
           <v-btn
             class="mt-2"
@@ -559,7 +615,7 @@ onMounted(cargarExpedientesEnCurso);
             <v-col cols="12" md="6">
               <v-text-field
                 v-model="vehiculoForm.razon_social"
-                label="Razón social"
+                label="Nombre completo / razón social"
                 variant="outlined"
                 density="comfortable"
                 :disabled="!puedeEditarVehiculo"
@@ -577,8 +633,9 @@ onMounted(cargarExpedientesEnCurso);
               />
             </v-col>
             <v-col cols="12" md="4">
-              <v-text-field
+              <v-combobox
                 v-model="vehiculoForm.propietario_estado"
+                :items="entidades"
                 label="Estado"
                 variant="outlined"
                 density="comfortable"
@@ -587,11 +644,14 @@ onMounted(cargarExpedientesEnCurso);
               />
             </v-col>
             <v-col cols="12" md="4">
-              <v-text-field
+              <v-combobox
                 v-model="vehiculoForm.propietario_municipio"
+                :items="esOaxaca(vehiculoForm.propietario_estado) ? municipiosOaxaca : []"
                 label="Municipio"
                 variant="outlined"
                 density="comfortable"
+                hint="Elegir de la lista: el certificado imprime su clave INEGI (p. ej. 67)."
+                persistent-hint
                 :disabled="!puedeEditarVehiculo"
                 :append-inner-icon="esCampoEditado('propietario_municipio') ? 'mdi-pencil' : undefined"
               />
@@ -636,6 +696,18 @@ onMounted(cargarExpedientesEnCurso);
                 :append-inner-icon="esCampoEditado('propietario_codigo_postal') ? 'mdi-pencil' : undefined"
               />
             </v-col>
+            <v-col cols="12" md="8">
+              <v-text-field
+                v-model="vehiculoForm.propietario_poblacion"
+                label="Población (localidad)"
+                variant="outlined"
+                density="comfortable"
+                hint="Si se deja vacío, el certificado imprime el nombre del municipio."
+                persistent-hint
+                :disabled="!puedeEditarVehiculo"
+                :append-inner-icon="esCampoEditado('propietario_poblacion') ? 'mdi-pencil' : undefined"
+              />
+            </v-col>
           </v-row>
           <v-btn
             class="mt-2"
@@ -645,6 +717,42 @@ onMounted(cargarExpedientesEnCurso);
             @click="guardarVehiculo"
           >
             Guardar propietario y domicilio
+          </v-btn>
+        </v-card-text>
+      </v-card>
+
+      <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
+        <v-card-title>Datos del certificado</v-card-title>
+        <v-card-text>
+          <v-row dense>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="certificadoForm.folio_multa"
+                label="Folio de multa (si existe)"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="certificadoForm.certificado_anterior"
+                label="Folio del certificado anterior"
+                variant="outlined"
+                density="comfortable"
+                :disabled="!puedeEditarVehiculo"
+              />
+            </v-col>
+          </v-row>
+          <p class="text-body-2 text-medium-emphasis">Ambos son opcionales.</p>
+          <v-btn
+            class="mt-2"
+            variant="outlined"
+            :disabled="!puedeEditarVehiculo"
+            :loading="guardandoCertificado"
+            @click="guardarDatosCertificado"
+          >
+            Guardar datos del certificado
           </v-btn>
         </v-card-text>
       </v-card>

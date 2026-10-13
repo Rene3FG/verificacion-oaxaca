@@ -273,6 +273,75 @@ async def actualizar_vehiculo(
     return vehiculo
 
 
+class DatosCertificadoUpdate(BaseModel):
+    """PATCH parcial: solo se tocan los campos presentes. Cadena vacía se
+    guarda como null (el cliente acepta dejarlos en blanco)."""
+
+    folio_multa: str | None = Field(default=None, max_length=30)
+    certificado_anterior: str | None = Field(default=None, max_length=30)
+
+
+ESTADOS_CON_CERTIFICADO_IMPRESO = {
+    EstadoVerificacion.IMPRESO,
+    EstadoVerificacion.CERRADO_APROBADO,
+    EstadoVerificacion.CERRADO_RECHAZADO,
+    EstadoVerificacion.CANCELADO,
+}
+
+
+@router.patch("/{expediente_id}/datos-certificado", response_model=ExpedienteRead)
+async def actualizar_datos_certificado(
+    expediente_id: uuid.UUID,
+    payload: DatosCertificadoUpdate,
+    session: SessionContext = Depends(
+        requiere_estacion(StationType.CAPTURA, StationType.PRUEBA)
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> Verificacion:
+    """Respuesta del cliente (2026-10-09): folio de multa (si existe) y
+    folio del certificado anterior se capturan con los datos del expediente
+    y se sobreimprimen; pueden quedar en blanco. Mismas estaciones que la
+    corrección del vehículo. Una vez impreso el certificado ya no se editan
+    (el papel ya salió con lo que había)."""
+
+    verificacion = await db.get(Verificacion, expediente_id)
+    if verificacion is None:
+        raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
+    if verificacion.estado in ESTADOS_CON_CERTIFICADO_IMPRESO:
+        raise HTTPException(
+            status_code=409,
+            detail="El certificado ya se imprimió; estos datos ya no se pueden modificar.",
+        )
+
+    cambios = {}
+    for campo, valor in payload.model_dump(exclude_unset=True).items():
+        valor = (valor or "").strip() or None
+        anterior = getattr(verificacion, campo)
+        if valor != anterior:
+            setattr(verificacion, campo, valor)
+            cambios[campo] = {"anterior": anterior, "nuevo": valor}
+
+    if cambios:
+        db.add(verificacion)
+        await registrar_evento_con_sync(
+            db,
+            EventLog(
+                verificacion_id=verificacion.id,
+                evento="datos_certificado_actualizados",
+                estado_anterior=verificacion.estado,
+                estado_nuevo=verificacion.estado,
+                usuario_id=session.user_id,
+                modulo="captura",
+                detalle_json=cambios,
+            ),
+            verificacion=verificacion,
+        )
+    await db.commit()
+    await db.refresh(verificacion)
+    return verificacion
+
+
 @router.get("/{expediente_id}", response_model=ExpedienteCompleto)
 async def obtener_expediente(
     expediente_id: uuid.UUID, db: AsyncSession = Depends(get_db)

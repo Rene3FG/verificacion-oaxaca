@@ -102,6 +102,8 @@ def _serializar_verificacion(v: Verificacion) -> dict:
         "combustible_validado": v.combustible_validado,
         "certificado_tipo": v.certificado_tipo,
         "folio_externo": v.folio_externo,
+        "folio_multa": v.folio_multa,
+        "certificado_anterior": v.certificado_anterior,
         "resultado_final": v.resultado_final.value if v.resultado_final else None,
         "cerrado_at": v.cerrado_at.isoformat() if v.cerrado_at else None,
     }

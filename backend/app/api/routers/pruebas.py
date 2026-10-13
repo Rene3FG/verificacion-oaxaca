@@ -39,6 +39,7 @@ from app.schemas.prueba import (
     metodo_de,
 )
 from app.schemas.verificacion import ExpedienteCompleto
+from app.services.potencia_dinamometro import potencias_por_fase
 from app.services.parametros import get_parametro
 from app.services import state_machine
 from app.services.evaluacion_prueba import (
@@ -146,10 +147,20 @@ async def configuracion_prueba(
         and tipo_default == TipoPrueba.DINAMICA
         and (await get_parametro(db, "gasolina_permite_cambio_estatica")) == "true"
     )
+    vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
     return {
         "tipo_default": tipo_default,
         "puede_cambiar_a_estatica": permite_cambio,
         "excede_capacidad_dinamometro": excede,
+        # Potencia que el dinamómetro debe aplicar en la prueba dinámica
+        # (fase 5024 → "ralenti", 2540 → "crucero"); None si faltan
+        # cilindros o carrocería en el vehículo.
+        "potencia_aplicada_bhp": potencias_por_fase(
+            vehiculo.clasificacion_carroceria if vehiculo is not None else None,
+            vehiculo.numero_cilindros if vehiculo is not None else None,
+        )
+        if es_gasolina
+        else None,
     }
 
 
@@ -495,6 +506,15 @@ async def guardar_resultado_prueba(
     inicio = datetime.datetime.now(datetime.timezone.utc)
     fin = datetime.datetime.now(datetime.timezone.utc)
     valores_medidos = payload_validado.model_dump()
+    if metodo == MetodoPrueba.GAS_DYNAMIC:
+        # TOTPOT5024/TOTPOT2540 (respuesta del cliente 2026-10-09): la
+        # potencia la asigna el sistema por norma, no la captura el operador.
+        # Se guarda con las lecturas para que quede congelada con el
+        # resultado (y cubierta por el hash de integridad).
+        valores_medidos["potencia_aplicada_bhp"] = potencias_por_fase(
+            vehiculo.clasificacion_carroceria if vehiculo is not None else None,
+            vehiculo.numero_cilindros if vehiculo is not None else None,
+        )
 
     hash_integridad = calcular_hash_resultado_prueba(
         resultado_id=resultado_id,
