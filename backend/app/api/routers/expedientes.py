@@ -344,8 +344,14 @@ async def actualizar_datos_certificado(
 
 @router.get("/{expediente_id}", response_model=ExpedienteCompleto)
 async def obtener_expediente(
-    expediente_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    expediente_id: uuid.UUID,
+    session: SessionContext = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db),
 ) -> Verificacion:
+    """Antes era la única ruta de negocio sin sesión (auditoría de permisos
+    2026-10-13): sin `X-Session-Id` devolvía el expediente completo, con
+    propietario y domicilio, y tampoco aplicaba HU-008 entre líneas."""
+
     result = await db.execute(
         select(Verificacion)
         .options(selectinload(Verificacion.vehiculo))
@@ -354,6 +360,7 @@ async def obtener_expediente(
     verificacion = result.scalar_one_or_none()
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
     return verificacion
 
 

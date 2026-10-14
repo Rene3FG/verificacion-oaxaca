@@ -2731,3 +2731,16 @@ quedó hecho; 343 pruebas, build limpio.
 3. El "001" cae en la fila **Técnico** (lo tenemos como número de equipo fijo): ¿es el técnico?
 4. Sebas reportó estos puntos como "resueltos" en su avance del 09-oct, pero en `79cccd5` no había código:
    eran los acuerdos con Luis. Lo implementado es esta sección.
+
+## QA de permisos: auditoría de rutas (2026-10-13)
+
+Se enumeraron las 65 rutas de `app.main.app` con sus dependencias. Hallazgo único:
+`GET /api/expedientes/{id}` no exigía sesión — sin `X-Session-Id` devolvía el expediente completo
+(propietario, domicilio) y no aplicaba HU-008. Ahora usa `get_current_session` +
+`assert_linea_permitida` (401 sin sesión, 403 de otra línea); sus dos llamadores (CapturaView,
+PruebaView) ya mandaban el header. 346 pruebas.
+
+Revisado y correcto: los módulos operativos usan `requiere_estacion` (Captura/Prueba/Impresión);
+Administración/Supervisión usan `requiere_supervisor`; logout solo cierra la propia sesión;
+`sync/expediente` aplica bloqueo de línea. Sin sesión por diseño: `/health`, `POST /estaciones/login`
+y `GET /estaciones/{device_identifier}` (se necesita antes del login; solo configuración de la estación).

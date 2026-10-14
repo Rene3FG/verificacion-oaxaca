@@ -608,3 +608,43 @@ async def test_catalogos_requieren_sesion_y_devuelven_datos(client, db_session):
     assert len(municipios) == 570
     assert {"clave": "20", "nombre": "Oaxaca"} in entidades
     assert {c["clave"] for c in carrocerias} >= {"SEDAN", "CERRADA", "PLATAFORMA"}
+
+
+async def test_obtener_expediente_sin_sesion_responde_401(client, db_session):
+    """Auditoría de permisos 2026-10-13: era la única ruta de negocio sin
+    `X-Session-Id` y exponía propietario y domicilio a cualquiera."""
+
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+
+    resp = await client.get(f"/api/expedientes/{expediente.id}")
+
+    assert resp.status_code == 401
+
+
+async def test_obtener_expediente_de_otra_linea_responde_403(client, db_session):
+    sesion = await _sesion_captura(db_session, line_id=1)
+    expediente_ajeno = await crear_expediente(db_session, linea_id=2)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/expedientes/{expediente_ajeno.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Acceso denegado. Este expediente pertenece a otra línea."
+
+
+async def test_obtener_expediente_de_su_linea_responde_200(client, db_session):
+    sesion = await _sesion_captura(db_session, line_id=1)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/expedientes/{expediente.id}",
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == str(expediente.id)
