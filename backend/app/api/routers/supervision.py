@@ -8,9 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import SessionContext, get_db, requiere_supervisor
-from app.models.enums import EstadoVerificacion
+from app.models.enums import EstadoVerificacion, SyncStatus
 from app.models.event_log import EventLog
+from app.models.print_job import PrintJob
 from app.models.prorroga_semestre import ProrrogaSemestre
+from app.models.sync_outbox import SyncOutbox
 from app.models.usuario import CatUsuario
 from app.models.verificacion import Verificacion
 from app.schemas.event_log import AuditoriaPagina, AuditoriaRead, EventLogRead
@@ -256,3 +258,233 @@ async def configurar_prorroga(
         fecha_final_prorroga=prorroga.fecha_final if prorroga else None,
         motivo_prorroga=prorroga.motivo if prorroga else None,
     )
+
+
+class IncidenciaRead(BaseModel):
+    id: str
+    tipo: str
+    titulo: str
+    origen: str
+    expediente_id: uuid.UUID | None
+    placa: str | None
+    linea_id: int | None
+    estado: str | None
+    responsable: str | None
+    ultimo_intento: datetime.datetime | None
+    intentos: int
+    mensaje_operativo: str
+    mensaje_tecnico: str | None
+    guia: str
+    accion: str
+
+
+# Fase 1 de la auditoría de Sebastián (2026-10-12, frame Figma #66:2950):
+# solo los errores que hoy existen de verdad en el sistema. Ninguno vive en
+# una tabla propia — se derivan del estado actual, así que "abierta" =
+# "el expediente sigue en el estado de error" y se cierra sola al
+# reintentar con éxito. SIOX caído no es incidencia: la regla es no
+# bloquear (captura manual), y ERROR_INTEGRACION no lo asigna ningún
+# endpoint. Equipo de prueba/OBD entran con el simulador de hardware.
+_GUIAS = {
+    "IMPRESION_FALLIDA": (
+        "Impresión fallida con folio",
+        "Impresión Central",
+        "No se obtuvo un certificado físico válido. El folio sigue asignado al expediente "
+        "y solo un Supervisor puede autorizar el reintento técnico.",
+        "El reintento usa el mismo folio y el mismo trabajo de impresión: no pide folio nuevo "
+        "ni cambia la Hora Salida. Si el papel se dañó, marque el folio como DAÑADO desde "
+        "Impresión para que se asigne el siguiente.",
+        "REINTENTAR_IMPRESION",
+    ),
+    "FOLIO_ERROR": (
+        "Sin folio disponible",
+        "Impresión Central",
+        "No se pudo asignar folio al expediente. No se imprime certificado definitivo sin folio.",
+        "Registre un lote de folios del tipo solicitado en Administración › Folios; después "
+        "Impresión vuelve a solicitar el folio del expediente.",
+        "REGISTRAR_LOTE",
+    ),
+    "SYNC_ERROR": (
+        "Error de sincronización con el central",
+        "Sincronización",
+        "Un registro del expediente no se pudo enviar al servidor central. La operación local "
+        "no se detiene; el registro queda en espera de reintento.",
+        "Sincronizar ahora reintenta todos los pendientes en orden; el central deduplica por "
+        "UUID, así que reintentar no duplica registros.",
+        "SINCRONIZAR",
+    ),
+}
+
+
+def _incidencia(tipo: str, **campos) -> IncidenciaRead:
+    titulo, origen, operativo, guia, accion = _GUIAS[tipo]
+    return IncidenciaRead(
+        tipo=tipo,
+        titulo=titulo,
+        origen=origen,
+        mensaje_operativo=operativo,
+        guia=guia,
+        accion=accion,
+        **campos,
+    )
+
+
+@router.get("/incidencias", response_model=list[IncidenciaRead])
+async def incidencias_centro(
+    linea_id: int | None = None,
+    origen: str | None = None,
+    q: str | None = None,
+    session: SessionContext = Depends(requiere_supervisor),
+    db: AsyncSession = Depends(get_db),
+) -> list[IncidenciaRead]:
+    """Pestaña 'Errores y reintentos' (Figma #66:2950): incidencias abiertas
+    del centro de la sesión, más reciente primero. Filtros: línea, origen
+    (texto exacto de `origen`) y búsqueda libre por placa, expediente o
+    mensaje."""
+
+    if session.center_id is None:
+        raise HTTPException(status_code=400, detail="La sesión no tiene centro asociado.")
+
+    incidencias: list[IncidenciaRead] = []
+
+    expedientes = (
+        await db.execute(
+            select(Verificacion).where(
+                Verificacion.centro_id == session.center_id,
+                Verificacion.estado.in_(
+                    [EstadoVerificacion.IMPRESION_FALLIDA, EstadoVerificacion.FOLIO_ERROR]
+                ),
+            )
+        )
+    ).scalars().all()
+    for exp in expedientes:
+        ultimo = (
+            await db.execute(
+                select(EventLog, CatUsuario.nombre_completo)
+                .outerjoin(CatUsuario, CatUsuario.id == EventLog.usuario_id)
+                .where(
+                    EventLog.verificacion_id == exp.id,
+                    EventLog.estado_nuevo == exp.estado,
+                )
+                .order_by(EventLog.created_at.desc())
+                .limit(1)
+            )
+        ).first()
+        evento, responsable = ultimo if ultimo else (None, None)
+        detalle = (evento.detalle_json or {}) if evento else {}
+
+        if exp.estado == EstadoVerificacion.IMPRESION_FALLIDA:
+            job = (
+                await db.execute(select(PrintJob).where(PrintJob.verificacion_id == exp.id))
+            ).scalars().first()
+            intentos = job.intentos if job else detalle.get("intentos", 0)
+            tecnico = " · ".join(
+                x
+                for x in (
+                    "PRINT_FAILED",
+                    f"folio={exp.folio_externo}" if exp.folio_externo else None,
+                    job.error_message if job else None,
+                )
+                if x
+            )
+        else:
+            intentos = 1
+            tecnico = " · ".join(
+                f"{k}={v}" for k, v in (("motivo", detalle.get("motivo")),
+                                        ("tipo", detalle.get("tipo_certificado"))) if v
+            ) or None
+
+        incidencias.append(
+            _incidencia(
+                exp.estado.value,
+                id=f"{exp.estado.value}:{exp.id}",
+                expediente_id=exp.id,
+                placa=exp.placa,
+                linea_id=exp.linea_id,
+                estado=exp.estado.value,
+                responsable=responsable,
+                ultimo_intento=evento.created_at if evento else exp.updated_at,
+                intentos=intentos,
+                mensaje_tecnico=tecnico,
+            )
+        )
+
+    filas_sync = (
+        await db.execute(select(SyncOutbox).where(SyncOutbox.sync_status == SyncStatus.ERROR))
+    ).scalars().all()
+    ids_sync = {
+        fila.id: (
+            fila.entity_uuid
+            if fila.entity_type == "verificacion"
+            else _uuid_o_none((fila.payload or {}).get("verificacion_id"))
+        )
+        for fila in filas_sync
+    }
+    exp_sync = {
+        v.id: v
+        for v in (
+            await db.execute(
+                select(Verificacion).where(
+                    Verificacion.id.in_([x for x in ids_sync.values() if x]),
+                    Verificacion.centro_id == session.center_id,
+                )
+            )
+        ).scalars()
+    }
+    for fila in filas_sync:
+        exp = exp_sync.get(ids_sync[fila.id])
+        if exp is None:
+            continue  # de otro centro (o sin expediente): no es de este supervisor
+        respuesta = fila.server_response or {}
+        incidencias.append(
+            _incidencia(
+                "SYNC_ERROR",
+                id=f"SYNC_ERROR:{fila.id}",
+                expediente_id=exp.id,
+                placa=exp.placa,
+                linea_id=exp.linea_id,
+                estado=exp.estado.value,
+                responsable=None,
+                ultimo_intento=fila.last_attempt_at or fila.created_at,
+                intentos=fila.attempts or 0,
+                mensaje_tecnico=" · ".join(
+                    x
+                    for x in (
+                        f"{fila.entity_type}.{fila.operation}",
+                        str(respuesta.get("error") or respuesta.get("detail") or "") or None,
+                    )
+                    if x
+                ),
+            )
+        )
+
+    if linea_id is not None:
+        incidencias = [i for i in incidencias if i.linea_id == linea_id]
+    if origen:
+        incidencias = [i for i in incidencias if i.origen == origen]
+    if q and q.strip():
+        texto = q.strip().lower()
+        incidencias = [
+            i
+            for i in incidencias
+            if texto in " ".join(
+                str(x) for x in (i.placa, i.expediente_id, i.titulo, i.mensaje_operativo,
+                                 i.mensaje_tecnico) if x
+            ).lower()
+        ]
+
+    minimo = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    incidencias.sort(
+        key=lambda i: i.ultimo_intento.replace(tzinfo=i.ultimo_intento.tzinfo or datetime.timezone.utc)
+        if i.ultimo_intento
+        else minimo,
+        reverse=True,
+    )
+    return incidencias
+
+
+def _uuid_o_none(valor) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(valor))
+    except (TypeError, ValueError):
+        return None

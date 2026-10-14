@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, reactive, ref, watch } from "vue";
 import { api } from "../api/client";
 import { useSessionStore } from "../stores/session";
 
@@ -10,6 +10,20 @@ const error = ref(null);
 const aviso = ref(null);
 const sub = ref("usuarios");
 const catalogo = ref("parametros");
+
+// "Errores y reintentos" lleva al supervisor a una sección concreta (p. ej.
+// Folios). Es prop y no método expuesto porque el panel puede no estar montado
+// todavía cuando se pide (v-window monta la pestaña al abrirla).
+const props = defineProps({ destino: { type: Object, default: null } });
+watch(
+  () => props.destino,
+  (d) => {
+    if (!d) return;
+    sub.value = d.seccion;
+    if (d.catalogo) catalogo.value = d.catalogo;
+  },
+  { immediate: true },
+);
 
 // --- Usuarios ---
 const usuarios = ref([]);

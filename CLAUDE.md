@@ -2744,3 +2744,27 @@ Revisado y correcto: los módulos operativos usan `requiere_estacion` (Captura/P
 Administración/Supervisión usan `requiere_supervisor`; logout solo cierra la propia sesión;
 `sync/expediente` aplica bloqueo de línea. Sin sesión por diseño: `/health`, `POST /estaciones/login`
 y `GET /estaciones/{device_identifier}` (se necesita antes del login; solo configuración de la estación).
+
+## Supervisión / Errores y reintentos — Fase 1 (2026-10-13)
+
+Auditoría de Sebastián (`~/Descargas/auditoria_errores_reintentos_supervision_figma.md`, frame `#66:2950`):
+el frame no es solo sync, es una bandeja de incidencias. La pestaña "Sincronización" pasa a ser
+**"Errores y reintentos"**: filtros (búsqueda, línea, origen), bandeja a la izquierda, detalle a la
+derecha (estado, origen, responsable, último intento, intentos, mensaje operativo, mensaje técnico, guía,
+"Ver bitácora" y la acción). La tarjeta de sync del central queda debajo, sin cambios.
+
+- `GET /api/supervision/incidencias` (`requiere_supervisor`, centro de la sesión). **Sin tabla nueva**: se
+  derivan del estado real — expedientes en `IMPRESION_FALLIDA` / `FOLIO_ERROR` y filas de `sync_outbox` en
+  `error` cuyo expediente es del centro. "Abierta" = sigue en ese estado; se cierra sola al reintentar con
+  éxito. Por eso el filtro "Estado: abiertos/resueltos" del Figma no existe todavía (no hay historial).
+- Acciones: `REINTENTAR_IMPRESION` usa el `POST /impresion/imprimir` existente (mismo folio, misma Hora
+  Salida, exige Supervisor). Ese endpoint exige estación de Impresión — la impresora está ahí —, así que en
+  Supervisión el botón solo se habilita si la sesión es de Impresión; si no, explica dónde hacerlo.
+  `REGISTRAR_LOTE` lleva a Administración › Folios (prop `destino` de `AdministracionPanel`).
+  `SINCRONIZAR` = `POST /sync/procesar`.
+- Correcciones al informe: SIOX caído **no** es incidencia (la regla es no bloquear → captura manual;
+  `ERROR_INTEGRACION` no lo asigna ningún endpoint) y no existe `PRUEBA_INTERRUMPIDA` (interrumpir regresa a
+  `LISTO_PARA_PRUEBA`). Equipo de prueba/OBD quedan para la Fase 2 con el simulador de hardware.
+- Verificado con Chrome headless (puppeteer-core) contra uvicorn + BD de dev: bandeja, detalle, navegación a
+  Folios y reintento real desde `IMPRESION-REFORMA-01` (IMPRESION_FALLIDA → IMPRESO, Hora Salida fijada, la
+  incidencia desaparece). Datos de QA y permiso temporal borrados. 5 pruebas nuevas, 351 en total.

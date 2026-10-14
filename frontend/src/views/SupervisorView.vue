@@ -175,6 +175,83 @@ async function eliminarPermiso(permiso) {
   }
 }
 
+// --- Errores y reintentos (auditoría de Sebastián 2026-10-12, Figma #66:2950) ---
+const ORIGENES_INCIDENCIA = ["Impresión Central", "Sincronización"];
+const incidencias = ref([]);
+const incidenciaSel = ref(null);
+const cargandoIncidencias = ref(false);
+const filtrosIncidencias = reactive({ q: "", linea_id: null, origen: null });
+const reintentando = ref(false);
+const destinoAdmin = ref(null);
+let consultaIncidencias = 0;
+
+const lineasIncidencias = computed(() =>
+  [...new Set(expedientes.value.map((e) => e.linea_id).concat(incidencias.value.map((i) => i.linea_id)))]
+    .filter((l) => l != null)
+    .sort((a, b) => a - b),
+);
+// El reintento técnico imprime físicamente: solo desde la estación de
+// Impresión Central, donde está la impresora (el backend también lo exige).
+const enEstacionImpresion = computed(() => session.estacion?.station_type === "impresion");
+
+async function cargarIncidencias() {
+  const consulta = ++consultaIncidencias;
+  cargandoIncidencias.value = true;
+  try {
+    const params = {};
+    if (filtrosIncidencias.q.trim()) params.q = filtrosIncidencias.q.trim();
+    if (filtrosIncidencias.linea_id != null) params.linea_id = filtrosIncidencias.linea_id;
+    if (filtrosIncidencias.origen) params.origen = filtrosIncidencias.origen;
+    const { data } = await api.get("/supervision/incidencias", { params });
+    if (consulta !== consultaIncidencias) return;
+    incidencias.value = data;
+    incidenciaSel.value = data.find((i) => i.id === incidenciaSel.value?.id) || data[0] || null;
+  } catch (err) {
+    if (consulta === consultaIncidencias) {
+      error.value = err.response?.data?.detail || "No se pudieron cargar las incidencias.";
+    }
+  } finally {
+    if (consulta === consultaIncidencias) cargandoIncidencias.value = false;
+  }
+}
+
+function limpiarFiltrosIncidencias() {
+  Object.assign(filtrosIncidencias, { q: "", linea_id: null, origen: null });
+  cargarIncidencias();
+}
+
+async function reintentarIncidencia(inc) {
+  error.value = null;
+  if (inc.accion === "REGISTRAR_LOTE") {
+    destinoAdmin.value = { seccion: "catalogos", catalogo: "folios" };
+    tab.value = "administracion";
+    return;
+  }
+  reintentando.value = true;
+  try {
+    if (inc.accion === "SINCRONIZAR") {
+      await sincronizarAhora();
+    } else if (inc.accion === "REINTENTAR_IMPRESION") {
+      const { data } = await api.post(`/impresion/imprimir/${inc.expediente_id}`);
+      aviso.value =
+        data.estado_expediente === "IMPRESO"
+          ? `Certificado de ${inc.placa} impreso en el reintento.`
+          : `La impresora volvió a fallar (${data.intentos} intentos).`;
+    }
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo reintentar.";
+  } finally {
+    reintentando.value = false;
+    await cargarIncidencias();
+  }
+}
+
+const TEXTO_ACCION = {
+  REINTENTAR_IMPRESION: "Reintentar impresión",
+  REGISTRAR_LOTE: "Registrar lote de folios",
+  SINCRONIZAR: "Sincronizar ahora",
+};
+
 // --- Sincronización (visibilidad de sync_outbox al operador) ---
 const estadoSync = ref(null);
 const cargandoEstadoSync = ref(false);
@@ -551,6 +628,7 @@ onMounted(() => {
   cargarUsuarios();
   cargarPermisos();
   cargarEstadoSync();
+  cargarIncidencias();
   cargarInventarioFolios();
   cargarLimitesEmision();
   cargarEstacionesPrueba();
@@ -573,7 +651,7 @@ onMounted(() => {
 
     <v-tabs v-model="tab" class="mb-4">
       <v-tab value="monitor">Monitor</v-tab>
-      <v-tab value="sincronizacion">Sincronización</v-tab>
+      <v-tab value="errores">Errores y reintentos</v-tab>
       <v-tab value="reimpresion">Reimpresión</v-tab>
       <v-tab value="auditoria">Auditoría</v-tab>
       <v-tab value="administracion">Administración</v-tab>
@@ -638,7 +716,139 @@ onMounted(() => {
       </v-window-item>
 
 
-      <v-window-item value="sincronizacion">
+      <v-window-item value="errores">
+        <v-card class="rounded-institucional-lg elevation-institucional-0 mb-4" variant="flat">
+          <v-card-title class="d-flex align-center ga-2 flex-wrap">
+            Errores y reintentos
+            <v-spacer />
+            <span class="text-body-2 text-medium-emphasis">
+              {{ incidencias.length }} incidencia{{ incidencias.length === 1 ? "" : "s" }} abierta{{ incidencias.length === 1 ? "" : "s" }}
+            </span>
+            <v-btn variant="text" icon="mdi-refresh" :loading="cargandoIncidencias" @click="cargarIncidencias" />
+          </v-card-title>
+          <v-card-subtitle>Incidencias operativas con trazabilidad y acciones supervisadas</v-card-subtitle>
+          <v-card-text>
+            <v-row dense class="mb-2">
+              <v-col cols="12" md="4">
+                <v-text-field
+                  v-model="filtrosIncidencias.q"
+                  label="Buscar: expediente, placa o mensaje"
+                  prepend-inner-icon="mdi-magnify"
+                  clearable
+                  @update:model-value="cargarIncidencias"
+                />
+              </v-col>
+              <v-col cols="6" md="2">
+                <v-select
+                  v-model="filtrosIncidencias.linea_id"
+                  :items="lineasIncidencias"
+                  label="Línea"
+                  clearable
+                  @update:model-value="cargarIncidencias"
+                />
+              </v-col>
+              <v-col cols="6" md="3">
+                <v-select
+                  v-model="filtrosIncidencias.origen"
+                  :items="ORIGENES_INCIDENCIA"
+                  label="Origen"
+                  clearable
+                  @update:model-value="cargarIncidencias"
+                />
+              </v-col>
+              <v-col cols="12" md="3" class="d-flex align-center">
+                <v-btn variant="text" @click="limpiarFiltrosIncidencias">Limpiar</v-btn>
+              </v-col>
+            </v-row>
+
+            <v-row>
+              <v-col cols="12" md="5">
+                <v-list v-if="incidencias.length" lines="two" density="compact" class="border rounded">
+                  <v-list-item
+                    v-for="inc in incidencias"
+                    :key="inc.id"
+                    :active="incidenciaSel?.id === inc.id"
+                    @click="incidenciaSel = inc"
+                  >
+                    <template #prepend>
+                      <v-chip color="error" size="small" prepend-icon="mdi-close-circle" class="mr-3">Error</v-chip>
+                    </template>
+                    <v-list-item-title>{{ inc.titulo }}</v-list-item-title>
+                    <v-list-item-subtitle>
+                      {{ inc.placa }} · Línea {{ inc.linea_id }} · {{ inc.origen }}
+                      <template v-if="inc.ultimo_intento">
+                        · {{ new Date(inc.ultimo_intento).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }}
+                      </template>
+                    </v-list-item-subtitle>
+                  </v-list-item>
+                </v-list>
+                <p v-else-if="!cargandoIncidencias" class="text-body-2 text-medium-emphasis">
+                  No hay incidencias abiertas.
+                </p>
+              </v-col>
+
+              <v-col cols="12" md="7">
+                <v-card v-if="incidenciaSel" variant="outlined" class="rounded-institucional-lg">
+                  <v-card-title class="d-flex align-center">
+                    {{ incidenciaSel.placa }}
+                    <v-spacer />
+                    <v-chip color="error" size="small" prepend-icon="mdi-close-circle">Error</v-chip>
+                  </v-card-title>
+                  <v-card-text>
+                    <v-table density="compact" class="mb-3">
+                      <tbody>
+                        <tr><td class="text-medium-emphasis">Estado</td><td>{{ textoEstado(incidenciaSel.estado) }}</td></tr>
+                        <tr><td class="text-medium-emphasis">Origen</td><td>{{ incidenciaSel.origen }}</td></tr>
+                        <tr><td class="text-medium-emphasis">Responsable</td><td>{{ incidenciaSel.responsable || "—" }}</td></tr>
+                        <tr>
+                          <td class="text-medium-emphasis">Último intento</td>
+                          <td>{{ incidenciaSel.ultimo_intento ? new Date(incidenciaSel.ultimo_intento).toLocaleString() : "—" }}</td>
+                        </tr>
+                        <tr><td class="text-medium-emphasis">Intentos</td><td>{{ incidenciaSel.intentos }}</td></tr>
+                      </tbody>
+                    </v-table>
+                    <v-alert type="error" variant="tonal" density="compact" class="mb-3">
+                      {{ incidenciaSel.mensaje_operativo }}
+                    </v-alert>
+                    <pre
+                      v-if="incidenciaSel.mensaje_tecnico"
+                      class="text-caption bg-grey-lighten-4 pa-2 rounded mb-3"
+                      style="white-space: pre-wrap; font-family: monospace"
+                    >{{ incidenciaSel.mensaje_tecnico }}</pre>
+                    <p class="text-body-2">{{ incidenciaSel.guia }}</p>
+                    <p
+                      v-if="incidenciaSel.accion === 'REINTENTAR_IMPRESION' && !enEstacionImpresion"
+                      class="text-caption text-medium-emphasis mt-2"
+                    >
+                      El reintento imprime en papel: inicie sesión como supervisor en la estación de
+                      Impresión Central para ejecutarlo.
+                    </p>
+                  </v-card-text>
+                  <v-card-actions>
+                    <v-btn
+                      variant="outlined"
+                      prepend-icon="mdi-history"
+                      @click="abrirBitacora({ id: incidenciaSel.expediente_id, placa: incidenciaSel.placa })"
+                    >
+                      Ver bitácora
+                    </v-btn>
+                    <v-spacer />
+                    <v-btn
+                      color="primary"
+                      variant="flat"
+                      :loading="reintentando"
+                      :disabled="incidenciaSel.accion === 'REINTENTAR_IMPRESION' && !enEstacionImpresion"
+                      @click="reintentarIncidencia(incidenciaSel)"
+                    >
+                      {{ TEXTO_ACCION[incidenciaSel.accion] }}
+                    </v-btn>
+                  </v-card-actions>
+                </v-card>
+              </v-col>
+            </v-row>
+          </v-card-text>
+        </v-card>
+
         <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
           <v-card-title class="d-flex align-center ga-2">
             Sincronización con el central
@@ -807,7 +1017,7 @@ onMounted(() => {
       </v-window-item>
 
       <v-window-item value="administracion">
-        <AdministracionPanel>
+        <AdministracionPanel :destino="destinoAdmin">
           <template #permisos>
             <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
               <v-card-title class="d-flex align-center ga-2">
