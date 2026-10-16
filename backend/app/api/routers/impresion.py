@@ -92,6 +92,9 @@ async def cola_impresion(
                 EstadoVerificacion.FOLIO_ASIGNADO,
                 EstadoVerificacion.FOLIO_ERROR,
                 EstadoVerificacion.IMPRESION_FALLIDA,
+                # Impreso pero aún sin cerrar: si el operador sale del detalle
+                # antes de cerrar, tiene que poder volver a cerrarlo desde aquí.
+                EstadoVerificacion.IMPRESO,
             ]
         ),
         Verificacion.centro_id == session.center_id,

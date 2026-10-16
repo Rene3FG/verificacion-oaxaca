@@ -697,3 +697,27 @@ async def test_resultados_complementarios_antes_de_terminar_prueba_responde_409(
         f"/api/impresion/resultados/{expediente.id}", headers={"X-Session-Id": str(sesion.id)}
     )
     assert resp.status_code == 409
+
+
+async def test_cola_impresion_conserva_impreso_hasta_cerrar(client, db_session):
+    """Un expediente IMPRESO sin cerrar sigue en la cola: si el operador sale
+    del detalle antes de cerrar, debe poder volver a cerrarlo."""
+
+    sesion = await _sesion_impresion(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.FOLIO_ASIGNADO
+    )
+    expediente.resultado_final = ResultadoFinal.APROBADO
+    expediente.folio_externo = "F-0002"
+    expediente.certificado_tipo = "PARTICULAR"
+    db_session.add(expediente)
+    await db_session.commit()
+    headers = {"X-Session-Id": str(sesion.id)}
+
+    await client.post(f"/api/impresion/imprimir/{expediente.id}", headers=headers)
+    ids = [e["id"] for e in (await client.get("/api/impresion/cola", headers=headers)).json()]
+    assert str(expediente.id) in ids
+
+    await client.post(f"/api/impresion/cerrar/{expediente.id}", headers=headers)
+    ids = [e["id"] for e in (await client.get("/api/impresion/cola", headers=headers)).json()]
+    assert str(expediente.id) not in ids
