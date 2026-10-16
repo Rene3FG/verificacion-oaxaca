@@ -62,13 +62,22 @@ const requiereSeleccionManual = computed(
 // --- Búsqueda y Filtros de la Cola de Impresión (HU-053, HU-056 a 060 y HU-090) ---
 const busquedaCola = ref("");
 const filtroEstadoCola = ref("TODOS");
+const filtroResultadoCola = ref("TODOS"); // HU-057: filtro por resultado técnico
 const filtroLineaCola = ref("TODAS");
 
 const OPCIONES_FILTRO_ESTADO = [
   { title: "Todos los estados", value: "TODOS" },
   { title: "Pendientes de folio", value: "PENDIENTE" },
   { title: "Folio asignado (listos)", value: "FOLIO_ASIGNADO" },
+  { title: "Impresos (pendientes de cierre)", value: "IMPRESO" },
   { title: "Incidencias / Errores", value: "INCIDENCIAS" },
+];
+
+const OPCIONES_FILTRO_RESULTADO = [
+  { title: "Todos los resultados", value: "TODOS" },
+  { title: "Aprobados", value: "APROBADO" },
+  { title: "Rechazos por prueba", value: "RECHAZADO" },
+  { title: "Rechazos visuales", value: "RECHAZO_VISUAL" },
 ];
 
 function tipoCertificadoSugerido(exp) {
@@ -98,6 +107,7 @@ const conteosPorEstado = computed(() => {
       ["PENDIENTE_IMPRESION", "PENDIENTE_DE_IMPRESION_RECHAZO"].includes(e.estado)
     ).length,
     asignados: lista.filter((e) => e.estado === "FOLIO_ASIGNADO").length,
+    impresos: lista.filter((e) => e.estado === "IMPRESO").length,
     incidencias: lista.filter((e) =>
       ["FOLIO_ERROR", "IMPRESION_FALLIDA"].includes(e.estado)
     ).length,
@@ -116,25 +126,44 @@ const opcionesFiltroLinea = computed(() => {
 const expedientesFiltrados = computed(() => {
   let lista = expedientes.value || [];
 
-  // 1. Filtro por Estado (HU-058 / HU-090)
+  // 1. Filtro por Estado (HU-058 / HU-059 / HU-090)
   if (filtroEstadoCola.value === "PENDIENTE") {
     lista = lista.filter((e) =>
       ["PENDIENTE_IMPRESION", "PENDIENTE_DE_IMPRESION_RECHAZO"].includes(e.estado)
     );
   } else if (filtroEstadoCola.value === "FOLIO_ASIGNADO") {
     lista = lista.filter((e) => e.estado === "FOLIO_ASIGNADO");
+  } else if (filtroEstadoCola.value === "IMPRESO") {
+    lista = lista.filter((e) => e.estado === "IMPRESO");
   } else if (filtroEstadoCola.value === "INCIDENCIAS") {
     lista = lista.filter((e) =>
       ["FOLIO_ERROR", "IMPRESION_FALLIDA"].includes(e.estado)
     );
   }
 
-  // 2. Filtro por Línea
+  // 2. Filtro por Resultado Técnico (HU-057)
+  if (filtroResultadoCola.value === "APROBADO") {
+    lista = lista.filter(
+      (e) =>
+        e.resultado_final === "APROBADO" ||
+        (e.estado === "PENDIENTE_IMPRESION" && e.certificado_tipo !== "RECHAZO")
+    );
+  } else if (filtroResultadoCola.value === "RECHAZADO") {
+    lista = lista.filter(
+      (e) =>
+        e.resultado_final === "RECHAZADO" &&
+        e.estado !== "PENDIENTE_DE_IMPRESION_RECHAZO"
+    );
+  } else if (filtroResultadoCola.value === "RECHAZO_VISUAL") {
+    lista = lista.filter((e) => e.estado === "PENDIENTE_DE_IMPRESION_RECHAZO");
+  }
+
+  // 3. Filtro por Línea (HU-056)
   if (filtroLineaCola.value !== "TODAS") {
     lista = lista.filter((e) => String(e.linea_id) === filtroLineaCola.value);
   }
 
-  // 3. Búsqueda reactiva por placa, expediente, folio o NIV (HU-056)
+  // 4. Búsqueda reactiva por placa, expediente, folio o NIV (HU-060)
   const q = busquedaCola.value.trim().toLowerCase();
   if (q) {
     lista = lista.filter((e) => {
@@ -161,6 +190,7 @@ const expedientesFiltrados = computed(() => {
 function limpiarFiltros() {
   busquedaCola.value = "";
   filtroEstadoCola.value = "TODOS";
+  filtroResultadoCola.value = "TODOS";
   filtroLineaCola.value = "TODAS";
 }
 
@@ -222,16 +252,11 @@ const puedeCerrar = computed(
 const puedeMarcarFolioDanado = computed(
   () => expediente.value?.estado === "FOLIO_ASIGNADO"
 );
-// Reimpresión por daño y corrección de tipo post-impresión: ya no viven
-// aquí. Esos estados (IMPRESO/CERRADO_*) no aparecen en esta cola y salen
-// de ella en cuanto se abren, así que la card equivalente que existió
-// brevemente en este archivo (commit 7c9c36d) solo era alcanzable
-// mientras el expediente seguía cargado en memoria — se perdía en cuanto
-// se navegaba fuera. René resolvió el mismo hueco con
-// GET /api/supervision/expedientes/buscar?placa= + la pestaña
-// "Reimpresión" en SupervisorView.vue (su archivo), así que ambas
-// operaciones quedan solo ahí — acordado con él el 2026-09-03 para no
-// duplicarlas en dos pantallas.
+// Reimpresión por daño y corrección de tipo post-impresión: viven en
+// SupervisorView.vue (pestaña "Reimpresión", buscador por placa). Desde el
+// commit bf2fb1c de René, los expedientes en estado IMPRESO permanecen en esta
+// cola hasta que el operador confirma el cierre definitivo (/cerrar), momento
+// en que transicionan a CERRADO_APROBADO o CERRADO_RECHAZADO y salen de la cola.
 
 async function cargarCola() {
   cargandoLista.value = true;
@@ -488,11 +513,11 @@ onMounted(cargarCola);
         {{ error }}
       </v-alert>
 
-      <!-- Panel de Búsqueda y Filtros de la Cola (HU-056, HU-058, HU-090) -->
+      <!-- Panel de Búsqueda y Filtros de la Cola (HU-056 a HU-060, HU-090) -->
       <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-text>
           <v-row dense class="align-center">
-            <v-col cols="12" md="6">
+            <v-col cols="12" md="4">
               <v-text-field
                 v-model="busquedaCola"
                 label="Buscar en la cola"
@@ -504,7 +529,19 @@ onMounted(cargarCola);
                 hide-details
               />
             </v-col>
-            <v-col cols="6" md="3">
+            <v-col cols="6" sm="4" md="3">
+              <!-- HU-057: Filtro por resultado técnico -->
+              <v-select
+                v-model="filtroResultadoCola"
+                :items="OPCIONES_FILTRO_RESULTADO"
+                label="Resultado técnico"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6" sm="4" md="3">
+              <!-- HU-058 / HU-059: Filtro por estado del expediente -->
               <v-select
                 v-model="filtroEstadoCola"
                 :items="OPCIONES_FILTRO_ESTADO"
@@ -514,7 +551,8 @@ onMounted(cargarCola);
                 hide-details
               />
             </v-col>
-            <v-col cols="6" md="3">
+            <v-col cols="12" sm="4" md="2">
+              <!-- HU-056: Filtro por línea -->
               <v-select
                 v-model="filtroLineaCola"
                 :items="opcionesFiltroLinea"
@@ -526,7 +564,7 @@ onMounted(cargarCola);
             </v-col>
           </v-row>
 
-          <!-- Chips de acceso rápido por estado con contadores (HU-058 / HU-090) -->
+          <!-- Chips de acceso rápido por estado con contadores (HU-058 / HU-059 / HU-090) -->
           <div class="d-flex align-center flex-wrap ga-2 mt-3 pt-2 border-t">
             <span class="text-caption text-medium-emphasis mr-1">Filtro rápido:</span>
             <v-chip
@@ -553,6 +591,15 @@ onMounted(cargarCola);
             >
               Folio asignado ({{ conteosPorEstado.asignados }})
             </v-chip>
+            <!-- HU-059: expedientes con impresión física exitosa pendientes de cierre formal -->
+            <v-chip
+              size="small"
+              :variant="filtroEstadoCola === 'IMPRESO' ? 'flat' : 'outlined'"
+              :color="filtroEstadoCola === 'IMPRESO' ? 'success' : undefined"
+              @click="filtroEstadoCola = 'IMPRESO'"
+            >
+              Impresos pendientes de cierre ({{ conteosPorEstado.impresos }})
+            </v-chip>
             <v-chip
               size="small"
               :variant="filtroEstadoCola === 'INCIDENCIAS' ? 'flat' : 'outlined'"
@@ -565,7 +612,7 @@ onMounted(cargarCola);
             <v-spacer />
 
             <v-btn
-              v-if="busquedaCola || filtroEstadoCola !== 'TODOS' || filtroLineaCola !== 'TODAS'"
+              v-if="busquedaCola || filtroEstadoCola !== 'TODOS' || filtroResultadoCola !== 'TODOS' || filtroLineaCola !== 'TODAS'"
               variant="text"
               size="small"
               color="error"
