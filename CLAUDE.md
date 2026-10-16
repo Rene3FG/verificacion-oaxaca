@@ -2768,3 +2768,10 @@ derecha (estado, origen, responsable, último intento, intentos, mensaje operati
 - Verificado con Chrome headless (puppeteer-core) contra uvicorn + BD de dev: bandeja, detalle, navegación a
   Folios y reintento real desde `IMPRESION-REFORMA-01` (IMPRESION_FALLIDA → IMPRESO, Hora Salida fijada, la
   incidencia desaparece). Datos de QA y permiso temporal borrados. 5 pruebas nuevas, 351 en total.
+
+## HU-020: encabezado del expediente completo (2026-10-15)
+
+`ExpedienteRead` expone `operador_id` y `operador_nombre` (relación de solo lectura
+`Verificacion.operador`, `lazy="selectin"`: `joined` choca con los `FOR UPDATE` de los
+routers). `ExpedienteHeader.vue` muestra "Tipo de vehículo" (faltaba frente al texto de la
+HU) y el operador que creó el expediente en vez del usuario de la sesión que lo mira.

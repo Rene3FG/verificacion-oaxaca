@@ -2,7 +2,15 @@ import datetime
 import re
 import uuid
 
-from pydantic import BaseModel, ConfigDict, computed_field, field_validator
+from pydantic import (
+    AliasChoices,
+    AliasPath,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+)
 
 from app.models.enums import EstadoVerificacion, ResultadoFinal, TipoPrueba
 from app.schemas.vehiculo import VehiculoRead
@@ -53,6 +61,11 @@ class ExpedienteRead(BaseModel):
     certificado_anterior: str | None = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    operador_id: uuid.UUID | None = None
+    # HU-020: se llena desde la relación `operador` (cat_usuarios).
+    operador_nombre: str | None = Field(
+        default=None, validation_alias=AliasChoices("operador_nombre", AliasPath("operador", "nombre_completo"))
+    )
 
 
 class ExpedienteCompleto(ExpedienteRead):

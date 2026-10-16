@@ -58,3 +58,11 @@ class Verificacion(Base, UUIDPKMixin, TimestampMixin):
     certificado_anterior: Mapped[str | None] = mapped_column(String(30))
 
     vehiculo: Mapped["Vehiculo"] = relationship()
+    # HU-020: nombre del operador que creó el expediente para el encabezado.
+    # Solo lectura: operador_id no tiene FK (se guarda tal cual la sesión).
+    operador: Mapped["CatUsuario | None"] = relationship(
+        "CatUsuario",
+        primaryjoin="foreign(Verificacion.operador_id) == CatUsuario.id",
+        viewonly=True,
+        lazy="selectin",
+    )

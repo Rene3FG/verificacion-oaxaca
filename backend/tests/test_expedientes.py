@@ -648,3 +648,25 @@ async def test_obtener_expediente_de_su_linea_responde_200(client, db_session):
 
     assert resp.status_code == 200
     assert resp.json()["id"] == str(expediente.id)
+
+
+async def test_expediente_expone_nombre_del_operador_que_lo_creo(client, db_session):
+    """HU-020: el encabezado muestra el operador del expediente, no el de la
+    sesión que lo esté mirando."""
+
+    from tests.conftest import crear_usuario
+
+    usuario = await crear_usuario(db_session, username="op_hu020")
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion, user_id=usuario.id)
+    await db_session.commit()
+
+    headers = {"X-Session-Id": str(sesion.id)}
+    creado = await client.post("/api/expedientes", json={"placa": "HUA020A"}, headers=headers)
+    assert creado.status_code == 201
+    assert creado.json()["operador_nombre"] == "Usuario de prueba"
+
+    leido = await client.get(f"/api/expedientes/{creado.json()['id']}", headers=headers)
+    assert leido.json()["operador_nombre"] == "Usuario de prueba"

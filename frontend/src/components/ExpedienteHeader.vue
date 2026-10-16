@@ -71,9 +71,8 @@ watch(
       COMBUSTIBLE, TIPO, CENTRO, LÍNEA, OPERADOR, FECHA/HORA como campos
       etiquetados en fila, no chips sueltos. "TIPO" en el diseño es el tipo
       de certificado (certificado_tipo), no el tipo de prueba. "OPERADOR"
-      no viene del backend por expediente (ExpedienteRead no lo expone,
-      ver schemas/verificacion.py) — se muestra el usuario de la sesión
-      actual de esta estación como aproximación, no un dato inventado. -->
+      es quien creó el expediente (HU-020, operador_nombre); si el backend no
+      lo trae, se cae al usuario de la sesión actual. -->
       <v-row dense>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Placa</span>
@@ -91,6 +90,10 @@ watch(
           <span class="font-weight-medium">{{ props.expediente.combustible_validado ?? "—" }}</span>
         </v-col>
         <v-col cols="6" sm="3" md="auto">
+          <span class="text-caption text-medium-emphasis d-block">Tipo de vehículo</span>
+          <span class="font-weight-medium">{{ props.expediente.vehiculo?.tipo_vehiculo ?? "—" }}</span>
+        </v-col>
+        <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Tipo</span>
           <span class="font-weight-medium">{{ props.expediente.certificado_tipo ?? "—" }}</span>
         </v-col>
@@ -104,7 +107,9 @@ watch(
         </v-col>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Operador</span>
-          <span class="font-weight-medium">{{ session.usuario ?? "—" }}</span>
+          <span class="font-weight-medium">
+            {{ props.expediente.operador_nombre ?? session.usuario ?? "—" }}
+          </span>
         </v-col>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Fecha / hora</span>
