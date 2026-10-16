@@ -1,3 +1,6 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.api.routers import (
@@ -17,7 +20,20 @@ from app.api.routers import (
     usuarios,
 )
 
-app = FastAPI(title="Sistema de Verificación Vehicular de Oaxaca")
+from app.services.sync_auto import bucle_sync_auto, sync_auto_habilitado
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    tarea = asyncio.create_task(bucle_sync_auto()) if sync_auto_habilitado() else None
+    try:
+        yield
+    finally:
+        if tarea:
+            tarea.cancel()
+
+
+app = FastAPI(title="Sistema de Verificación Vehicular de Oaxaca", lifespan=lifespan)
 
 app.include_router(expedientes.router)
 app.include_router(siox.router)

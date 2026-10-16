@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     central_sync_url: str = ""
     central_sync_token: str = ""
     central_sync_timeout_s: float = 10.0
+    # HU-107: cada cuántos segundos el servidor local intenta enviar pendientes
+    # solo. 0 o sin central_sync_url = apagado (queda el POST /api/sync/procesar).
+    sync_auto_intervalo_s: float = 30.0
 
     obd_modelo_minimo: int = 2006
 

@@ -2775,3 +2775,12 @@ derecha (estado, origen, responsable, último intento, intentos, mensaje operati
 `Verificacion.operador`, `lazy="selectin"`: `joined` choca con los `FOR UPDATE` de los
 routers). `ExpedienteHeader.vue` muestra "Tipo de vehículo" (faltaba frente al texto de la
 HU) y el operador que creó el expediente en vez del usuario de la sesión que lo mira.
+
+## HU-107: sincronización automática (2026-10-15)
+
+`app/services/sync_auto.py`: bucle asyncio en el `lifespan` de la app que llama a
+`procesar_pendientes` cada `SYNC_AUTO_INTERVALO_S` (30 s por defecto). Solo arranca si hay
+`CENTRAL_SYNC_URL` y el intervalo es > 0; sin URL queda el `POST /api/sync/procesar` manual.
+El backoff por fila lo sigue dando `procesar_pendientes`. Sin Celery. Con varios workers de
+uvicorn habría un bucle por proceso (el envío ya es idempotente por `Idempotency-Key`);
+correr con un solo worker o aceptar el envío duplicado inofensivo.

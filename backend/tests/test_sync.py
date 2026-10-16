@@ -327,3 +327,42 @@ async def test_estado_por_expediente_resume_sus_filas(client, db_session):
 
     resp = await client.get(f"/api/sync/expediente/{uuid.uuid4()}", headers=headers)
     assert resp.status_code == 404
+
+
+async def test_sync_auto_solo_se_habilita_con_central_configurado(monkeypatch):
+    """HU-107: sin CENTRAL_SYNC_URL o con intervalo 0 el bucle no arranca."""
+
+    from app.core.config import settings
+    from app.services.sync_auto import sync_auto_habilitado
+
+    monkeypatch.setattr(settings, "central_sync_url", "")
+    assert not sync_auto_habilitado()
+    monkeypatch.setattr(settings, "central_sync_url", "http://central.test")
+    monkeypatch.setattr(settings, "sync_auto_intervalo_s", 0)
+    assert not sync_auto_habilitado()
+    monkeypatch.setattr(settings, "sync_auto_intervalo_s", 30)
+    assert sync_auto_habilitado()
+
+
+async def test_sync_auto_bucle_sobrevive_a_una_vuelta_fallida(monkeypatch):
+    """Una excepción en una vuelta no mata el bucle: sigue intentando."""
+
+    import asyncio
+
+    from app.core.config import settings
+    from app.services import sync_auto
+
+    llamadas = []
+
+    async def vuelta():
+        llamadas.append(1)
+        if len(llamadas) == 1:
+            raise RuntimeError("central caido")
+        return {}
+
+    monkeypatch.setattr(sync_auto, "una_vuelta", vuelta)
+    monkeypatch.setattr(settings, "sync_auto_intervalo_s", 0.01)
+    tarea = asyncio.create_task(sync_auto.bucle_sync_auto())
+    await asyncio.sleep(0.15)
+    tarea.cancel()
+    assert len(llamadas) >= 2
