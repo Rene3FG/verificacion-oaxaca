@@ -179,6 +179,7 @@ async def procesar_pendientes(
     max_lote: int = 50,
     ventana_candidatos: int = 500,
     ahora: datetime.datetime | None = None,
+    forzar: bool = False,
 ) -> dict:
     """Envía ordenado (por created_at, FIFO) los pendientes/errados cuyo
     backoff ya expiró. Cada fila se marca SYNCED solo si `enviar` no lanza
@@ -197,7 +198,20 @@ async def procesar_pendientes(
     llamada, hasta que las viejas expiraran. Ahora se examina una ventana
     de candidatos más amplia (`ventana_candidatos`) y el backoff se filtra
     en Python antes de recortar a `max_lote` intentos reales, así una fila
-    lista se envía aunque haya filas más viejas todavía en espera."""
+    lista se envía aunque haya filas más viejas todavía en espera.
+
+    **Resiliencia ante caídas largas (2026-10-16)**:
+    - `forzar=True` ignora el backoff (lo usa el botón "Sincronizar ahora" del
+      supervisor). Sin esto, tras una caída de ~2.5 h cada fila queda a 1 h de
+      su siguiente intento y el botón no enviaba nada aunque ya hubiera
+      internet. El bucle automático sigue respetando el backoff.
+    - Si falla la conexión con el central (`httpx.TransportError`: sin ruta,
+      DNS, timeout) se corta el lote: las filas restantes no se intentan ni
+      gastan intentos/backoff. Antes cada fila esperaba su propio timeout
+      (hasta 50 × 10 s con la transacción abierta). Un error HTTP del central
+      (4xx/5xx) no corta: ese problema es de la fila, no de la conexión.
+    - Las filas a enviar se bloquean con `FOR UPDATE SKIP LOCKED`: el bucle
+      automático y el botón manual ya no se pisan ni se bloquean entre sí."""
 
     ahora = ahora or datetime.datetime.now(datetime.timezone.utc)
 
@@ -217,7 +231,7 @@ async def procesar_pendientes(
     en_backoff = 0
     listos: list[SyncOutbox] = []
     for row in candidatos:
-        if row.last_attempt_at is not None:
+        if row.last_attempt_at is not None and not forzar:
             espera = calcular_espera_segundos(row.attempts)
             transcurrido = (ahora - row.last_attempt_at).total_seconds()
             if transcurrido < espera:
@@ -227,10 +241,33 @@ async def procesar_pendientes(
         if len(listos) >= max_lote:
             break
 
+    if listos:
+        # Se bloquean solo las filas que se van a enviar (no las que siguen en
+        # backoff) y se revalida su estado: otra corrida pudo enviarlas entre
+        # la lectura de arriba y este bloqueo.
+        listos = list(
+            (
+                await db.execute(
+                    select(SyncOutbox)
+                    .where(
+                        SyncOutbox.id.in_([r.id for r in listos]),
+                        SyncOutbox.sync_status.in_([SyncStatus.PENDING, SyncStatus.ERROR]),
+                    )
+                    .order_by(SyncOutbox.created_at)
+                    .with_for_update(skip_locked=True)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
     enviados = 0
     fallidos = 0
+    omitidos = 0
+    central_inalcanzable = False
 
-    for row in listos:
+    for indice, row in enumerate(listos):
         row.sync_status = SyncStatus.SYNCING
         row.attempts += 1
         row.last_attempt_at = ahora
@@ -239,6 +276,14 @@ async def procesar_pendientes(
 
         try:
             respuesta = await enviar(row)
+        except httpx.TransportError as exc:
+            row.sync_status = SyncStatus.ERROR
+            row.server_response = {"error": str(exc) or type(exc).__name__}
+            fallidos += 1
+            db.add(row)
+            central_inalcanzable = True
+            omitidos = len(listos) - indice - 1
+            break
         except Exception as exc:  # noqa: BLE001 - cualquier falla de red/central
             row.sync_status = SyncStatus.ERROR
             row.server_response = {"error": str(exc)}
@@ -250,9 +295,13 @@ async def procesar_pendientes(
         db.add(row)
 
     await db.commit()
-    return {
+    resultado = {
         "procesados": len(candidatos),
         "enviados": enviados,
         "fallidos": fallidos,
         "en_backoff": en_backoff,
     }
+    if central_inalcanzable:
+        resultado["central_inalcanzable"] = True
+        resultado["omitidos"] = omitidos
+    return resultado

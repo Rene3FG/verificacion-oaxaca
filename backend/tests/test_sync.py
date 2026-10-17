@@ -1,6 +1,7 @@
 import datetime
 import uuid
 
+import httpx
 from sqlalchemy import select
 
 from app.models.enums import StationType, SyncStatus
@@ -366,3 +367,121 @@ async def test_sync_auto_bucle_sobrevive_a_una_vuelta_fallida(monkeypatch):
     await asyncio.sleep(0.15)
     tarea.cancel()
     assert len(llamadas) >= 2
+
+
+async def test_procesar_pendientes_forzar_ignora_el_backoff(db_session):
+    outbox = await _encolar(db_session)
+    await db_session.commit()
+
+    async def _enviar_falla(row: SyncOutbox) -> dict:
+        raise RuntimeError("central no disponible")
+
+    async def _enviar_exitoso(row: SyncOutbox) -> dict:
+        return {"ok": True}
+
+    ahora = datetime.datetime.now(datetime.timezone.utc)
+    await procesar_pendientes(db_session, enviar=_enviar_falla, ahora=ahora)
+
+    # Un segundo después seguiría en backoff (5 s): sin forzar no se envía...
+    en_espera = await procesar_pendientes(
+        db_session,
+        enviar=_enviar_exitoso,
+        ahora=ahora + datetime.timedelta(seconds=1),
+    )
+    assert en_espera == {"procesados": 1, "enviados": 0, "fallidos": 0, "en_backoff": 1}
+
+    # ...y con forzar (acción explícita del supervisor) sí.
+    forzado = await procesar_pendientes(
+        db_session,
+        enviar=_enviar_exitoso,
+        ahora=ahora + datetime.timedelta(seconds=1),
+        forzar=True,
+    )
+    assert forzado == {"procesados": 1, "enviados": 1, "fallidos": 0, "en_backoff": 0}
+    await db_session.refresh(outbox)
+    assert outbox.sync_status == SyncStatus.SYNCED
+
+
+async def test_central_inalcanzable_corta_el_lote_sin_gastar_intentos_de_las_demas(
+    db_session,
+):
+    for _ in range(3):
+        await _encolar(db_session)
+    await db_session.commit()
+
+    llamadas = []
+
+    async def _sin_internet(row: SyncOutbox) -> dict:
+        llamadas.append(row.id)
+        raise httpx.ConnectError("sin internet")
+
+    resultado = await procesar_pendientes(db_session, enviar=_sin_internet)
+
+    assert len(llamadas) == 1
+    assert resultado["fallidos"] == 1
+    assert resultado["enviados"] == 0
+    assert resultado["central_inalcanzable"] is True
+    assert resultado["omitidos"] == 2
+
+    intactas = (
+        await db_session.execute(
+            select(SyncOutbox).where(
+                SyncOutbox.sync_status == SyncStatus.PENDING, SyncOutbox.attempts == 0
+            )
+        )
+    ).scalars().all()
+    assert len(intactas) == 2
+
+
+async def test_error_http_del_central_no_corta_el_lote(db_session):
+    """Si el central contesta con un error (4xx/5xx) el problema es de esa
+    fila, no de la conexión: las demás se siguen intentando."""
+
+    for _ in range(3):
+        await _encolar(db_session)
+    await db_session.commit()
+
+    primera = True
+
+    async def _enviar(row: SyncOutbox) -> dict:
+        nonlocal primera
+        if primera:
+            primera = False
+            raise httpx.HTTPStatusError(
+                "422",
+                request=httpx.Request("POST", "http://central"),
+                response=httpx.Response(422),
+            )
+        return {"ok": True}
+
+    resultado = await procesar_pendientes(db_session, enviar=_enviar)
+
+    assert resultado == {"procesados": 3, "enviados": 2, "fallidos": 1, "en_backoff": 0}
+
+
+async def test_procesar_endpoint_forzar_reintenta_filas_en_backoff(
+    client, db_session, monkeypatch
+):
+    sesion = await crear_sesion_supervisor(db_session)
+    outbox = await _encolar(
+        db_session,
+        sync_status=SyncStatus.ERROR,
+        attempts=1,
+        last_attempt_at=datetime.datetime.now(datetime.timezone.utc),
+    )
+    await db_session.commit()
+
+    async def _fake(row: SyncOutbox) -> dict:
+        return {"ok": True}
+
+    monkeypatch.setattr("app.api.routers.sync._enviar_a_central", _fake)
+    headers = {"X-Session-Id": str(sesion.id)}
+
+    normal = await client.post("/api/sync/procesar", headers=headers)
+    assert normal.json() == {"procesados": 1, "enviados": 0, "fallidos": 0, "en_backoff": 1}
+
+    forzado = await client.post("/api/sync/procesar?forzar=true", headers=headers)
+    assert forzado.json() == {"procesados": 1, "enviados": 1, "fallidos": 0, "en_backoff": 0}
+
+    await db_session.refresh(outbox)
+    assert outbox.sync_status == SyncStatus.SYNCED

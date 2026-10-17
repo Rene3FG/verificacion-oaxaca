@@ -29,6 +29,7 @@ async def _enviar_a_central(row: SyncOutbox) -> dict:
 
 @router.post("/procesar")
 async def procesar(
+    forzar: bool = False,
     session: SessionContext = Depends(requiere_supervisor),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -38,7 +39,9 @@ async def procesar(
     en vez de un worker en segundo plano. `requiere_supervisor` porque es
     una operación de centro, no de una estación física particular."""
 
-    return await procesar_pendientes(db, enviar=_enviar_a_central)
+    # `forzar=true`: acción explícita del supervisor, ignora el backoff de las
+    # filas en espera (tras una caída larga el backoff llega a 1 h por fila).
+    return await procesar_pendientes(db, enviar=_enviar_a_central, forzar=forzar)
 
 
 @router.get("/estado")

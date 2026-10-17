@@ -276,7 +276,9 @@ async function sincronizarAhora() {
   error.value = null;
   resultadoSync.value = null;
   try {
-    const { data } = await api.post("/sync/procesar");
+    // forzar: el botón es una acción explícita; sin esto, tras una caída larga
+    // el backoff (hasta 1 h por fila) dejaba al botón sin enviar nada.
+    const { data } = await api.post("/sync/procesar", null, { params: { forzar: true } });
     resultadoSync.value = data;
     await cargarEstadoSync();
   } catch (err) {
@@ -904,6 +906,11 @@ onMounted(() => {
                 {{ resultadoSync.fallidos }} fallidos,
                 {{ resultadoSync.en_backoff }} en espera de reintento
                 (de {{ resultadoSync.procesados }} procesados).
+              </p>
+              <p v-if="resultadoSync?.central_inalcanzable" class="text-body-2 text-error">
+                No se pudo contactar al central: se detuvo el envío y quedan
+                {{ resultadoSync.omitidos }} registros por intentar. Revisa la conexión a
+                internet y vuelve a intentar.
               </p>
               <p v-if="resultadoSync?.fallidos > 0" class="text-caption text-medium-emphasis">
                 No hay un central real definido todavía — los fallos son esperados hasta que

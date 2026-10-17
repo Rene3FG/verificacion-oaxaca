@@ -2784,3 +2784,33 @@ HU) y el operador que creó el expediente en vez del usuario de la sesión que l
 El backoff por fila lo sigue dando `procesar_pendientes`. Sin Celery. Con varios workers de
 uvicorn habría un bucle por proceso (el envío ya es idempotente por `Idempotency-Key`);
 correr con un solo worker o aceptar el envío duplicado inofensivo.
+
+## Resiliencia de SIOX y sincronización offline (2026-10-16)
+
+Auditoría de la "Opción 2" (degradación de SIOX en Captura y cola offline), con cuatro hallazgos
+corregidos. 365 pruebas (355 → 365); `npx vite build` limpio.
+
+- **Carrera SIOX vs. captura manual** (`siox.py`): la consulta validaba el estado *antes* de llamar a
+  SIOX (timeout 15 s) y no lo revisaba después, así que una captura manual hecha mientras SIOX tardaba
+  era pisada al llegar la respuesta (reproducido con dos sesiones de BD reales: terminaba en
+  `DATOS_SIOX_IMPORTADOS` con la marca de SIOX). Ahora, tras la llamada, se relee el expediente con
+  `FOR UPDATE` y se revalida: si ya no es consultable, la respuesta se guarda como evidencia
+  (`siox_consultas`, evento `siox_respuesta_descartada`) y se responde 409 sin importar nada.
+  `captura-manual` valida estado antes de tocar el vehículo (antes: 500 con datos ya escritos) y también
+  bloquea la fila. `CapturaView.vue`: "Consultar" y "Captura manual" se deshabilitan entre sí mientras
+  una está en curso, y un 409 recarga el expediente.
+- **Respuesta inesperada de SIOX**: un 200 sin datos y sin el aviso "No existe un vehiculo…"
+  (mantenimiento, captcha, cambio de formato) ahora es `ERROR`, no `SIN_DATOS`.
+- **`POST /api/sync/procesar?forzar=true`**: ignora el backoff. El botón "Sincronizar ahora" lo usa;
+  tras ~145 min de caída cada fila queda a 1 h del siguiente intento y el botón no enviaba nada. El
+  bucle automático sigue respetando el backoff.
+- **Corte del lote si el central no responde**: ante `httpx.TransportError` se detiene el lote (antes
+  hasta 50 × 10 s con la transacción abierta); las filas restantes no gastan intentos. La respuesta añade
+  `central_inalcanzable` y `omitidos` solo en ese caso. Un 4xx/5xx del central no corta el lote.
+- **`FOR UPDATE SKIP LOCKED`** sobre las filas a enviar: el bucle automático y el botón manual no se
+  pisan. Verificado con dos corridas concurrentes reales (cada fila se envió una vez).
+
+**Pendiente (sin tocar)**: un snapshot viejo reintentado después de uno nuevo podría sobrescribir el
+estado en el central si éste aplica "última llegada gana"; el contrato del central debe resolver por
+`created_at` del cuerpo. La fila `SYNCING` nunca es visible (se commitea al final del lote), así que el
+contador `sincronizando` del Top App Bar siempre marca 0.
