@@ -1,8 +1,11 @@
 """Pestaña 'Errores y reintentos' (auditoría de Sebastián 2026-10-12, Figma
 #66:2950): incidencias abiertas del centro, derivadas del estado real."""
 
+from sqlalchemy import func, select
+
 from app.models.enums import EstadoVerificacion, StationType, SyncStatus
 from app.models.event_log import EventLog
+from app.models.print_attempt import PrintAttempt
 from app.models.print_job import PrintJob
 from app.models.sync_outbox import SyncOutbox
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa, crear_sesion_supervisor
@@ -137,3 +140,110 @@ async def test_incidencia_se_cierra_al_salir_del_estado_de_error(client, db_sess
     await db_session.commit()
 
     assert (await client.get(URL, headers=h)).json() == []
+
+
+def _ids(resp):
+    return {i["expediente_id"] for i in resp.json()}
+
+
+async def _fallida_lista_para_reintentar(db_session, *, intentos_previos=2):
+    """IMPRESION_FALLIDA con PrintJob y N PrintAttempt fallidos reales
+    (intentos se recalcula por conteo de filas, no por el campo)."""
+    exp = await _impresion_fallida(db_session)
+    exp.certificado_tipo = "PARTICULAR"
+    job = (
+        await db_session.execute(select(PrintJob).where(PrintJob.verificacion_id == exp.id))
+    ).scalar_one()
+    for _ in range(intentos_previos):
+        db_session.add(
+            PrintAttempt(print_job_id=job.id, verificacion_id=exp.id, exitoso=False, error_message="fallo")
+        )
+    await db_session.commit()
+    return exp
+
+
+async def test_reintento_secuencial_de_dos_supervisores_imprime_una_sola_vez(
+    client, db_session, monkeypatch
+):
+    """El segundo supervisor llega con el expediente ya IMPRESO: 409 y sin
+    segundo PrintAttempt. (Con la sesión única de la fixture no hay
+    concurrencia real; la serialización la da el FOR UPDATE.)"""
+    sup1 = await crear_sesion_supervisor(db_session, station_type=StationType.IMPRESION)
+    sup2 = await crear_sesion_supervisor(db_session, station_type=StationType.IMPRESION)
+    exp = await _fallida_lista_para_reintentar(db_session)
+
+    async def _ok(pdf_bytes: bytes) -> bool:
+        return True
+
+    monkeypatch.setattr("app.api.routers.impresion.imprimir_en_impresora", _ok)
+
+    r1 = await client.post(f"/api/impresion/imprimir/{exp.id}", headers={"X-Session-Id": str(sup1.id)})
+    r2 = await client.post(f"/api/impresion/imprimir/{exp.id}", headers={"X-Session-Id": str(sup2.id)})
+
+    assert r1.status_code == 200
+    assert r1.json()["estado_expediente"] == EstadoVerificacion.IMPRESO.value
+    assert r2.status_code == 409
+    total = (
+        await db_session.execute(
+            select(func.count()).select_from(PrintAttempt).where(PrintAttempt.verificacion_id == exp.id)
+        )
+    ).scalar_one()
+    assert total == 3  # 2 previos + 1 exitoso, ninguno duplicado
+
+    sup = await crear_sesion_supervisor(db_session)
+    inc = await client.get(URL, headers={"X-Session-Id": str(sup.id)})
+    assert str(exp.id) not in _ids(inc)
+
+
+async def test_reintento_fallido_incrementa_intentos_y_la_incidencia_sigue_abierta(
+    client, db_session, monkeypatch
+):
+    sup = await crear_sesion_supervisor(db_session, station_type=StationType.IMPRESION)
+    exp = await _fallida_lista_para_reintentar(db_session)
+
+    async def _falla(pdf_bytes: bytes) -> bool:
+        return False
+
+    monkeypatch.setattr("app.api.routers.impresion.imprimir_en_impresora", _falla)
+
+    r = await client.post(f"/api/impresion/imprimir/{exp.id}", headers={"X-Session-Id": str(sup.id)})
+    assert r.status_code == 200
+    assert r.json()["estado_expediente"] == EstadoVerificacion.IMPRESION_FALLIDA.value
+    assert r.json()["intentos"] == 3
+
+    inc = await client.get(URL, headers={"X-Session-Id": str(sup.id)})
+    fila = next(i for i in inc.json() if i["expediente_id"] == str(exp.id))
+    assert fila["intentos"] == 3
+    assert fila["accion"] == "REINTENTAR_IMPRESION"
+
+
+async def test_folio_error_se_cierra_al_registrar_lote_y_solicitar(client, db_session):
+    sup = await crear_sesion_supervisor(db_session, station_type=StationType.IMPRESION)
+    exp = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.FOLIO_ERROR
+    )
+    exp.certificado_tipo = "PARTICULAR"
+    await db_session.commit()
+    h = {"X-Session-Id": str(sup.id)}
+
+    antes = await client.get(URL, headers=h)
+    assert str(exp.id) in _ids(antes)
+
+    lote = await client.post(
+        "/api/folios/lotes",
+        params={"tipo_certificado": "PARTICULAR", "folio_inicio": "INC-900001", "folio_fin": "INC-900002"},
+        headers=h,
+    )
+    assert lote.status_code == 200
+    # Registrar el lote solo no cierra la incidencia: el expediente sigue en FOLIO_ERROR.
+    medio = await client.get(URL, headers=h)
+    assert str(exp.id) in _ids(medio)
+
+    sol = await client.post(
+        f"/api/folios/solicitar/{exp.id}", params={"tipo_certificado": "PARTICULAR"}, headers=h
+    )
+    assert sol.status_code == 200
+    assert sol.json()["estado_expediente"] == EstadoVerificacion.FOLIO_ASIGNADO.value
+
+    despues = await client.get(URL, headers=h)
+    assert str(exp.id) not in _ids(despues)
