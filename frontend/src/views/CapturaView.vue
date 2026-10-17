@@ -242,6 +242,11 @@ async function consultarSiox() {
     await abrirExpediente(expediente.value.id);
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudo consultar SIOX.";
+    // 409: el expediente avanzó mientras SIOX respondía (p. ej. otra estación
+    // capturó a mano); se recarga para mostrar el estado real y el historial.
+    if (err.response?.status === 409) {
+      await abrirExpediente(expediente.value.id);
+    }
   } finally {
     consultandoSiox.value = false;
   }
@@ -404,7 +409,7 @@ onMounted(cargarExpedientesEnCurso);
           <div class="d-flex ga-3 flex-wrap mb-4">
             <v-btn
               color="primary"
-              :disabled="!puedeConsultarSiox"
+              :disabled="!puedeConsultarSiox || guardandoVehiculo"
               :loading="consultandoSiox"
               @click="consultarSiox"
             >
@@ -412,7 +417,7 @@ onMounted(cargarExpedientesEnCurso);
             </v-btn>
             <v-btn
               variant="outlined"
-              :disabled="!puedeConsultarSiox"
+              :disabled="!puedeConsultarSiox || consultandoSiox"
               :loading="guardandoVehiculo"
               @click="capturaManual"
             >

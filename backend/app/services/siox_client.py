@@ -41,6 +41,10 @@ class SioxConsultaResultado:
         self.normalized = normalized
 
 
+def _vehiculo_no_existe(html: str) -> bool:
+    return NOT_FOUND_TEXT in BeautifulSoup(html, "html.parser").get_text()
+
+
 def _parse_respuesta(html: str) -> dict[str, str] | None:
     soup = BeautifulSoup(html, "html.parser")
     if NOT_FOUND_TEXT in soup.get_text():
@@ -85,8 +89,16 @@ async def consultar_placa(placa: str) -> SioxConsultaResultado:
 
     datos = _parse_respuesta(response.text)
     if datos is None:
+        if _vehiculo_no_existe(response.text):
+            return SioxConsultaResultado(
+                status="SIN_DATOS", raw={"html": response.text}, normalized=None
+            )
+        # 200 pero sin datos ni el aviso de "no existe" (mantenimiento,
+        # captcha, cambio de formato del portal): no prueba que el vehículo no
+        # exista, así que es una falla de SIOX, no "sin datos". Se conserva el
+        # HTML como evidencia.
         return SioxConsultaResultado(
-            status="SIN_DATOS", raw={"html": response.text}, normalized=None
+            status="ERROR", raw={"html": response.text}, normalized=None
         )
 
     return SioxConsultaResultado(

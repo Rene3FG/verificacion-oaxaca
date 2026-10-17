@@ -1,5 +1,7 @@
 import datetime
 
+from sqlalchemy import func, select
+
 from app.models.enums import EstadoVerificacion, FuenteDatos, StationType
 from app.models.event_log import EventLog
 from app.models.integration_log import IntegrationLog
@@ -419,3 +421,71 @@ async def test_consultar_con_expediente_ya_normalizado_responde_409_sin_llamar_a
 
     assert resp.status_code == 409
     assert llamadas == []
+
+
+async def test_captura_manual_durante_consulta_siox_no_pisa_datos_ni_estado(
+    client, db_session, monkeypatch
+):
+    """Con SIOX lento el operador puede capturar a mano mientras la consulta
+    sigue en vuelo. Al responder SIOX no debe pisar lo tecleado ni regresar el
+    estado; la respuesta tardía se conserva como evidencia y se avisa (409)."""
+
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(db_session, linea_id=1)
+    await db_session.commit()
+    headers = {"X-Session-Id": str(sesion.id)}
+
+    async def _siox_lento(placa: str) -> SioxConsultaResultado:
+        manual = await client.post(
+            f"/api/siox/captura-manual/{expediente.id}",
+            json={"marca": "MANUAL"},
+            headers=headers,
+        )
+        assert manual.status_code == 200
+        return SioxConsultaResultado(
+            status="EXITOSA",
+            raw={"html": "<div/>"},
+            normalized={"placa": placa, "marca": "SIOX", "modelo": 2023},
+        )
+
+    monkeypatch.setattr("app.api.routers.siox.consultar_placa", _siox_lento)
+
+    resp = await client.post(f"/api/siox/consultar/{expediente.id}", headers=headers)
+
+    assert resp.status_code == 409
+    await db_session.refresh(expediente)
+    assert expediente.estado == EstadoVerificacion.DATOS_CAPTURADOS_MANUALMENTE
+    vehiculo = await db_session.get(Vehiculo, expediente.vehiculo_id)
+    await db_session.refresh(vehiculo)
+    assert vehiculo.marca == "MANUAL"
+    assert vehiculo.fuente_datos != FuenteDatos.SIOX
+    consultas = (
+        await db_session.execute(
+            select(func.count())
+            .select_from(SioxConsulta)
+            .where(SioxConsulta.verificacion_id == expediente.id)
+        )
+    ).scalar_one()
+    assert consultas == 1
+
+
+async def test_captura_manual_fuera_de_estado_responde_409_sin_tocar_el_vehiculo(
+    client, db_session
+):
+    sesion = await _sesion_captura(db_session)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.DATOS_SIOX_IMPORTADOS
+    )
+    vehiculo = await db_session.get(Vehiculo, expediente.vehiculo_id)
+    marca_original = vehiculo.marca
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/siox/captura-manual/{expediente.id}",
+        json={"marca": "OTRA"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+
+    assert resp.status_code == 409
+    await db_session.refresh(vehiculo)
+    assert vehiculo.marca == marca_original

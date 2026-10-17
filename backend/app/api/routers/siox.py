@@ -41,6 +41,44 @@ ESTADOS_CONSULTABLES_SIOX = {
     EstadoVerificacion.DATOS_SIOX_CONSULTADOS,
 }
 
+# La captura manual solo es transición válida desde los mismos estados
+# (ver state_machine.ALLOWED_TRANSITIONS).
+ESTADOS_CAPTURA_MANUAL = ESTADOS_CONSULTABLES_SIOX
+
+
+def _evidencia_consulta(
+    db: AsyncSession, verificacion: Verificacion, resultado, user_id: uuid.UUID | None
+) -> None:
+    """Guarda la evidencia de una consulta SIOX (siox_consultas + bitácora
+    técnica), haya o no podido usarse su respuesta."""
+
+    db.add(
+        SioxConsulta(
+            verificacion_id=verificacion.id,
+            placa=verificacion.placa,
+            url_consulta=settings.siox_base_url,
+            request_payload={"placa": verificacion.placa},
+            response_raw=resultado.raw,
+            response_normalized=resultado.normalized,
+            status=STATUS_MAP[resultado.status],
+            consultado_por=user_id,
+        )
+    )
+    db.add(
+        IntegrationLog(
+            verificacion_id=verificacion.id,
+            integration_name="SIOX",
+            direction=IntegrationDirection.RESPONSE,
+            payload=resultado.raw,
+            status=IntegrationStatus.OK
+            if resultado.status != "ERROR"
+            else IntegrationStatus.ERROR,
+            error_message=None
+            if resultado.status != "ERROR"
+            else "SIOX no respondió o devolvió una respuesta inesperada",
+        )
+    )
+
 
 @router.post("/consultar/{expediente_id}")
 async def consultar_siox(
@@ -63,6 +101,48 @@ async def consultar_siox(
             detail=f"No se puede consultar SIOX con el expediente en estado {verificacion.estado}.",
         )
 
+    resultado = await consultar_placa(verificacion.placa)
+
+    # La llamada a SIOX puede tardar segundos (timeout 15 s) y el operador
+    # puede avanzar el expediente mientras tanto (captura manual, otra
+    # estación). El estado leído arriba ya no es de fiar: se relee con
+    # bloqueo de fila y se valida otra vez antes de importar nada.
+    verificacion = (
+        await db.execute(
+            select(Verificacion)
+            .where(Verificacion.id == expediente_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+
+    if verificacion.estado not in ESTADOS_CONSULTABLES_SIOX:
+        # La respuesta tardía se conserva como evidencia, pero no se importa
+        # ni se transiciona: pisaría lo que el operador ya capturó.
+        _evidencia_consulta(db, verificacion, resultado, session.user_id)
+        await registrar_evento_con_sync(
+            db,
+            EventLog(
+                verificacion_id=verificacion.id,
+                evento="siox_respuesta_descartada",
+                estado_anterior=verificacion.estado,
+                estado_nuevo=verificacion.estado,
+                usuario_id=session.user_id,
+                modulo="captura",
+                detalle_json={"status": resultado.status},
+            ),
+            verificacion=verificacion,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"El expediente pasó a {verificacion.estado.value} mientras se "
+                "consultaba SIOX. La respuesta se guardó en el historial, pero "
+                "no se importó para no pisar los datos ya capturados."
+            ),
+        )
+
     consultas_previas = (
         await db.execute(
             select(func.count())
@@ -71,8 +151,6 @@ async def consultar_siox(
         )
     ).scalar_one()
     intento = consultas_previas + 1
-
-    resultado = await consultar_placa(verificacion.placa)
 
     # HU-014: la transición a DATOS_SIOX_CONSULTADOS solo ocurre en el primer
     # intento (estado CREADO); un reintento no vuelve a transicionar pero
@@ -92,30 +170,7 @@ async def consultar_siox(
         verificacion=verificacion,
     )
 
-    db.add(
-        SioxConsulta(
-            verificacion_id=verificacion.id,
-            placa=verificacion.placa,
-            url_consulta=settings.siox_base_url,
-            request_payload={"placa": verificacion.placa},
-            response_raw=resultado.raw,
-            response_normalized=resultado.normalized,
-            status=STATUS_MAP[resultado.status],
-            consultado_por=session.user_id,
-        )
-    )
-    db.add(
-        IntegrationLog(
-            verificacion_id=verificacion.id,
-            integration_name="SIOX",
-            direction=IntegrationDirection.RESPONSE,
-            payload=resultado.raw,
-            status=IntegrationStatus.OK
-            if resultado.status != "ERROR"
-            else IntegrationStatus.ERROR,
-            error_message=None if resultado.status != "ERROR" else "SIOX no respondió",
-        )
-    )
+    _evidencia_consulta(db, verificacion, resultado, session.user_id)
 
     if verificacion.estado == EstadoVerificacion.CREADO:
         await state_machine.transition(
@@ -197,10 +252,25 @@ async def captura_manual(
     campos del vehículo en el mismo payload, reutilizando la lógica de
     HU-016 (app.services.vehiculo) en vez de solo cambiar el estado."""
 
-    verificacion = await db.get(Verificacion, expediente_id)
+    verificacion = (
+        await db.execute(
+            select(Verificacion).where(Verificacion.id == expediente_id).with_for_update()
+        )
+    ).scalar_one_or_none()
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
+
+    # Antes de tocar el vehículo: fuera de estos estados la transición no es
+    # válida y el payload no debe aplicarse (antes: 500 con datos ya escritos).
+    if verificacion.estado not in ESTADOS_CAPTURA_MANUAL:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No se puede capturar manualmente con el expediente en estado "
+                f"{verificacion.estado.value}."
+            ),
+        )
 
     if payload is not None:
         vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)

@@ -1,4 +1,7 @@
-from app.services.siox_client import _normalizar, _parse_respuesta
+import httpx
+
+from app.services import siox_client
+from app.services.siox_client import _normalizar, _parse_respuesta, consultar_placa
 
 # Fragmentos reconstruidos a partir del HTML real devuelto por
 # https://siox.finanzasoaxaca.gob.mx/pagoTenencia/busquedaVehiculo.htm
@@ -110,3 +113,59 @@ def test_normalizar_con_modelo_ausente_no_falla():
 
     assert normalizado["modelo"] is None
     assert normalizado["placa"] == "THJ389B"
+
+
+def _simular_siox(monkeypatch, handler):
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        siox_client.httpx,
+        "AsyncClient",
+        lambda **kw: real(transport=httpx.MockTransport(handler), **kw),
+    )
+
+
+async def test_consultar_placa_pagina_inesperada_es_error_no_sin_datos(monkeypatch):
+    """Un 200 que no es ni el bloque de datos ni el aviso de 'no existe'
+    (mantenimiento, captcha, cambio de formato) no prueba que el vehículo no
+    exista: se clasifica ERROR y se guarda el HTML como evidencia."""
+
+    _simular_siox(
+        monkeypatch,
+        lambda req: httpx.Response(200, text="<html><body>Sitio en mantenimiento</body></html>"),
+    )
+
+    resultado = await consultar_placa("THJ389B")
+
+    assert resultado.status == "ERROR"
+    assert resultado.normalized is None
+    assert "mantenimiento" in resultado.raw["html"]
+
+
+async def test_consultar_placa_vehiculo_inexistente_sigue_siendo_sin_datos(monkeypatch):
+    _simular_siox(monkeypatch, lambda req: httpx.Response(200, text=NO_ENCONTRADO_HTML))
+
+    resultado = await consultar_placa("XXX000")
+
+    assert resultado.status == "SIN_DATOS"
+    assert resultado.normalized is None
+
+
+async def test_consultar_placa_encontrado_es_exitosa(monkeypatch):
+    _simular_siox(monkeypatch, lambda req: httpx.Response(200, text=ENCONTRADO_HTML))
+
+    resultado = await consultar_placa("THJ389B")
+
+    assert resultado.status == "EXITOSA"
+    assert resultado.normalized["niv"] == "3N1CN8AE1PL835483"
+
+
+async def test_consultar_placa_error_de_red_es_error(monkeypatch):
+    def _handler(req):
+        raise httpx.ConnectError("sin internet", request=req)
+
+    _simular_siox(monkeypatch, _handler)
+
+    resultado = await consultar_placa("THJ389B")
+
+    assert resultado.status == "ERROR"
+    assert resultado.raw is None
