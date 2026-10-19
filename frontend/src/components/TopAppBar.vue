@@ -44,17 +44,26 @@ const fechaHora = computed(() =>
 
 function colorConexion(conexion, enError) {
   if (conexion === "en_linea") return "success";
+  if (conexion === "sin_internet") return "warning";
   if (conexion === "sincronizando") return "warning";
   if (conexion === "pendientes") return enError > 0 ? "error" : "grey";
   return "grey";
 }
 
+function textoPendientes(n) {
+  return n === 1 ? "1 pendiente" : `${n} pendientes`;
+}
+
 function textoConexion(conexion, estadoSync) {
   if (conexion === "en_linea") return "Todo sincronizado";
   if (conexion === "sincronizando") return "Sincronizando…";
+  if (conexion === "sin_internet") {
+    const { pendientes } = estadoSync;
+    return pendientes > 0 ? `Operando sin internet · ${textoPendientes(pendientes)}` : "Operando sin internet";
+  }
   if (conexion === "pendientes") {
     const { pendientes, en_error: enError } = estadoSync;
-    return enError > 0 ? `${pendientes} pendientes (${enError} con error)` : `${pendientes} pendientes`;
+    return enError > 0 ? `${textoPendientes(pendientes)} (${enError} con error)` : textoPendientes(pendientes);
   }
   return "—";
 }
@@ -85,6 +94,7 @@ function textoConexion(conexion, estadoSync) {
       class="mr-2 rounded-institucional-full"
       variant="flat"
       :color="colorConexion(session.conexion, session.estadoSync?.en_error)"
+      :prepend-icon="session.conexion === 'sin_internet' ? 'mdi-wifi-off' : undefined"
     >
       {{ textoConexion(session.conexion, session.estadoSync) }}
     </v-chip>

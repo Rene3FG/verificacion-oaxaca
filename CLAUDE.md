@@ -2881,3 +2881,13 @@ detalla).
     de `resultados_obd_sbd` y después tiraba `TransitionNotAllowed` (500). Ahora 409 antes de escribir, con
     bloqueo de fila. Se quitó la rama de motivo "inspección no aprobada", ya inalcanzable.
 - 439 pruebas. `npx vite build` limpio.
+
+## HU-104: indicador "Operando sin internet" (2026-10-19, 3ª parte)
+
+`GET /api/sync/estado` agrega `central`: `SIN_CONFIGURAR` (sin `CENTRAL_SYNC_URL`) | `DESCONOCIDO` (nunca se
+intentó) | `EN_LINEA` | `SIN_CONEXION`. Se deriva de la BD (`app.services.sync.estado_conexion_central`), no de
+memoria: las filas del último lote comparten `last_attempt_at`, y si alguna falló por `httpx.TransportError`
+(ahora `server_response.sin_conexion = true`) el central no respondió; un 4xx/5xx cuenta como en línea. Vale con
+varios workers y tras reiniciar. El Top App Bar muestra "Operando sin internet · N pendientes" (warning, ícono
+`mdi-wifi-off`) con prioridad sobre "N pendientes"; se corrigió el singular ("1 pendiente"). Verificado en Chrome
+con `CENTRAL_SYNC_URL=http://127.0.0.1:9/sync` y el bucle automático (fila de QA borrada después). 440 pruebas.

@@ -194,11 +194,14 @@ async def test_procesar_endpoint_envia_pendientes(client, db_session, monkeypatc
     assert outbox.sync_status == SyncStatus.SYNCED
 
 
-async def test_estado_no_requiere_supervisor(client, db_session):
+async def test_estado_no_requiere_supervisor(client, db_session, monkeypatch):
     """A diferencia de /procesar, /estado es de solo lectura: cualquier
     estación con sesión activa debe poder consultarlo (lo usa el Top App
     Bar en toda vista, no solo en Supervisor)."""
 
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "central_sync_url", "")
     estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA)
     sesion = await crear_sesion_activa(db_session, estacion=estacion)
     await db_session.commit()
@@ -212,6 +215,7 @@ async def test_estado_no_requiere_supervisor(client, db_session):
         "en_error": 0,
         "sincronizados": 0,
         "pendiente_mas_antiguo": None,
+        "central": "SIN_CONFIGURAR",
     }
 
 
@@ -485,3 +489,39 @@ async def test_procesar_endpoint_forzar_reintenta_filas_en_backoff(
 
     await db_session.refresh(outbox)
     assert outbox.sync_status == SyncStatus.SYNCED
+
+
+async def test_estado_distingue_operando_sin_internet(client, db_session, monkeypatch):
+    """HU-104: tras un lote cortado por falta de conexión el estado es
+    SIN_CONEXION; el siguiente lote que llega al central lo regresa a
+    EN_LINEA. Sin central configurado, SIN_CONFIGURAR."""
+
+    from app.core.config import settings
+
+    estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA)
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    h = {"X-Session-Id": str(sesion.id)}
+    await _encolar(db_session)
+    await db_session.commit()
+
+    monkeypatch.setattr(settings, "central_sync_url", "")
+    assert (await client.get("/api/sync/estado", headers=h)).json()["central"] == "SIN_CONFIGURAR"
+
+    monkeypatch.setattr(settings, "central_sync_url", "http://central.test")
+
+    async def _sin_internet(row):
+        raise httpx.ConnectError("sin internet")
+
+    await procesar_pendientes(db_session, enviar=_sin_internet)
+    assert (await client.get("/api/sync/estado", headers=h)).json()["central"] == "SIN_CONEXION"
+
+    async def _ok(row):
+        return {"ok": True}
+
+    await procesar_pendientes(
+        db_session,
+        enviar=_ok,
+        forzar=True,
+        ahora=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=1),
+    )
+    assert (await client.get("/api/sync/estado", headers=h)).json()["central"] == "EN_LINEA"

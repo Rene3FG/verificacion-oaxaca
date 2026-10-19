@@ -14,7 +14,7 @@ from app.api.deps import (
 from app.models.enums import SyncStatus
 from app.models.sync_outbox import SyncOutbox
 from app.models.verificacion import Verificacion
-from app.services.sync import enviar_uno_a_central, procesar_pendientes
+from app.services.sync import enviar_uno_a_central, estado_conexion_central, procesar_pendientes
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
@@ -81,6 +81,7 @@ async def estado(
         "en_error": conteos[SyncStatus.ERROR.value],
         "sincronizados": conteos[SyncStatus.SYNCED.value],
         "pendiente_mas_antiguo": mas_antiguo.isoformat() if mas_antiguo else None,
+        "central": await estado_conexion_central(db),
     }
 
 

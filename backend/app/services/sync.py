@@ -32,7 +32,7 @@ import uuid
 from typing import Awaitable, Callable
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -278,7 +278,8 @@ async def procesar_pendientes(
             respuesta = await enviar(row)
         except httpx.TransportError as exc:
             row.sync_status = SyncStatus.ERROR
-            row.server_response = {"error": str(exc) or type(exc).__name__}
+            # La marca la lee `estado_conexion_central` (HU-104).
+            row.server_response = {"error": str(exc) or type(exc).__name__, "sin_conexion": True}
             fallidos += 1
             db.add(row)
             central_inalcanzable = True
@@ -305,3 +306,30 @@ async def procesar_pendientes(
         resultado["central_inalcanzable"] = True
         resultado["omitidos"] = omitidos
     return resultado
+
+
+async def estado_conexion_central(db: AsyncSession) -> str:
+    """HU-104: "operando sin internet" frente a "pendientes". Se deriva del
+    último lote enviado (las filas de un lote comparten `last_attempt_at`):
+    si en él alguna falló por transporte, el central no respondió; si no,
+    respondió (aunque fuera con un error HTTP). Se lee de la BD, así que
+    vale con varios workers y tras reiniciar.
+
+    SIN_CONFIGURAR (sin `central_sync_url`) | DESCONOCIDO (nunca se intentó)
+    | EN_LINEA | SIN_CONEXION."""
+
+    if not settings.central_sync_url:
+        return "SIN_CONFIGURAR"
+    ultimo = (
+        await db.execute(
+            select(SyncOutbox.server_response).where(
+                SyncOutbox.last_attempt_at
+                == select(func.max(SyncOutbox.last_attempt_at)).scalar_subquery()
+            )
+        )
+    ).scalars().all()
+    if not ultimo:
+        return "DESCONOCIDO"
+    if any((r or {}).get("sin_conexion") for r in ultimo):
+        return "SIN_CONEXION"
+    return "EN_LINEA"

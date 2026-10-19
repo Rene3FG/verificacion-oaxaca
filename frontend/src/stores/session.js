@@ -33,10 +33,13 @@ export const useSessionStore = defineStore("session", {
     tieneSesionActiva: (state) => state.sesion !== null,
     puedeSupervisar: (state) => state.sesion?.can_supervise === true,
 
-    // "en_linea" | "sincronizando" | "pendientes" | "desconocido" — antes
-    // de la primera respuesta de /api/sync/estado no se sabe.
+    // "en_linea" | "sin_internet" | "sincronizando" | "pendientes" |
+    // "desconocido" — antes de la primera respuesta de /api/sync/estado no se
+    // sabe. "sin_internet" (HU-104): el último envío al central no tuvo
+    // conexión; se sigue operando y los registros esperan en la cola local.
     conexion: (state) => {
       if (state.estadoSync === null) return "desconocido";
+      if (state.estadoSync.central === "SIN_CONEXION") return "sin_internet";
       if (state.estadoSync.sincronizando > 0) return "sincronizando";
       if (state.estadoSync.pendientes > 0) return "pendientes";
       return "en_linea";
