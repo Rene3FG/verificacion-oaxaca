@@ -169,6 +169,11 @@ async def reasignar_linea(
             status_code=403,
             detail="No puedes reasignar expedientes de otro centro.",
         )
+    if verificacion.estado in ESTADOS_CON_CERTIFICADO_IMPRESO:
+        raise HTTPException(
+            status_code=409,
+            detail=f"No se puede reasignar un expediente en estado {verificacion.estado.value}.",
+        )
     if verificacion.resultado_final is not None:
         raise HTTPException(
             status_code=409,
@@ -233,6 +238,16 @@ async def reasignar_linea(
     return verificacion
 
 
+# HU-096: con el certificado ya impreso (o el expediente cancelado) los datos
+# que salieron en el papel quedan congelados.
+ESTADOS_CON_CERTIFICADO_IMPRESO = {
+    EstadoVerificacion.IMPRESO,
+    EstadoVerificacion.CERRADO_APROBADO,
+    EstadoVerificacion.CERRADO_RECHAZADO,
+    EstadoVerificacion.CANCELADO,
+}
+
+
 @router.patch("/{expediente_id}/vehiculo", response_model=VehiculoRead)
 async def actualizar_vehiculo(
     expediente_id: uuid.UUID,
@@ -250,13 +265,18 @@ async def actualizar_vehiculo(
     Abierto también a la estación de Prueba (decisión de producto
     2026-08-14): si Inspección Visual detecta un error en los datos del
     vehículo, el operador de Prueba debe poder corregirlo sin devolver el
-    expediente a Captura. Sin límite de estado explícito — se puede
-    corregir en cualquier punto mientras el expediente siga abierto."""
+    expediente a Captura. Se puede corregir en cualquier punto mientras el
+    expediente siga abierto y el certificado no se haya impreso (HU-096)."""
 
     verificacion = await db.get(Verificacion, expediente_id)
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
+    if verificacion.estado in ESTADOS_CON_CERTIFICADO_IMPRESO:
+        raise HTTPException(
+            status_code=409,
+            detail="El certificado ya se imprimió o el expediente está cerrado; los datos del vehículo ya no se pueden modificar.",
+        )
 
     vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
     await actualizar_datos_vehiculo(
@@ -279,14 +299,6 @@ class DatosCertificadoUpdate(BaseModel):
 
     folio_multa: str | None = Field(default=None, max_length=30)
     certificado_anterior: str | None = Field(default=None, max_length=30)
-
-
-ESTADOS_CON_CERTIFICADO_IMPRESO = {
-    EstadoVerificacion.IMPRESO,
-    EstadoVerificacion.CERRADO_APROBADO,
-    EstadoVerificacion.CERRADO_RECHAZADO,
-    EstadoVerificacion.CANCELADO,
-}
 
 
 @router.patch("/{expediente_id}/datos-certificado", response_model=ExpedienteRead)

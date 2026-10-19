@@ -88,3 +88,28 @@ class ExpedienteCompleto(ExpedienteRead):
         ):
             return "RECHAZO"
         return None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resultado_tecnico(self) -> str | None:
+        """HU-057 (filtro de la cola de Impresión): APROBADO,
+        RECHAZADO_PRUEBA o RECHAZADO_VISUAL. Inspección visual nunca llena
+        `resultado_final` (solo la prueba lo hace), así que un rechazo sin él
+        es visual. El estado no sirve para distinguirlos: los dos rechazos
+        comparten PENDIENTE_DE_IMPRESION_RECHAZO y luego avanzan por folio."""
+
+        if self.resultado_final == ResultadoFinal.APROBADO:
+            return "APROBADO"
+        if self.resultado_final == ResultadoFinal.RECHAZADO:
+            return "RECHAZADO_PRUEBA"
+        if (
+            self.estado
+            in (
+                EstadoVerificacion.INSPECCION_VISUAL_RECHAZADA,
+                EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO,
+                EstadoVerificacion.CERRADO_RECHAZADO,
+            )
+            or self.certificado_tipo == "RECHAZO"
+        ):
+            return "RECHAZADO_VISUAL"
+        return None

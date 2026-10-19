@@ -2859,3 +2859,25 @@ PARCIAL, pero ahora solo les falta el adaptador real del proveedor; contra el si
 `equipo_id` real en `ResultadoPrueba`, incidencias de equipo en "Errores y reintentos" (hoy un error se registra
 al interrumpir, no queda abierto como incidencia) y la calibración periódica como bloqueo (el contrato no la
 detalla).
+
+## Filtros de Impresión de Sebas + HU-057 en backend + HU-096 (2026-10-19, 2ª parte)
+
+- **Merge de `frontend-impresion-central`** (`cce893f`, Sebas: filtros HU-057 resultado técnico y HU-059
+  impresos). Su filtro "Rechazos visuales" usaba `estado === PENDIENTE_DE_IMPRESION_RECHAZO`, pero desde el
+  2026-08-26 ese estado también lo usan los rechazos **por prueba**, y un rechazo visual salía del filtro al
+  asignarle folio. Ahora `ExpedienteCompleto.resultado_tecnico` (campo calculado: APROBADO /
+  RECHAZADO_PRUEBA / RECHAZADO_VISUAL) lo decide el backend — inspección visual nunca llena
+  `resultado_final`, la prueba sí — y el filtro solo compara contra ese valor.
+- **HU-096 (expediente cerrado bloquea cambios)**: `tests/test_expediente_cerrado.py` recorre los 19
+  endpoints de modificación con `CERRADO_APROBADO` / `CERRADO_RECHAZADO` / `CANCELADO` y exige 409 sin cambio
+  de estado. Huecos encontrados y corregidos:
+  - `PATCH /expedientes/{id}/vehiculo` no tenía guardia de estado: un expediente cerrado aceptaba cambios de
+    datos ya impresos. Ahora 409 desde `IMPRESO` (mismo conjunto `ESTADOS_CON_CERTIFICADO_IMPRESO` que
+    `datos-certificado`). Matiza la decisión del 2026-08-14 ("en cualquier punto mientras siga abierto"):
+    con el papel impreso ya no se corrige por aquí.
+  - `reasignar-linea` no excluía `CANCELADO` → 409 en los mismos estados.
+  - **Bug**: `POST /obd/evaluar` no validaba estado. Desde cualquier estado que no fuera
+    `INSPECCION_VISUAL_APROBADA` (doble clic, expediente cerrado) escribía `combustible_validado` y otra fila
+    de `resultados_obd_sbd` y después tiraba `TransitionNotAllowed` (500). Ahora 409 antes de escribir, con
+    bloqueo de fila. Se quitó la rama de motivo "inspección no aprobada", ya inalcanzable.
+- 439 pruebas. `npx vite build` limpio.

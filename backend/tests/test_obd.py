@@ -268,3 +268,28 @@ async def test_evaluar_obd_explica_por_que_no_aplica(client, db_session):
     )
     assert resp.json()["aplica"] is False
     assert "diesel" in resp.json()["motivo"]
+
+
+async def test_evaluar_obd_dos_veces_responde_409_sin_duplicar_fila(client, db_session):
+    """Doble clic: la segunda evaluación (expediente ya en OBD_PENDIENTE)
+    antes tiraba TransitionNotAllowed (500) tras escribir otra fila de OBD."""
+
+    sesion = await _sesion_prueba(db_session)
+    expediente = await crear_expediente(
+        db_session,
+        linea_id=1,
+        estado=EstadoVerificacion.INSPECCION_VISUAL_APROBADA,
+        tipo_vehiculo="vehiculo",
+        combustible="gasolina",
+        modelo=2020,
+    )
+    await db_session.commit()
+    h = {"X-Session-Id": str(sesion.id)}
+
+    assert (await client.post(f"/api/obd/evaluar/{expediente.id}", headers=h)).status_code == 200
+    assert (await client.post(f"/api/obd/evaluar/{expediente.id}", headers=h)).status_code == 409
+
+    filas = (await db_session.execute(
+        select(ResultadoObdSbd).where(ResultadoObdSbd.verificacion_id == expediente.id)
+    )).scalars().all()
+    assert len(filas) == 1

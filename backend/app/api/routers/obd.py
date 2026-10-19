@@ -30,11 +30,24 @@ async def evaluar_obd(
         select(Verificacion)
         .options(selectinload(Verificacion.vehiculo))
         .where(Verificacion.id == expediente_id)
+        .with_for_update(of=Verificacion)
     )
     verificacion = result.scalar_one_or_none()
     if verificacion is None:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
+
+    # Solo desde inspección aprobada (única transición a OBD_PENDIENTE /
+    # OBD_NO_APLICA). Sin esta guardia, un doble clic o un expediente cerrado
+    # escribía la fila de OBD y luego tiraba TransitionNotAllowed (500).
+    if verificacion.estado != EstadoVerificacion.INSPECCION_VISUAL_APROBADA:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No se puede evaluar OBD/SBD: el expediente está en estado "
+                f"{verificacion.estado}, no INSPECCION_VISUAL_APROBADA."
+            ),
+        )
 
     vehiculo = verificacion.vehiculo
     if vehiculo.tipo_vehiculo is None or vehiculo.combustible is None or vehiculo.modelo is None:
@@ -45,8 +58,7 @@ async def evaluar_obd(
 
     aplica = await obd_aplica(
         db,
-        inspeccion_aprobada=verificacion.estado
-        == EstadoVerificacion.INSPECCION_VISUAL_APROBADA,
+        inspeccion_aprobada=True,
         tipo_vehiculo=vehiculo.tipo_vehiculo,
         combustible=vehiculo.combustible,
         modelo=vehiculo.modelo,
@@ -57,9 +69,7 @@ async def evaluar_obd(
     # HU-029: el motivo explica la decisión con las mismas 4 condiciones de
     # `obd_aplica` (regla #4), en el orden en que se evalúan.
     modelo_minimo = int(await get_parametro(db, "obd_modelo_minimo"))
-    if verificacion.estado != EstadoVerificacion.INSPECCION_VISUAL_APROBADA:
-        motivo = "La inspección visual no está aprobada."
-    elif vehiculo.tipo_vehiculo.lower() != "vehiculo":
+    if vehiculo.tipo_vehiculo.lower() != "vehiculo":
         motivo = f"El tipo de unidad ({vehiculo.tipo_vehiculo}) no es vehículo."
     elif vehiculo.combustible.lower() != "gasolina":
         motivo = f"El combustible ({vehiculo.combustible}) no es gasolina."

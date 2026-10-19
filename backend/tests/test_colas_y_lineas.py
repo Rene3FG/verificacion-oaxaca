@@ -1,4 +1,4 @@
-from app.models.enums import EstadoVerificacion, StationType
+from app.models.enums import EstadoVerificacion, ResultadoFinal, StationType
 from tests.conftest import crear_estacion, crear_expediente, crear_sesion_activa
 
 
@@ -197,3 +197,40 @@ async def test_impresion_cola_sugiere_rechazo_solo_en_la_cola_de_rechazo(client,
     sugerido = {e["id"]: e["tipo_certificado_sugerido"] for e in resp.json()}
     assert sugerido[str(aprobado.id)] is None
     assert sugerido[str(rechazado.id)] == "RECHAZO"
+
+
+async def test_impresion_cola_distingue_rechazo_por_prueba_de_rechazo_visual(client, db_session):
+    """HU-057: los dos rechazos comparten PENDIENTE_DE_IMPRESION_RECHAZO; el
+    origen sale de resultado_final (solo la prueba lo llena) y se conserva
+    cuando el expediente avanza por folio."""
+
+    estacion = await crear_estacion(
+        db_session,
+        station_type=StationType.IMPRESION,
+        center_id="OAX-01",
+        line_id=None,
+        is_centralized=True,
+        allowed_line_ids=[1],
+    )
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    aprobado = await crear_expediente(db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_IMPRESION)
+    aprobado.resultado_final = ResultadoFinal.APROBADO
+    por_prueba = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO
+    )
+    por_prueba.resultado_final = ResultadoFinal.RECHAZADO
+    visual = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO
+    )
+    visual_con_folio = await crear_expediente(db_session, linea_id=1, estado=EstadoVerificacion.FOLIO_ASIGNADO)
+    visual_con_folio.certificado_tipo = "RECHAZO"
+    await db_session.commit()
+
+    resp = await client.get("/api/impresion/cola", headers={"X-Session-Id": str(sesion.id)})
+
+    assert resp.status_code == 200
+    origen = {e["id"]: e["resultado_tecnico"] for e in resp.json()}
+    assert origen[str(aprobado.id)] == "APROBADO"
+    assert origen[str(por_prueba.id)] == "RECHAZADO_PRUEBA"
+    assert origen[str(visual.id)] == "RECHAZADO_VISUAL"
+    assert origen[str(visual_con_folio.id)] == "RECHAZADO_VISUAL"

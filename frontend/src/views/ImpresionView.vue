@@ -76,8 +76,8 @@ const OPCIONES_FILTRO_ESTADO = [
 const OPCIONES_FILTRO_RESULTADO = [
   { title: "Todos los resultados", value: "TODOS" },
   { title: "Aprobados", value: "APROBADO" },
-  { title: "Rechazos por prueba", value: "RECHAZADO" },
-  { title: "Rechazos visuales", value: "RECHAZO_VISUAL" },
+  { title: "Rechazos por prueba", value: "RECHAZADO_PRUEBA" },
+  { title: "Rechazos visuales", value: "RECHAZADO_VISUAL" },
 ];
 
 function tipoCertificadoSugerido(exp) {
@@ -141,21 +141,12 @@ const expedientesFiltrados = computed(() => {
     );
   }
 
-  // 2. Filtro por Resultado Técnico (HU-057)
-  if (filtroResultadoCola.value === "APROBADO") {
-    lista = lista.filter(
-      (e) =>
-        e.resultado_final === "APROBADO" ||
-        (e.estado === "PENDIENTE_IMPRESION" && e.certificado_tipo !== "RECHAZO")
-    );
-  } else if (filtroResultadoCola.value === "RECHAZADO") {
-    lista = lista.filter(
-      (e) =>
-        e.resultado_final === "RECHAZADO" &&
-        e.estado !== "PENDIENTE_DE_IMPRESION_RECHAZO"
-    );
-  } else if (filtroResultadoCola.value === "RECHAZO_VISUAL") {
-    lista = lista.filter((e) => e.estado === "PENDIENTE_DE_IMPRESION_RECHAZO");
+  // 2. Filtro por Resultado Técnico (HU-057). El origen del rechazo lo
+  // calcula el backend (`resultado_tecnico`): por estado no se distingue,
+  // porque rechazo por prueba y rechazo visual comparten
+  // PENDIENTE_DE_IMPRESION_RECHAZO y ambos avanzan después por folio.
+  if (filtroResultadoCola.value !== "TODOS") {
+    lista = lista.filter((e) => e.resultado_tecnico === filtroResultadoCola.value);
   }
 
   // 3. Filtro por Línea (HU-056)
