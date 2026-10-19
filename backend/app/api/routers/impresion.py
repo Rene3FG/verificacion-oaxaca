@@ -398,6 +398,19 @@ async def vista_previa_certificado(
         ),
         await _html_resultados_expediente(db, verificacion, vehiculo),
     )
+    # HU-093: la vista previa también queda en la bitácora (sin cambio de
+    # estado ni snapshot del expediente).
+    await registrar_evento_con_sync(
+        db,
+        EventLog(
+            verificacion_id=verificacion.id,
+            usuario_id=session.user_id,
+            modulo="impresion",
+            evento="vista_previa_generada",
+            detalle_json={"certificado_tipo": verificacion.certificado_tipo},
+        ),
+    )
+    await db.commit()
     return Response(content=pdf_bytes, media_type="application/pdf")
 
 

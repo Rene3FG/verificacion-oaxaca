@@ -2891,3 +2891,11 @@ memoria: las filas del último lote comparten `last_attempt_at`, y si alguna fal
 varios workers y tras reiniciar. El Top App Bar muestra "Operando sin internet · N pendientes" (warning, ícono
 `mdi-wifi-off`) con prioridad sobre "N pendientes"; se corrigió el singular ("1 pendiente"). Verificado en Chrome
 con `CENTRAL_SYNC_URL=http://127.0.0.1:9/sync` y el bucle automático (fila de QA borrada después). 440 pruebas.
+
+## HU-093/HU-027: bitácora de Impresión completa (2026-10-19, 4ª parte)
+
+La vista previa (`GET /impresion/vista-previa`) no dejaba rastro y la HU-093 la pide: ahora registra
+`vista_previa_generada` (evento sin cambio de estado, sin snapshot). `tests/test_bitacora_impresion.py` recorre
+el ciclo real — tipo de certificado, folio sin inventario (`folio_error`), alta de lote, `folio_asignado`, vista
+previa, `impresion_fallida`, reintento de Supervisor, `certificado_impreso`, `expediente_cerrado` — y verifica
+estados anterior/nuevo y usuario por evento (HU-027). 441 pruebas.
