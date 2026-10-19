@@ -56,6 +56,9 @@ class Verificacion(Base, UUIDPKMixin, TimestampMixin):
     # quedar en blanco.
     folio_multa: Mapped[str | None] = mapped_column(String(30))
     certificado_anterior: Mapped[str | None] = mapped_column(String(30))
+    # Equipment Integration Contract v1: corrida vigente en el gateway del
+    # equipo. Se fija al iniciar la lectura y se limpia al interrumpir.
+    equipo_test_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
     vehiculo: Mapped["Vehiculo"] = relationship()
     # HU-020: nombre del operador que creó el expediente para el encabezado.

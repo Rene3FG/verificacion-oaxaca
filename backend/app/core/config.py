@@ -21,5 +21,11 @@ class Settings(BaseSettings):
 
     obd_modelo_minimo: int = 2006
 
+    # Equipment Integration Contract v1 (ver app/services/equipo_gateway.py):
+    # "manual" = sin gateway, el operador captura las lecturas; "simulador" =
+    # gateway en memoria para QA/demo. Nunca "simulador" en producción.
+    equipo_gateway_modo: str = "manual"
+    equipo_simulador_escenario: str = "APROBADO"
+
 
 settings = Settings()

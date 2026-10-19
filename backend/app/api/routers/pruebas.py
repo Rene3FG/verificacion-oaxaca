@@ -48,8 +48,15 @@ from app.services.evaluacion_prueba import (
     evaluar_diesel,
     evaluar_gasolina,
 )
+from app.services.equipo_gateway import (
+    CorridaNoEncontrada,
+    EquipmentGateway,
+    EscenarioSimulador,
+    EstadoEquipo,
+    get_equipment_gateway,
+)
 from app.services.integridad import calcular_hash_resultado_prueba
-from app.services.sync import encolar_sync
+from app.services.sync import encolar_sync, registrar_evento_con_sync
 
 router = APIRouter(prefix="/api/pruebas", tags=["pruebas"])
 
@@ -329,6 +336,7 @@ async def iniciar_prueba(
     payload: IniciarPruebaInput | None = None,
     session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
+    gateway: EquipmentGateway | None = Depends(get_equipment_gateway),
 ) -> dict:
     verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
 
@@ -340,6 +348,16 @@ async def iniciar_prueba(
                 f"estado {verificacion.estado}, no PRUEBA_CONFIGURADA."
             ),
         )
+
+    # HU-044: con equipo integrado, solo se inicia con el equipo LISTO
+    # (no calibrando, ni ocupado con otra corrida, ni en error).
+    if gateway is not None:
+        estado_equipo, _ = await gateway.get_status(session.workstation_id)
+        if estado_equipo != EstadoEquipo.LISTO:
+            raise HTTPException(
+                status_code=409,
+                detail=f"El equipo de la línea no está listo (estado {estado_equipo.value}).",
+            )
 
     detalle = None
     if verificacion.tipo_prueba_final == TipoPrueba.OPACIDAD:
@@ -381,6 +399,7 @@ async def interrumpir_prueba(
     payload: InterrumpirPruebaInput,
     session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
+    gateway: EquipmentGateway | None = Depends(get_equipment_gateway),
 ) -> dict:
     """HU-045 (cancelar), HU-054/083 (error del equipo) y HU-084 (reintento):
     una prueba configurada o en proceso se interrumpe sin generar resultado
@@ -423,6 +442,11 @@ async def interrumpir_prueba(
         "mensaje_tecnico": payload.mensaje_tecnico,
         "intento": (intentos_previos or 0) + 1,
     }
+    if verificacion.equipo_test_run_id is not None:
+        detalle["test_run_id"] = str(verificacion.equipo_test_run_id)
+        if gateway is not None:
+            await gateway.stop(verificacion.equipo_test_run_id)
+        verificacion.equipo_test_run_id = None
     verificacion.tipo_prueba_final = None
     await state_machine.transition(
         db,
@@ -444,8 +468,12 @@ class ResultadoPruebaInput(BaseModel):
     app.services.evaluacion_prueba). El shape exacto de
     `normalized_payload` depende del método (ver app.schemas.prueba)."""
 
-    normalized_payload: dict
+    normalized_payload: dict | None = None
     equipo_id: uuid.UUID | None = None
+    # Equipment Integration Contract v1: si viene, las lecturas se toman de
+    # la corrida FINALIZADA del gateway y `normalized_payload` se ignora — el
+    # operador no puede alterar lo que midió el equipo.
+    test_run_id: uuid.UUID | None = None
 
 
 @router.post("/resultado/{expediente_id}")
@@ -454,6 +482,7 @@ async def guardar_resultado_prueba(
     payload: ResultadoPruebaInput,
     session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
+    gateway: EquipmentGateway | None = Depends(get_equipment_gateway),
 ) -> dict:
     verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
 
@@ -480,17 +509,24 @@ async def guardar_resultado_prueba(
     except MetodoSinMapeo as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    if payload.test_run_id is not None:
+        lecturas = await _lecturas_de_corrida_finalizada(verificacion, payload.test_run_id, gateway)
+    elif payload.normalized_payload is not None:
+        lecturas = payload.normalized_payload
+    else:
+        raise HTTPException(status_code=422, detail="Faltan las lecturas (normalized_payload o test_run_id).")
+
     try:
         vehiculo = await db.get(Vehiculo, verificacion.vehiculo_id)
         anio_modelo = vehiculo.modelo if vehiculo is not None else None
         if metodo == MetodoPrueba.DIESEL_OPACITY:
             peso_bruto_kg = vehiculo.peso_bruto_vehicular_kg if vehiculo is not None else None
-            payload_validado = NormalizedPayloadDiesel.model_validate(payload.normalized_payload)
+            payload_validado = NormalizedPayloadDiesel.model_validate(lecturas)
             resultado, limits_applied, excedidos = await evaluar_diesel(
                 db, metodo, payload_validado, peso_bruto_kg, anio_modelo
             )
         else:
-            payload_validado = NormalizedPayloadGasolina.model_validate(payload.normalized_payload)
+            payload_validado = NormalizedPayloadGasolina.model_validate(lecturas)
             resultado, limits_applied, excedidos = await evaluar_gasolina(
                 db, metodo, payload_validado, anio_modelo
             )
@@ -506,6 +542,10 @@ async def guardar_resultado_prueba(
     inicio = datetime.datetime.now(datetime.timezone.utc)
     fin = datetime.datetime.now(datetime.timezone.utc)
     valores_medidos = payload_validado.model_dump()
+    if payload.test_run_id is not None:
+        # Evidencia (cubierta por el hash): las lecturas vinieron del equipo.
+        valores_medidos["origen_lecturas"] = "EQUIPO"
+        valores_medidos["test_run_id"] = str(payload.test_run_id)
     if metodo == MetodoPrueba.GAS_DYNAMIC:
         # TOTPOT5024/TOTPOT2540 (respuesta del cliente 2026-10-09): la
         # potencia la asigna el sistema por norma, no la captura el operador.
@@ -603,6 +643,126 @@ async def guardar_resultado_prueba(
     )
     await db.commit()
     return {"estado_expediente": verificacion.estado}
+
+
+async def _lecturas_de_corrida_finalizada(
+    verificacion: Verificacion, test_run_id: uuid.UUID, gateway: EquipmentGateway | None
+) -> dict:
+    if gateway is None:
+        raise HTTPException(status_code=409, detail="Esta instalación opera en captura manual; no hay equipo conectado.")
+    if verificacion.equipo_test_run_id != test_run_id:
+        raise HTTPException(status_code=409, detail="La corrida indicada no es la vigente de este expediente.")
+    corrida = await _leer_corrida(gateway, test_run_id)
+    if corrida.estado != EstadoEquipo.FINALIZADA or corrida.resultado is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"El equipo todavía no entrega el resultado (estado {corrida.estado.value}).",
+        )
+    return corrida.resultado
+
+
+async def _leer_corrida(gateway: EquipmentGateway, test_run_id: uuid.UUID):
+    try:
+        return await gateway.read_data(test_run_id)
+    except CorridaNoEncontrada as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="El equipo no reconoce la corrida (¿se reinició?). Inicie la lectura de nuevo.",
+        ) from exc
+
+
+# --- Equipment Integration Contract v1 (HU-041/043/046/083) ---------------
+
+
+@router.get("/equipo/estado")
+async def estado_equipo(
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
+    gateway: EquipmentGateway | None = Depends(get_equipment_gateway),
+) -> dict:
+    """Estado del equipo de la línea (HU-041/043). En modo manual no hay
+    equipo que consultar: `estado` es null y la UI captura a mano."""
+
+    if gateway is None:
+        return {"modo": "manual", "estado": None, "mensaje_tecnico": None}
+    estado, mensaje = await gateway.get_status(session.workstation_id)
+    return {"modo": gateway.modo, "estado": estado.value, "mensaje_tecnico": mensaje}
+
+
+@router.post("/equipo/iniciar/{expediente_id}")
+async def iniciar_lectura_equipo(
+    expediente_id: uuid.UUID,
+    escenario: EscenarioSimulador | None = None,
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
+    db: AsyncSession = Depends(get_db),
+    gateway: EquipmentGateway | None = Depends(get_equipment_gateway),
+) -> dict:
+    """OPEN_SESSION + START. Al equipo solo viajan `test_run_id` y método;
+    nunca placa, NIV ni el id del expediente. Iniciar otra vez sustituye la
+    corrida anterior (p. ej. tras una muestra inválida). `escenario` solo
+    lo atiende el simulador."""
+
+    if gateway is None:
+        raise HTTPException(status_code=409, detail="Esta instalación opera en captura manual; no hay equipo conectado.")
+    verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
+    if verificacion.estado != EstadoVerificacion.PRUEBA_EN_PROCESO:
+        raise HTTPException(
+            status_code=409,
+            detail=f"La lectura del equipo requiere la prueba en proceso; el expediente está en {verificacion.estado}.",
+        )
+    try:
+        metodo = metodo_de(verificacion.tipo_prueba_final)
+    except MetodoSinMapeo as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    anterior = verificacion.equipo_test_run_id
+    if anterior is not None:
+        await gateway.stop(anterior)
+    test_run_id = uuid.uuid4()
+    corrida = await gateway.open_session(
+        session.workstation_id,
+        test_run_id,
+        metodo,
+        escenario if gateway.modo == "simulador" else None,
+    )
+    verificacion.equipo_test_run_id = test_run_id
+    await registrar_evento_con_sync(
+        db,
+        EventLog(
+            verificacion_id=verificacion.id,
+            evento="equipo_corrida_iniciada",
+            usuario_id=session.user_id,
+            modulo="prueba",
+            detalle_json={
+                "test_run_id": str(test_run_id),
+                "metodo": metodo.value,
+                "modo": gateway.modo,
+                "corrida_anterior": str(anterior) if anterior else None,
+            },
+        ),
+        verificacion=verificacion,
+    )
+    await db.commit()
+    return corrida.a_dict()
+
+
+@router.get("/equipo/corrida/{expediente_id}")
+async def corrida_equipo(
+    expediente_id: uuid.UUID,
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
+    db: AsyncSession = Depends(get_db),
+    gateway: EquipmentGateway | None = Depends(get_equipment_gateway),
+) -> dict | None:
+    """READ_DATA de la corrida vigente: estado, lecturas recibidas
+    (HU-046) y, en FINALIZADA, el resultado que tomará /resultado. `null`
+    si el expediente no tiene corrida."""
+
+    verificacion = await db.get(Verificacion, expediente_id)
+    if verificacion is None:
+        raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    assert_linea_permitida(session, verificacion.centro_id, verificacion.linea_id)
+    if gateway is None or verificacion.equipo_test_run_id is None:
+        return None
+    return (await _leer_corrida(gateway, verificacion.equipo_test_run_id)).a_dict()
 
 
 class LimiteEmisionInput(BaseModel):

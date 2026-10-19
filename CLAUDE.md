@@ -2814,3 +2814,48 @@ corregidos. 365 pruebas (355 → 365); `npx vite build` limpio.
 estado en el central si éste aplica "última llegada gana"; el contrato del central debe resolver por
 `created_at` del cuerpo. La fila `SYNCING` nunca es visible (se commitea al final del lote), así que el
 contador `sincronizando` del Top App Bar siempre marca 0.
+
+## Fase 2: Equipment Integration Contract v1 con simulador (2026-10-19)
+
+Gateway de equipo según el contrato del Figma (`04 — Flows & Handoff`), sin el adaptador del proveedor
+(sigue sin protocolo). `app/services/equipo_gateway.py`: interfaz `EquipmentGateway`
+(`get_status` / `open_session` = OPEN_SESSION+START / `read_data` = READ_DATA con los DATA_EVENT / `stop`) y
+`SimuladorGateway` en memoria. Al equipo solo viajan `test_run_id` y método; nunca placa, NIV ni id del
+expediente. 377 pruebas (`tests/test_equipo_gateway.py`, 9 nuevas).
+
+- **Modo** por `.env`: `EQUIPO_GATEWAY_MODO=manual` (default; sin gateway, captura manual como siempre, ningún
+  endpoint fabrica lecturas) o `simulador` (QA/demo; la UI muestra un aviso de "equipo simulado").
+  `get_equipment_gateway` es el único punto a cambiar cuando llegue el adaptador real.
+- **Simulador**: el avance se calcula con el reloj (sin tareas en segundo plano): conectando → conectado (1 s) →
+  calibrando (2 s) → mediciones desde 4 s → finalizada. Gasolina: 3 muestras por fase (ralentí/crucero), la
+  última es el resultado. Diésel: 3 aceleraciones, K final = promedio. Escenarios `APROBADO` / `RECHAZADO` /
+  `FALLA` (error de comunicación a los 6.5 s), por `.env` o por corrida (`?escenario=`, solo simulador). Las
+  pruebas inyectan `reloj`.
+- **Endpoints** (`requiere_estacion(PRUEBA)`): `GET /api/pruebas/equipo/estado` (modo + estado HU-041 de la
+  estación), `POST /api/pruebas/equipo/iniciar/{id}` (exige `PRUEBA_EN_PROCESO`; volver a llamarlo sustituye la
+  corrida; evento `equipo_corrida_iniciada`), `GET /api/pruebas/equipo/corrida/{id}` (lecturas recibidas y, al
+  finalizar, el resultado).
+- **Corrida vigente** en `verificaciones.equipo_test_run_id` (migración `e5b1c8d4a9f3`), no en `event_log`: en
+  una misma transacción los eventos comparten `created_at` y no se puede saber cuál es el último.
+- **`POST /resultado` con `test_run_id`**: toma las lecturas de la corrida FINALIZADA del gateway e ignora
+  `normalized_payload` (el operador no puede alterar lo medido). 409 si no está finalizada o no es la corrida
+  vigente. `valores_medidos_json` gana `origen_lecturas: "EQUIPO"` y `test_run_id` (cubiertos por el hash). Sin
+  `test_run_id` el camino manual no cambia.
+- **HU-044**: con gateway, `POST /iniciar` responde 409 si el equipo no está `LISTO` (calibrando, ocupado con
+  otra corrida, en error). **HU-083**: `interrumpir` detiene la corrida (STOP), la desvincula y guarda su
+  `test_run_id` en la bitácora; en la UI, un ERROR del equipo abre "Registrar error" con el mensaje técnico
+  prellenado.
+- **`PruebaView.vue`**: chip "Equipo: <estado>" en la tarjeta de Prueba (o "Captura manual de lecturas"); en
+  prueba en proceso con gateway, los campos manuales se sustituyen por "Iniciar lectura del equipo", tabla de
+  lecturas en vivo (sondeo cada 1 s hasta un estado terminal) y el resultado final.
+- Verificado con Chrome headless (puppeteer-core) contra uvicorn en modo simulador: APROBADO completo hasta
+  `PENDIENTE_IMPRESION` con `origen_lecturas=EQUIPO`, y FALLA → error → interrupción. `GVN-091-B` (seed demo) se
+  restauró a `PRUEBA_CONFIGURADA` y se borraron sus eventos/sync de la QA.
+
+**Cambia en la trazabilidad (corte 2026-10-15)**: HU-041 de SIN_EVIDENCIA a PARCIAL, y HU-043/044/046/083 siguen
+PARCIAL, pero ahora solo les falta el adaptador real del proveedor; contra el simulador están completas.
+
+**Pendiente**: adaptador del proveedor (protocolo, puerto/URL por línea; quizá una columna en `Workstation`),
+`equipo_id` real en `ResultadoPrueba`, incidencias de equipo en "Errores y reintentos" (hoy un error se registra
+al interrumpir, no queda abierto como incidencia) y la calibración periódica como bloqueo (el contrato no la
+detalla).

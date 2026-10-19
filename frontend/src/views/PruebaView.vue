@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { api } from "../api/client";
 import ExpedienteHeader from "../components/ExpedienteHeader.vue";
 import { useSessionStore } from "../stores/session";
@@ -271,6 +271,98 @@ function reiniciarPrueba() {
   });
 }
 
+// --- Equipment Integration Contract v1 (HU-041/043/046/083). En modo
+// "manual" no hay gateway y el operador captura las lecturas; con gateway
+// las lecturas llegan del equipo y /resultado las toma de la corrida, no del
+// formulario.
+const ESTADOS_EQUIPO = {
+  DESCONECTADO: { texto: "Desconectado", color: "grey" },
+  CONECTANDO: { texto: "Conectando", color: "info" },
+  CONECTADO: { texto: "Conectado", color: "info" },
+  CALIBRANDO: { texto: "Calibrando", color: "warning" },
+  LISTO: { texto: "Listo", color: "success" },
+  PRUEBA_EN_PROCESO: { texto: "Prueba en proceso", color: "info" },
+  LECTURA_RECIBIDA: { texto: "Lectura recibida", color: "info" },
+  FINALIZADA: { texto: "Finalizada", color: "success" },
+  ERROR: { texto: "Error", color: "error" },
+};
+const ESTADOS_CORRIDA_TERMINALES = ["FINALIZADA", "ERROR", "DESCONECTADO"];
+const ETIQUETAS_PARAMETRO = {
+  hc_ppm: "HC (ppm)",
+  co_pct: "CO (%)",
+  co2_pct: "CO2 (%)",
+  o2_pct: "O2 (%)",
+  nox_ppm: "NOx (ppm)",
+  lambda_factor: "Lambda",
+  speed_kph: "km/h",
+  k_m1: "K (m⁻¹)",
+  opacity_pct: "Opacidad (%)",
+  rpm_peak: "RPM pico",
+};
+const equipo = ref({ modo: "manual", estado: null, mensaje_tecnico: null });
+const corrida = ref(null);
+const escenarioSimulador = ref("APROBADO");
+const iniciandoLectura = ref(false);
+let temporizadorCorrida = null;
+
+const conEquipo = computed(() => equipo.value.modo !== "manual");
+const estadoEquipoVisible = computed(() => corrida.value?.estado ?? equipo.value.estado);
+const corridaFinalizada = computed(() => corrida.value?.estado === "FINALIZADA" && corrida.value.resultado);
+
+function infoEstadoEquipo(estado) {
+  return ESTADOS_EQUIPO[estado] ?? { texto: estado ?? "Sin dato", color: "grey" };
+}
+function textoParametros(parametros) {
+  return Object.entries(parametros)
+    .map(([k, v]) => `${ETIQUETAS_PARAMETRO[k] ?? k}: ${v}`)
+    .join(" · ");
+}
+
+function detenerSondeoCorrida() {
+  if (temporizadorCorrida) clearInterval(temporizadorCorrida);
+  temporizadorCorrida = null;
+}
+
+async function cargarEstadoEquipo() {
+  try {
+    equipo.value = (await api.get("/pruebas/equipo/estado")).data;
+  } catch {
+    equipo.value = { modo: "manual", estado: null, mensaje_tecnico: null };
+  }
+}
+
+async function cargarCorrida() {
+  if (!expediente.value) return;
+  try {
+    corrida.value = (await api.get(`/pruebas/equipo/corrida/${expediente.value.id}`)).data;
+  } catch (err) {
+    detenerSondeoCorrida();
+    error.value = err.response?.data?.detail || "No se pudo leer el equipo.";
+    return;
+  }
+  if (!corrida.value || ESTADOS_CORRIDA_TERMINALES.includes(corrida.value.estado)) {
+    detenerSondeoCorrida();
+  } else if (!temporizadorCorrida) {
+    temporizadorCorrida = setInterval(cargarCorrida, 1000);
+  }
+}
+
+async function iniciarLecturaEquipo() {
+  iniciandoLectura.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.post(`/pruebas/equipo/iniciar/${expediente.value.id}`, null, {
+      params: equipo.value.modo === "simulador" ? { escenario: escenarioSimulador.value } : {},
+    });
+    corrida.value = data;
+    await cargarCorrida();
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo iniciar la lectura del equipo.";
+  } finally {
+    iniciandoLectura.value = false;
+  }
+}
+
 async function cargarExpedientesEnCurso() {
   if (!session.estacion?.center_id || !session.estacion?.line_id) return;
   cargandoLista.value = true;
@@ -300,6 +392,12 @@ async function abrirExpediente(id) {
     reiniciarPrueba();
     sincronizarVehiculoForm(data.vehiculo);
     configuracionPrueba.value = null;
+    detenerSondeoCorrida();
+    corrida.value = null;
+    if (["LISTO_PARA_PRUEBA", "PRUEBA_CONFIGURADA", "PRUEBA_EN_PROCESO"].includes(data.estado)) {
+      await cargarEstadoEquipo();
+      if (data.estado === "PRUEBA_EN_PROCESO" && conEquipo.value) await cargarCorrida();
+    }
     if (data.estado === "LISTO_PARA_PRUEBA") {
       try {
         configuracionPrueba.value = (await api.get(`/pruebas/configuracion/${id}`)).data;
@@ -316,6 +414,8 @@ async function abrirExpediente(id) {
 }
 
 function cerrarExpediente() {
+  detenerSondeoCorrida();
+  corrida.value = null;
   expediente.value = null;
   aviso.value = null;
   cargarExpedientesEnCurso();
@@ -425,8 +525,8 @@ const interrupcion = reactive({
   enviando: false,
 });
 
-function abrirInterrupcion(causa) {
-  Object.assign(interrupcion, { abierto: true, causa, motivo: "", mensajeTecnico: "" });
+function abrirInterrupcion(causa, mensajeTecnico = "") {
+  Object.assign(interrupcion, { abierto: true, causa, motivo: "", mensajeTecnico });
 }
 
 async function interrumpirPrueba() {
@@ -468,9 +568,12 @@ async function guardarResultadoPrueba() {
   guardandoResultado.value = true;
   error.value = null;
   try {
-    const { data } = await api.post(`/pruebas/resultado/${expediente.value.id}`, {
-      normalized_payload: construirNormalizedPayload(),
-    });
+    const { data } = await api.post(
+      `/pruebas/resultado/${expediente.value.id}`,
+      conEquipo.value
+        ? { test_run_id: corrida.value.test_run_id }
+        : { normalized_payload: construirNormalizedPayload() }
+    );
     aviso.value =
       data.estado_expediente === "PENDIENTE_DE_IMPRESION_RECHAZO"
         ? "Prueba rechazada (fuera de límites). Expediente enviado a Impresión Central."
@@ -493,6 +596,7 @@ onMounted(() => {
   cargarExpedientesEnCurso();
   cargarCatalogoChecklist();
 });
+onUnmounted(detenerSondeoCorrida);
 </script>
 
 <template>
@@ -721,7 +825,22 @@ onMounted(() => {
         v-else-if="['LISTO_PARA_PRUEBA', 'PRUEBA_CONFIGURADA', 'PRUEBA_EN_PROCESO'].includes(expediente.estado)"
         class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat"
       >
-        <v-card-title>Prueba</v-card-title>
+        <v-card-title class="d-flex align-center flex-wrap ga-2">
+          Prueba
+          <v-spacer />
+          <v-chip
+            v-if="conEquipo"
+            :color="infoEstadoEquipo(estadoEquipoVisible).color"
+            size="small"
+            prepend-icon="mdi-gauge"
+            class="rounded-institucional-full"
+          >
+            Equipo: {{ infoEstadoEquipo(estadoEquipoVisible).texto }}
+          </v-chip>
+          <v-chip v-else size="small" variant="outlined" class="rounded-institucional-full">
+            Captura manual de lecturas
+          </v-chip>
+        </v-card-title>
         <v-card-text>
           <template v-if="expediente.estado === 'LISTO_PARA_PRUEBA'">
             <p class="mb-2 text-body-2">
@@ -793,7 +912,22 @@ onMounted(() => {
                 hide-details
               />
             </div>
-            <v-btn color="primary" :loading="iniciando" :disabled="!preparacionCompleta" @click="iniciarPrueba">
+            <v-alert
+              v-if="conEquipo && equipo.estado !== 'LISTO'"
+              type="warning" variant="tonal" density="compact" class="mb-3"
+            >
+              El equipo no está listo ({{ infoEstadoEquipo(equipo.estado).texto }}); espera a que termine o
+              revisa la conexión.
+              <template #append>
+                <v-btn variant="text" size="small" @click="cargarEstadoEquipo">Actualizar</v-btn>
+              </template>
+            </v-alert>
+            <v-btn
+              color="primary"
+              :loading="iniciando"
+              :disabled="!preparacionCompleta || (conEquipo && equipo.estado !== 'LISTO')"
+              @click="iniciarPrueba"
+            >
               Iniciar prueba
             </v-btn>
           </template>
@@ -807,6 +941,80 @@ onMounted(() => {
               Este tipo de prueba no tiene un método de proyección de certificado aprobado; no se
               puede guardar el resultado.
             </v-alert>
+
+            <!-- HU-046: lecturas del equipo en tiempo real -->
+            <template v-else-if="conEquipo">
+              <div class="d-flex flex-wrap align-center ga-2 mb-3">
+                <v-select
+                  v-if="equipo.modo === 'simulador'"
+                  v-model="escenarioSimulador"
+                  :items="['APROBADO', 'RECHAZADO', 'FALLA']"
+                  label="Escenario del simulador"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  style="max-width: 240px"
+                />
+                <v-btn
+                  color="primary"
+                  :variant="corrida ? 'outlined' : 'flat'"
+                  :loading="iniciandoLectura"
+                  :disabled="corrida && !['FINALIZADA', 'ERROR', 'DESCONECTADO'].includes(corrida.estado)"
+                  @click="iniciarLecturaEquipo"
+                >
+                  {{ corrida ? "Repetir lectura" : "Iniciar lectura del equipo" }}
+                </v-btn>
+              </div>
+              <v-alert v-if="equipo.modo === 'simulador'" type="warning" variant="tonal" density="compact" class="mb-3">
+                Equipo simulado: las lecturas no vienen de un analizador real. Solo para pruebas y demostración.
+              </v-alert>
+
+              <p v-if="!corrida" class="text-body-2 text-medium-emphasis mb-3">
+                Al iniciar, el sistema abre la corrida con el equipo (solo se le envía un identificador de
+                corrida, nunca la placa) y las lecturas aparecen aquí conforme llegan.
+              </p>
+              <template v-else>
+                <v-progress-linear
+                  v-if="!['FINALIZADA', 'ERROR', 'DESCONECTADO'].includes(corrida.estado)"
+                  indeterminate
+                  color="primary"
+                  class="mb-3"
+                />
+                <v-table v-if="corrida.lecturas.length" density="compact" class="mb-3">
+                  <thead>
+                    <tr><th>Fase</th><th>Lectura</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(l, i) in corrida.lecturas" :key="i">
+                      <td class="text-no-wrap">{{ l.fase.replace("_", " ") }}</td>
+                      <td>{{ textoParametros(l.parametros) }}</td>
+                    </tr>
+                  </tbody>
+                </v-table>
+                <v-alert v-if="corrida.estado === 'ERROR'" type="error" variant="tonal" density="compact" class="mb-3">
+                  El equipo reportó un error: {{ corrida.mensaje_tecnico }}
+                  <template #append>
+                    <v-btn
+                      variant="text"
+                      color="error"
+                      @click="abrirInterrupcion('ERROR_EQUIPO', corrida.mensaje_tecnico || '')"
+                    >
+                      Registrar error
+                    </v-btn>
+                  </template>
+                </v-alert>
+                <v-alert v-if="corridaFinalizada" type="success" variant="tonal" density="compact" class="mb-3">
+                  <template v-if="esMetodoGasolina">
+                    Ralentí — {{ textoParametros(corrida.resultado.ralenti) }}<br />
+                    Crucero — {{ textoParametros(corrida.resultado.crucero) }}
+                  </template>
+                  <template v-else>
+                    Coeficiente de absorción final K:
+                    <strong>{{ corrida.resultado.coefficient_absorption_final_k_m1 }} m⁻¹</strong>
+                  </template>
+                </v-alert>
+              </template>
+            </template>
 
             <template v-else-if="esMetodoGasolina">
               <p class="text-caption text-medium-emphasis mb-2">
@@ -861,7 +1069,7 @@ onMounted(() => {
             <v-btn
               color="primary"
               :loading="guardandoResultado"
-              :disabled="!metodoPrueba || !lecturaCompleta"
+              :disabled="!metodoPrueba || (conEquipo ? !corridaFinalizada : !lecturaCompleta)"
               @click="guardarResultadoPrueba"
             >
               Guardar resultado
