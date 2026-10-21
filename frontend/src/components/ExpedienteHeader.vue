@@ -76,44 +76,44 @@ watch(
       <v-row dense>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Placa</span>
-          <span class="font-weight-medium">
+          <span class="font-weight-medium text-break">
             {{ props.expediente.placa }}
             <template v-if="modeloAuto">({{ modeloAuto }})</template>
           </span>
         </v-col>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Modelo</span>
-          <span class="font-weight-medium">{{ props.expediente.vehiculo?.modelo ?? "—" }}</span>
+          <span class="font-weight-medium text-break">{{ props.expediente.vehiculo?.modelo ?? "—" }}</span>
         </v-col>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Combustible</span>
-          <span class="font-weight-medium">{{ props.expediente.combustible_validado ?? "—" }}</span>
+          <span class="font-weight-medium text-break">{{ props.expediente.combustible_validado ?? "—" }}</span>
         </v-col>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Tipo de vehículo</span>
-          <span class="font-weight-medium">{{ props.expediente.vehiculo?.tipo_vehiculo ?? "—" }}</span>
+          <span class="font-weight-medium text-break">{{ props.expediente.vehiculo?.tipo_vehiculo ?? "—" }}</span>
         </v-col>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Tipo</span>
-          <span class="font-weight-medium">{{ props.expediente.certificado_tipo ?? "—" }}</span>
+          <span class="font-weight-medium text-break">{{ props.expediente.certificado_tipo ?? "—" }}</span>
         </v-col>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Centro</span>
-          <span class="font-weight-medium">{{ props.expediente.centro_id }}</span>
+          <span class="font-weight-medium text-break">{{ props.expediente.centro_id }}</span>
         </v-col>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Línea</span>
-          <span class="font-weight-medium">{{ props.expediente.linea_id }}</span>
+          <span class="font-weight-medium text-break">{{ props.expediente.linea_id }}</span>
         </v-col>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Operador</span>
-          <span class="font-weight-medium">
+          <span class="font-weight-medium text-break">
             {{ props.expediente.operador_nombre ?? session.usuario ?? "—" }}
           </span>
         </v-col>
         <v-col cols="6" sm="3" md="auto">
           <span class="text-caption text-medium-emphasis d-block">Fecha / hora</span>
-          <span class="font-weight-medium">
+          <span class="font-weight-medium text-break">
             {{ formatearFecha(props.expediente.updated_at) ?? "—" }}
           </span>
         </v-col>
