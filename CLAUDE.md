@@ -2899,3 +2899,18 @@ La vista previa (`GET /impresion/vista-previa`) no dejaba rastro y la HU-093 la 
 el ciclo real — tipo de certificado, folio sin inventario (`folio_error`), alta de lote, `folio_asignado`, vista
 previa, `impresion_fallida`, reintento de Supervisor, `certificado_impreso`, `expediente_cerrado` — y verifica
 estados anterior/nuevo y usuario por evento (HU-027). 441 pruebas.
+
+## Pruebas de frontend (Vitest) y lista de pendientes (2026-10-20)
+
+- **Vitest + @vue/test-utils + jsdom** (`npm test` en `frontend/`; config en `vite.config.js`, polyfill de
+  `ResizeObserver` en `tests/setup.js`). 60 pruebas: `estado.js` (los 27 estados del enum tienen etiqueta, ícono y
+  color), `stores/session.js` (conexión HU-104, acceso HU-007, cierre de sesión), `TopAppBar` (HU-004/104) y
+  `ExpedienteHeader` (HU-020/037/105). Si el enum `EstadoVerificacion` gana un estado, `estado.test.js` hay que
+  actualizarlo a mano (la lista es un espejo).
+- `ExpedienteHeader.vue`: los 9 valores llevan `text-break` para que operador/tipo largos no desborden la fila.
+- `backend/tests/test_cierre_brechas_trazabilidad.py`: HU-027, 034, 088 y 089. 445 pruebas de backend.
+- `docs/trazabilidad/trazabilidad_hu_2026-10-20.*`: HECHO 86 / PARCIAL 14 / SOLO_FRONTEND 6 / DESFASADA_SHEET 4.
+  La auditoría de Sebas (10-14) reporta 94.5 % porque cuenta "existe en código" como cubierta; la matriz exige prueba.
+- `docs/PENDIENTES_2026-10-20.md`: lista completa de lo que falta (bloqueos de terceros, supuestos por confirmar,
+  tareas sin bloqueo, huecos de seguridad y de despliegue). Hallazgos nuevos de esa revisión: sin límite de intentos
+  de login, sin caducidad de sesión por inactividad, sin TLS/CORS de producción, sin Dockerfile de producción ni CI.
