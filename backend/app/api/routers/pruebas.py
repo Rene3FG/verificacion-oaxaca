@@ -404,8 +404,9 @@ async def interrumpir_prueba(
     """HU-045 (cancelar), HU-054/083 (error del equipo) y HU-084 (reintento):
     una prueba configurada o en proceso se interrumpe sin generar resultado
     — nunca se fabrica un resultado final — y el expediente vuelve a
-    LISTO_PARA_PRUEBA en la cola de su línea, desde donde se configura de
-    nuevo. El intento anterior (tipo, causa, motivo, mensaje técnico) queda
+    LISTO_PARA_PRUEBA en la cola de su línea (cancelación) o, si la causa es
+    ERROR_EQUIPO, a ERROR_INTEGRACION (HU-054: incidencia abierta hasta
+    `POST /reintentar`). El intento anterior (tipo, causa, motivo, mensaje técnico) queda
     en `event_log`. Motivo obligatorio en ambos casos."""
 
     verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
@@ -448,17 +449,62 @@ async def interrumpir_prueba(
             await gateway.stop(verificacion.equipo_test_run_id)
         verificacion.equipo_test_run_id = None
     verificacion.tipo_prueba_final = None
+    error_equipo = payload.causa == "ERROR_EQUIPO"
+    await state_machine.transition(
+        db,
+        verificacion,
+        EstadoVerificacion.ERROR_INTEGRACION
+        if error_equipo
+        else EstadoVerificacion.LISTO_PARA_PRUEBA,
+        usuario_id=session.user_id,
+        modulo="prueba",
+        evento="prueba_error_equipo" if error_equipo else "prueba_cancelada",
+        detalle=detalle,
+    )
+    await db.commit()
+    return {"estado_expediente": verificacion.estado, "intento": detalle["intento"]}
+
+
+@router.post("/reintentar/{expediente_id}")
+async def reintentar_prueba(
+    expediente_id: uuid.UUID,
+    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """HU-054/084: autoriza el reintento tras un error del equipo. Solo
+    aplica a un ERROR_INTEGRACION que dejó `prueba_error_equipo` (el mismo
+    estado lo usan SIOX y OBD, que se reintentan por sus propios caminos);
+    devuelve el expediente a LISTO_PARA_PRUEBA para configurarlo de nuevo."""
+
+    verificacion = await _obtener_expediente_de_la_linea(db, session, expediente_id)
+    if verificacion.estado != EstadoVerificacion.ERROR_INTEGRACION:
+        raise HTTPException(
+            status_code=409,
+            detail=f"No hay un error de equipo que reintentar: el expediente está en {verificacion.estado}.",
+        )
+    ultimo = await db.scalar(
+        select(EventLog.evento)
+        .where(
+            EventLog.verificacion_id == verificacion.id,
+            EventLog.estado_nuevo == EstadoVerificacion.ERROR_INTEGRACION,
+        )
+        .order_by(EventLog.created_at.desc())
+        .limit(1)
+    )
+    if ultimo != "prueba_error_equipo":
+        raise HTTPException(
+            status_code=409, detail="El error del expediente no es de la prueba con equipo."
+        )
     await state_machine.transition(
         db,
         verificacion,
         EstadoVerificacion.LISTO_PARA_PRUEBA,
         usuario_id=session.user_id,
         modulo="prueba",
-        evento="prueba_cancelada" if payload.causa == "CANCELADA" else "prueba_error_equipo",
-        detalle=detalle,
+        evento="prueba_reintento_autorizado",
     )
     await db.commit()
-    return {"estado_expediente": verificacion.estado, "intento": detalle["intento"]}
+    return {"estado_expediente": verificacion.estado}
 
 
 class ResultadoPruebaInput(BaseModel):

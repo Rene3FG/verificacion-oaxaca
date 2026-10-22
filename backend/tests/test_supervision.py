@@ -335,3 +335,45 @@ async def test_auditoria_rango_de_fechas_inclusivo_y_paginacion(client, db_sessi
 
     invertido = await client.get("/api/supervision/auditoria?desde=2026-03-05&hasta=2026-03-01", headers=h)
     assert invertido.status_code == 422
+
+
+async def test_error_de_equipo_aparece_como_incidencia_y_se_reintenta(client, db_session):
+    from tests.conftest import crear_sesion_activa, crear_estacion
+
+    supervisor = await crear_sesion_supervisor(db_session, center_id="OAX-01")
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=1
+    )
+    prueba = await crear_sesion_activa(db_session, estacion=estacion)
+    exp = await crear_expediente(
+        db_session, linea_id=1, centro_id="OAX-01", estado=EstadoVerificacion.PRUEBA_EN_PROCESO
+    )
+    await db_session.commit()
+
+    r = await client.post(
+        f"/api/pruebas/interrumpir/{exp.id}",
+        json={"causa": "ERROR_EQUIPO", "motivo": "Sin comunicación", "mensaje_tecnico": "timeout"},
+        headers={"X-Session-Id": str(prueba.id)},
+    )
+    assert r.status_code == 200
+
+    inc = (
+        await client.get(
+            "/api/supervision/incidencias", headers={"X-Session-Id": str(supervisor.id)}
+        )
+    ).json()
+    mias = [i for i in inc if i["expediente_id"] == str(exp.id)]
+    assert len(mias) == 1
+    assert mias[0]["accion"] == "REINTENTAR_PRUEBA"
+    assert "timeout" in mias[0]["mensaje_tecnico"]
+
+    r = await client.post(
+        f"/api/pruebas/reintentar/{exp.id}", headers={"X-Session-Id": str(prueba.id)}
+    )
+    assert r.status_code == 200
+    inc = (
+        await client.get(
+            "/api/supervision/incidencias", headers={"X-Session-Id": str(supervisor.id)}
+        )
+    ).json()
+    assert not [i for i in inc if i["expediente_id"] == str(exp.id)]

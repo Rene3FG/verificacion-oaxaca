@@ -1463,7 +1463,10 @@ async def test_interrumpir_prueba_por_error_de_equipo_y_reintentar(client, db_se
             headers=h,
         )
         assert resp.status_code == 200
-        assert resp.json() == {"estado_expediente": "LISTO_PARA_PRUEBA", "intento": intento}
+        assert resp.json() == {"estado_expediente": "ERROR_INTEGRACION", "intento": intento}
+        # HU-054: queda en error hasta que se autoriza el reintento.
+        assert (await client.post(f"/api/pruebas/configurar/{expediente.id}?tipo_prueba=DINAMICA", headers=h)).status_code == 409
+        assert (await client.post(f"/api/pruebas/reintentar/{expediente.id}", headers=h)).status_code == 200
 
     eventos = (await db_session.execute(
         select(EventLog).where(

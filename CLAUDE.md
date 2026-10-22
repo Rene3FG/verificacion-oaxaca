@@ -2928,3 +2928,14 @@ Primeros dos puntos de seguridad de `docs/PENDIENTES_2026-10-20.md`, sin migraci
   min sin peticiones; la actividad (`station_sessions.updated_at`) se renueva como máximo una vez por minuto. El interceptor
   401 del frontend devuelve al login. 0 apaga cada regla. Ajustar la inactividad al ritmo real de un verificentro.
 - 4 pruebas nuevas, 449 en total.
+
+## F1/F2: error de equipo = ERROR_INTEGRACION con reintento explícito (2026-10-21)
+
+- `POST /pruebas/interrumpir` con `causa=ERROR_EQUIPO` ahora deja el expediente en `ERROR_INTEGRACION` (antes volvía a
+  `LISTO_PARA_PRUEBA`); `CANCELADA` no cambia. Transiciones nuevas: `PRUEBA_CONFIGURADA|PRUEBA_EN_PROCESO → ERROR_INTEGRACION` y
+  `ERROR_INTEGRACION → LISTO_PARA_PRUEBA`.
+- `POST /pruebas/reintentar/{id}` (estación de Prueba): solo si el último evento hacia `ERROR_INTEGRACION` fue
+  `prueba_error_equipo` (SIOX y OBD usan el mismo estado con sus propios caminos); evento `prueba_reintento_autorizado`.
+- "Errores y reintentos" lista ese error como incidencia (`REINTENTAR_PRUEBA`, desde la estación de Prueba, igual que la
+  impresión exige su estación). `PruebaView.vue` muestra el expediente en error con "Autorizar reintento".
+- Cierra F1 y F2 de `docs/PENDIENTES_2026-10-20.md`. 450 pruebas. No probado en Chrome.

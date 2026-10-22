@@ -296,6 +296,15 @@ _GUIAS = {
         "Impresión para que se asigne el siguiente.",
         "REINTENTAR_IMPRESION",
     ),
+    "ERROR_INTEGRACION": (
+        "Error del equipo de prueba",
+        "Estación de Prueba",
+        "El equipo de medición falló durante la prueba. No se generó resultado y el "
+        "expediente espera el reintento.",
+        "Revise el equipo (comunicación, calibración) y autorice el reintento desde la "
+        "estación de Prueba: el expediente vuelve a la cola de su línea y se configura de nuevo.",
+        "REINTENTAR_PRUEBA",
+    ),
     "FOLIO_ERROR": (
         "Sin folio disponible",
         "Impresión Central",
@@ -352,7 +361,11 @@ async def incidencias_centro(
             select(Verificacion).where(
                 Verificacion.centro_id == session.center_id,
                 Verificacion.estado.in_(
-                    [EstadoVerificacion.IMPRESION_FALLIDA, EstadoVerificacion.FOLIO_ERROR]
+                    [
+                        EstadoVerificacion.IMPRESION_FALLIDA,
+                        EstadoVerificacion.FOLIO_ERROR,
+                        EstadoVerificacion.ERROR_INTEGRACION,
+                    ]
                 ),
             )
         )
@@ -373,7 +386,16 @@ async def incidencias_centro(
         evento, responsable = ultimo if ultimo else (None, None)
         detalle = (evento.detalle_json or {}) if evento else {}
 
-        if exp.estado == EstadoVerificacion.IMPRESION_FALLIDA:
+        if exp.estado == EstadoVerificacion.ERROR_INTEGRACION:
+            # El mismo estado lo usan SIOX y OBD; solo el error de equipo de
+            # prueba es una incidencia de esta bandeja.
+            if evento is None or evento.evento != "prueba_error_equipo":
+                continue
+            intentos = detalle.get("intento", 1)
+            tecnico = " · ".join(
+                x for x in (detalle.get("motivo"), detalle.get("mensaje_tecnico")) if x
+            ) or None
+        elif exp.estado == EstadoVerificacion.IMPRESION_FALLIDA:
             job = (
                 await db.execute(select(PrintJob).where(PrintJob.verificacion_id == exp.id))
             ).scalars().first()

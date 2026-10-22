@@ -21,6 +21,7 @@ const ESTADOS_PRUEBA = [
   "LISTO_PARA_PRUEBA",
   "PRUEBA_CONFIGURADA",
   "PRUEBA_EN_PROCESO",
+  "ERROR_INTEGRACION",
 ];
 
 // Checklist real de inspección visual (sección 8 de la revisión del Figma
@@ -529,6 +530,21 @@ function abrirInterrupcion(causa, mensajeTecnico = "") {
   Object.assign(interrupcion, { abierto: true, causa, motivo: "", mensajeTecnico });
 }
 
+const reintentando = ref(false);
+async function reintentarPrueba() {
+  reintentando.value = true;
+  error.value = null;
+  try {
+    await api.post(`/pruebas/reintentar/${expediente.value.id}`);
+    aviso.value = "Reintento autorizado. El expediente volvió a la cola de prueba.";
+    await recargarExpediente();
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo autorizar el reintento.";
+  } finally {
+    reintentando.value = false;
+  }
+}
+
 async function interrumpirPrueba() {
   interrupcion.enviando = true;
   error.value = null;
@@ -817,6 +833,23 @@ onUnmounted(detenerSondeoCorrida);
               Guardar resultado
             </v-btn>
           </template>
+        </v-card-text>
+      </v-card>
+
+      <!-- HU-054: error del equipo, a la espera de reintento -->
+      <v-card
+        v-else-if="expediente.estado === 'ERROR_INTEGRACION'"
+        class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat"
+      >
+        <v-card-title>Error del equipo de prueba</v-card-title>
+        <v-card-text>
+          <v-alert type="error" variant="tonal" class="mb-3">
+            La prueba se interrumpió por un error del equipo y no generó resultado. Revise el
+            equipo y autorice el reintento; el detalle técnico está en la bitácora.
+          </v-alert>
+          <v-btn color="primary" :loading="reintentando" @click="reintentarPrueba">
+            Autorizar reintento
+          </v-btn>
         </v-card-text>
       </v-card>
 

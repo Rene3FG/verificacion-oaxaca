@@ -193,6 +193,12 @@ const lineasIncidencias = computed(() =>
 // El reintento técnico imprime físicamente: solo desde la estación de
 // Impresión Central, donde está la impresora (el backend también lo exige).
 const enEstacionImpresion = computed(() => session.estacion?.station_type === "impresion");
+const enEstacionPrueba = computed(() => session.estacion?.station_type === "prueba");
+// La acción de cada incidencia solo se puede ejecutar desde la estación que
+// tiene el hardware (impresora / equipo de prueba).
+const accionBloqueada = (inc) =>
+  (inc.accion === "REINTENTAR_IMPRESION" && !enEstacionImpresion.value) ||
+  (inc.accion === "REINTENTAR_PRUEBA" && !enEstacionPrueba.value);
 
 async function cargarIncidencias() {
   const consulta = ++consultaIncidencias;
@@ -231,6 +237,9 @@ async function reintentarIncidencia(inc) {
   try {
     if (inc.accion === "SINCRONIZAR") {
       await sincronizarAhora();
+    } else if (inc.accion === "REINTENTAR_PRUEBA") {
+      await api.post(`/pruebas/reintentar/${inc.expediente_id}`);
+      aviso.value = `${inc.placa} volvió a la cola de Prueba.`;
     } else if (inc.accion === "REINTENTAR_IMPRESION") {
       const { data } = await api.post(`/impresion/imprimir/${inc.expediente_id}`);
       aviso.value =
@@ -250,6 +259,7 @@ const TEXTO_ACCION = {
   REINTENTAR_IMPRESION: "Reintentar impresión",
   REGISTRAR_LOTE: "Registrar lote de folios",
   SINCRONIZAR: "Sincronizar ahora",
+  REINTENTAR_PRUEBA: "Autorizar reintento de prueba",
 };
 
 // --- Sincronización (visibilidad de sync_outbox al operador) ---
@@ -825,6 +835,13 @@ onMounted(() => {
                       El reintento imprime en papel: inicie sesión como supervisor en la estación de
                       Impresión Central para ejecutarlo.
                     </p>
+                    <p
+                      v-if="incidenciaSel.accion === 'REINTENTAR_PRUEBA' && !enEstacionPrueba"
+                      class="text-caption text-medium-emphasis mt-2"
+                    >
+                      El reintento se autoriza desde la estación de Prueba de la línea: inicie
+                      sesión ahí para ejecutarlo.
+                    </p>
                   </v-card-text>
                   <v-card-actions>
                     <v-btn
@@ -839,7 +856,7 @@ onMounted(() => {
                       color="primary"
                       variant="flat"
                       :loading="reintentando"
-                      :disabled="incidenciaSel.accion === 'REINTENTAR_IMPRESION' && !enEstacionImpresion"
+                      :disabled="accionBloqueada(incidenciaSel)"
                       @click="reintentarIncidencia(incidenciaSel)"
                     >
                       {{ TEXTO_ACCION[incidenciaSel.accion] }}

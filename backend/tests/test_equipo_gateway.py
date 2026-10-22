@@ -177,8 +177,17 @@ async def test_falla_del_equipo_y_reintento(client, db_session, simulador, reloj
     )
     assert resp.status_code == 200
     await db_session.refresh(expediente)
-    assert expediente.estado == EstadoVerificacion.LISTO_PARA_PRUEBA
+    assert expediente.estado == EstadoVerificacion.ERROR_INTEGRACION
     assert expediente.equipo_test_run_id is None
+
+    # HU-054: el reintento es explícito y devuelve el expediente a la cola.
+    resp = await client.post(f"/api/pruebas/reintentar/{expediente.id}", headers=_h(sesion))
+    assert resp.status_code == 200
+    await db_session.refresh(expediente)
+    assert expediente.estado == EstadoVerificacion.LISTO_PARA_PRUEBA
+    assert (
+        await client.post(f"/api/pruebas/reintentar/{expediente.id}", headers=_h(sesion))
+    ).status_code == 409
     evento = await db_session.scalar(
         select(EventLog).where(
             EventLog.verificacion_id == expediente.id, EventLog.evento == "prueba_error_equipo"

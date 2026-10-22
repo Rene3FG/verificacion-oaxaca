@@ -73,8 +73,10 @@ ALLOWED_TRANSITIONS: dict[E, set[E]] = {
     # HU-045/054/083/084: una prueba configurada o en proceso puede
     # interrumpirse (cancelación operativa o error del equipo) y vuelve a la
     # cola de su línea para reintentarse; el intento queda en la bitácora.
-    E.PRUEBA_CONFIGURADA: {E.PRUEBA_EN_PROCESO, E.LISTO_PARA_PRUEBA},
-    E.PRUEBA_EN_PROCESO: {E.PRUEBA_FINALIZADA, E.LISTO_PARA_PRUEBA},
+    # HU-054: un error del equipo deja el expediente en ERROR_INTEGRACION
+    # (incidencia abierta) hasta que se autoriza el reintento.
+    E.PRUEBA_CONFIGURADA: {E.PRUEBA_EN_PROCESO, E.LISTO_PARA_PRUEBA, E.ERROR_INTEGRACION},
+    E.PRUEBA_EN_PROCESO: {E.PRUEBA_FINALIZADA, E.LISTO_PARA_PRUEBA, E.ERROR_INTEGRACION},
     # El resultado de la prueba decide la cola: APROBADO -> PENDIENTE_IMPRESION,
     # RECHAZADO -> PENDIENTE_DE_IMPRESION_RECHAZO (ver pruebas.guardar_resultado).
     E.PRUEBA_FINALIZADA: {E.PENDIENTE_IMPRESION, E.PENDIENTE_DE_IMPRESION_RECHAZO},
@@ -94,6 +96,7 @@ ALLOWED_TRANSITIONS: dict[E, set[E]] = {
     E.ERROR_INTEGRACION: {
         E.DATOS_SIOX_CONSULTADOS,
         E.OBD_SOLICITADO,
+        E.LISTO_PARA_PRUEBA,
     },
     E.FOLIO_ERROR: {E.FOLIO_SOLICITADO},
     E.IMPRESION_FALLIDA: {E.FOLIO_ASIGNADO},
