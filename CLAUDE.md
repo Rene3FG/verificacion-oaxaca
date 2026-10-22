@@ -2958,3 +2958,9 @@ Cubre D1, D2, D3 y D9 de `docs/PENDIENTES_2026-10-20.md`; el entorno de desarrol
 caracteres (ya existía), al menos una letra y un número, fuera de una lista corta de contraseñas comunes, y distinta del
 usuario (422 con el motivo). No hay caducidad ni rotación forzada. Las contraseñas de `seed.py` (`operador1`, `supervisor1`…)
 son de desarrollo y no pasarían esta política: en producción hay que dar de alta los usuarios reales desde Administración (D5).
+
+## Acceso denegado con permisos asignados (2026-10-22, HU-007)
+
+`POST /api/estaciones/login` responde 403 con `{"detail", "permisos_asignados": [{station_type, center_id, line_id}]}`
+(solo los permisos `can_operate` del propio usuario ya autenticado). `LoginView.vue` los muestra en la fila
+"Estaciones asignadas" del estado B. No hay rol global en el modelo, por eso se muestran estaciones y no un "rol".
