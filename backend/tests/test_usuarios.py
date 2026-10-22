@@ -1,3 +1,5 @@
+import pytest
+
 from app.models.enums import StationType
 from tests.conftest import crear_estacion, crear_sesion_activa, crear_sesion_supervisor, crear_usuario
 
@@ -192,3 +194,33 @@ def test_verify_password_con_mas_de_72_bytes_devuelve_false():
     from app.services.auth import hash_password, verify_password
 
     assert verify_password("x" * 100, hash_password("corta-clave-1")) is False
+
+
+@pytest.mark.parametrize(
+    "password",
+    ["sololetras", "123456789", "password1", "aaaa1111", "nuevo.op1"],
+)
+async def test_politica_de_contrasena_rechaza_debiles(client, db_session, password):
+    sesion = await crear_sesion_supervisor(db_session)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/usuarios",
+        json={"username": "nuevo.op1", "password": password, "nombre_completo": "X"},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 422
+
+
+async def test_restablecer_contrasena_aplica_la_politica(client, db_session):
+    sesion = await crear_sesion_supervisor(db_session)
+    objetivo = await crear_usuario(db_session, password="vieja-clave-1")
+    await db_session.commit()
+    h = {"X-Session-Id": str(sesion.id)}
+
+    resp = await client.patch(f"/api/usuarios/{objetivo.id}", json={"password": "sololetras"}, headers=h)
+    assert resp.status_code == 422
+    resp = await client.patch(
+        f"/api/usuarios/{objetivo.id}", json={"password": objetivo.username}, headers=h
+    )
+    assert resp.status_code == 422

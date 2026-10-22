@@ -2951,3 +2951,10 @@ Cubre D1, D2, D3 y D9 de `docs/PENDIENTES_2026-10-20.md`; el entorno de desarrol
 - `.github/workflows/ci.yml`: backend (pytest contra Postgres 16) y frontend (Vitest + build) en cada push/PR. Aún no ha corrido en GitHub.
 - **Bug encontrado al probar el stack**: `requirements.txt` no declaraba `greenlet`; la imagen no arrancaba (en local lo traía el `.venv`). Ahora `sqlalchemy[asyncio]`.
 - Probado levantando el stack completo: SPA, `/api` vía nginx (401 sin sesión), migraciones y seed. Faltan D4 (respaldos), D5 (datos de arranque reales), D6 (manual), D7, D8.
+
+## X6: política de contraseñas (2026-10-21)
+
+`app.services.auth.validar_politica_password`, aplicada en `UsuarioCreate`/`UsuarioUpdate` (alta y restablecimiento): mínimo 8
+caracteres (ya existía), al menos una letra y un número, fuera de una lista corta de contraseñas comunes, y distinta del
+usuario (422 con el motivo). No hay caducidad ni rotación forzada. Las contraseñas de `seed.py` (`operador1`, `supervisor1`…)
+son de desarrollo y no pasarían esta política: en producción hay que dar de alta los usuarios reales desde Administración (D5).

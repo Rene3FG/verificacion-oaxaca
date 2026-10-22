@@ -341,6 +341,8 @@ onMounted(() => {
             v-model="usuarioForm.password"
             type="password"
             :label="usuarioEditandoId ? 'Nueva contraseña (opcional)' : 'Contraseña (mín. 8)'"
+            hint="Mínimo 8 caracteres, con al menos una letra y un número."
+            persistent-hint
             autocomplete="new-password"
           />
         </v-card-text>

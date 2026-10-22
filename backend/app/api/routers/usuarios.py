@@ -73,6 +73,10 @@ async def actualizar_usuario(
 
     password = cambios.pop("password", None)
     if password is not None:
+        if password.lower() == usuario.username.lower():
+            raise HTTPException(
+                status_code=422, detail="La contraseña no puede ser igual al usuario."
+            )
         usuario.password_hash = hash_password(password)
     for campo, valor in cambios.items():
         if valor is not None:
