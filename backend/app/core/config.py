@@ -21,6 +21,14 @@ class Settings(BaseSettings):
 
     obd_modelo_minimo: int = 2006
 
+    # X1/X2 (PENDIENTES 2026-10-20): tras `login_max_intentos` credenciales
+    # inválidas seguidas el usuario queda bloqueado `login_bloqueo_min`
+    # minutos; una sesión sin peticiones por `sesion_inactividad_min`
+    # minutos expira. 0 apaga cada regla.
+    login_max_intentos: int = 5
+    login_bloqueo_min: int = 15
+    sesion_inactividad_min: int = 30
+
     # Equipment Integration Contract v1 (ver app/services/equipo_gateway.py):
     # "manual" = sin gateway, el operador captura las lecturas; "simulador" =
     # gateway en memoria para QA/demo. Nunca "simulador" en producción.

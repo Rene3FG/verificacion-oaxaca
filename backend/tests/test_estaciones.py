@@ -207,3 +207,48 @@ async def test_crear_estacion_sin_supervisor_responde_403(client, db_session):
         json={"name": "X", "station_type": "captura", "center_id": "OAX-01"},
     )
     assert resp.status_code == 403
+
+
+async def test_sesion_expira_por_inactividad(client, db_session):
+    import datetime
+
+    from app.core.config import settings
+
+    estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA)
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    await db_session.commit()
+    headers = {"X-Session-Id": str(sesion.id)}
+
+    assert (await client.get("/api/sync/estado", headers=headers)).status_code == 200
+
+    sesion.updated_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+        minutes=settings.sesion_inactividad_min + 1
+    )
+    await db_session.commit()
+
+    resp = await client.get("/api/sync/estado", headers=headers)
+    assert resp.status_code == 401
+    await db_session.refresh(sesion)
+    assert sesion.status == "expirada"
+    assert sesion.logout_at is not None
+
+
+async def test_actividad_renueva_la_sesion(client, db_session):
+    import datetime
+
+    from app.core.config import settings
+
+    estacion = await crear_estacion(db_session, station_type=StationType.CAPTURA)
+    sesion = await crear_sesion_activa(db_session, estacion=estacion)
+    # Casi vencida: una petición la renueva.
+    sesion.updated_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+        minutes=settings.sesion_inactividad_min - 1
+    )
+    await db_session.commit()
+    headers = {"X-Session-Id": str(sesion.id)}
+
+    assert (await client.get("/api/sync/estado", headers=headers)).status_code == 200
+    await db_session.refresh(sesion)
+    assert datetime.datetime.now(datetime.timezone.utc) - sesion.updated_at < datetime.timedelta(
+        minutes=1
+    )

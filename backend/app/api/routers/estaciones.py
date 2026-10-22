@@ -3,9 +3,10 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.api.deps import SessionContext, get_current_session, get_db, requiere_supervisor
 from app.models.access_event import AccessEvent
 from app.models.enums import AccessEventResultado, StationType
@@ -20,6 +21,8 @@ from app.schemas.estacion import (
 from app.services.auth import verify_password
 
 router = APIRouter(prefix="/api/estaciones", tags=["estaciones"])
+
+MOTIVO_CREDENCIALES = "Credenciales inválidas"
 
 
 @router.get("", response_model=list[WorkstationRead])
@@ -141,6 +144,38 @@ class LoginRequest(BaseModel):
     device_fingerprint: str | None = None
 
 
+async def _segundos_de_bloqueo(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """Segundos que le faltan al usuario para poder volver a intentar (0 si
+    no está bloqueado)."""
+    ultimo_ok = (
+        select(func.max(AccessEvent.created_at))
+        .where(
+            AccessEvent.user_id == user_id,
+            AccessEvent.resultado == AccessEventResultado.PERMITIDO,
+        )
+        .scalar_subquery()
+    )
+    ventana = datetime.timedelta(minutes=settings.login_bloqueo_min)
+    desde = datetime.datetime.now(datetime.timezone.utc) - ventana
+    fallos = (
+        await db.execute(
+            select(AccessEvent.created_at)
+            .where(
+                AccessEvent.user_id == user_id,
+                AccessEvent.resultado == AccessEventResultado.DENEGADO,
+                AccessEvent.motivo == MOTIVO_CREDENCIALES,
+                AccessEvent.created_at > desde,
+                or_(ultimo_ok.is_(None), AccessEvent.created_at > ultimo_ok),
+            )
+            .order_by(AccessEvent.created_at.desc())
+        )
+    ).scalars().all()
+    if len(fallos) < settings.login_max_intentos:
+        return 0
+    restante = fallos[0] + ventana - datetime.datetime.now(datetime.timezone.utc)
+    return max(int(restante.total_seconds()), 0)
+
+
 @router.post("/login", response_model=StationSessionRead)
 async def iniciar_sesion(
     payload: LoginRequest, db: AsyncSession = Depends(get_db)
@@ -154,6 +189,18 @@ async def iniciar_sesion(
             select(CatUsuario).where(CatUsuario.username == payload.username)
         )
     ).scalar_one_or_none()
+
+    # X1: bloqueo temporal tras N credenciales inválidas seguidas. Se cuenta
+    # en `access_events` (sin tabla nueva); un login correcto reinicia la
+    # cuenta. Aplica aunque la contraseña ahora sea la correcta.
+    if usuario is not None and settings.login_max_intentos > 0:
+        espera = await _segundos_de_bloqueo(db, usuario.id)
+        if espera > 0:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Demasiados intentos fallidos. Intenta de nuevo en {-(-espera // 60)} min.",
+                headers={"Retry-After": str(espera)},
+            )
 
     # Mismo mensaje genérico tanto si el usuario no existe como si la
     # contraseña es incorrecta — no revelar cuál de las dos falló.
@@ -171,7 +218,7 @@ async def iniciar_sesion(
                 center_id=estacion.center_id,
                 line_id=estacion.line_id,
                 resultado=AccessEventResultado.DENEGADO,
-                motivo="Credenciales inválidas",
+                motivo=MOTIVO_CREDENCIALES,
                 ip_address=payload.ip_address,
             )
         )

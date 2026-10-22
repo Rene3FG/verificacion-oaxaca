@@ -2914,3 +2914,17 @@ estados anterior/nuevo y usuario por evento (HU-027). 441 pruebas.
 - `docs/PENDIENTES_2026-10-20.md`: lista completa de lo que falta (bloqueos de terceros, supuestos por confirmar,
   tareas sin bloqueo, huecos de seguridad y de despliegue). Hallazgos nuevos de esa revisión: sin límite de intentos
   de login, sin caducidad de sesión por inactividad, sin TLS/CORS de producción, sin Dockerfile de producción ni CI.
+
+## X1/X2: bloqueo de login y caducidad de sesión (2026-10-21)
+
+Primeros dos puntos de seguridad de `docs/PENDIENTES_2026-10-20.md`, sin migración ni tabla nueva.
+
+- **X1**: tras `LOGIN_MAX_INTENTOS` (5) credenciales inválidas seguidas de un usuario existente, `POST /estaciones/login`
+  responde 429 con `Retry-After` durante `LOGIN_BLOQUEO_MIN` (15) min, incluso con la contraseña correcta. La cuenta sale de
+  `access_events` (motivo "Credenciales inválidas" desde el último login permitido), así que un login correcto la reinicia.
+  Solo cuenta por usuario existente (los intentos con usuario inexistente no tienen `user_id`); el 429 revela que el usuario
+  existe, aceptado frente a la fuerza bruta. No cuenta los 403 de falta de permiso.
+- **X2**: `get_current_session` expira la sesión (`status="expirada"`, `logout_at`) si pasaron `SESION_INACTIVIDAD_MIN` (30)
+  min sin peticiones; la actividad (`station_sessions.updated_at`) se renueva como máximo una vez por minuto. El interceptor
+  401 del frontend devuelve al login. 0 apaga cada regla. Ajustar la inactividad al ritmo real de un verificentro.
+- 4 pruebas nuevas, 449 en total.

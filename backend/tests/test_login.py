@@ -287,3 +287,57 @@ async def test_login_denegado_registra_access_event_sin_expediente(client, db_se
     assert len(eventos) == 1
     assert eventos[0].resultado == AccessEventResultado.DENEGADO
     assert eventos[0].session_id is None
+
+
+async def _login(client, usuario, estacion, password):
+    return await client.post(
+        "/api/estaciones/login",
+        json={
+            "username": usuario.username,
+            "password": password,
+            "workstation_id": str(estacion.id),
+        },
+    )
+
+
+async def _usuario_con_permiso(db_session):
+    usuario = await crear_usuario(db_session, password="clave-correcta")
+    estacion = await crear_estacion(
+        db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=1
+    )
+    await crear_permiso(
+        db_session,
+        user_id=usuario.id,
+        station_type=StationType.PRUEBA,
+        center_id="OAX-01",
+        line_id=1,
+    )
+    await db_session.commit()
+    return usuario, estacion
+
+
+async def test_login_se_bloquea_tras_intentos_fallidos(client, db_session):
+    from app.core.config import settings
+
+    usuario, estacion = await _usuario_con_permiso(db_session)
+
+    for _ in range(settings.login_max_intentos):
+        resp = await _login(client, usuario, estacion, "mala")
+        assert resp.status_code == 401
+
+    # Bloqueado: ni siquiera la contraseña correcta entra.
+    resp = await _login(client, usuario, estacion, "clave-correcta")
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) > 0
+
+
+async def test_login_exitoso_reinicia_la_cuenta_de_fallos(client, db_session):
+    from app.core.config import settings
+
+    usuario, estacion = await _usuario_con_permiso(db_session)
+
+    for _ in range(settings.login_max_intentos - 1):
+        assert (await _login(client, usuario, estacion, "mala")).status_code == 401
+    assert (await _login(client, usuario, estacion, "clave-correcta")).status_code == 200
+    # Un fallo más no debe bloquear: la cuenta volvió a cero.
+    assert (await _login(client, usuario, estacion, "mala")).status_code == 401

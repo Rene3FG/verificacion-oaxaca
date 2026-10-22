@@ -1,3 +1,4 @@
+import datetime
 import uuid
 from dataclasses import dataclass
 from typing import Annotated
@@ -6,6 +7,7 @@ from fastapi import Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.models.enums import StationType
 from app.models.usuario import CatUsuario
@@ -20,6 +22,9 @@ __all__ = [
     "requiere_supervisor",
     "es_supervisor",
 ]
+
+
+ACTIVIDAD_REFRESCO = datetime.timedelta(seconds=60)
 
 
 @dataclass
@@ -61,6 +66,22 @@ async def get_current_session(
     sesion = await db.get(StationSession, session_uuid)
     if sesion is None or sesion.status != "activa" or sesion.logout_at is not None:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+
+    # X2: la sesión expira tras `sesion_inactividad_min` sin peticiones.
+    # `updated_at` es la última actividad; se renueva como máximo una vez por
+    # minuto para no escribir en cada petición.
+    ahora = datetime.datetime.now(datetime.timezone.utc)
+    ultima = sesion.updated_at or sesion.login_at or ahora
+    if settings.sesion_inactividad_min > 0 and ahora - ultima > datetime.timedelta(
+        minutes=settings.sesion_inactividad_min
+    ):
+        sesion.status = "expirada"
+        sesion.logout_at = ahora
+        await db.commit()
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    if ahora - ultima > ACTIVIDAD_REFRESCO:
+        sesion.updated_at = ahora
+        await db.commit()
 
     estacion = await db.get(Workstation, sesion.workstation_id)
     if estacion is None or not estacion.is_active:
