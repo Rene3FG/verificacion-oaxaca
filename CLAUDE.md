@@ -2939,3 +2939,15 @@ Primeros dos puntos de seguridad de `docs/PENDIENTES_2026-10-20.md`, sin migraci
 - "Errores y reintentos" lista ese error como incidencia (`REINTENTAR_PRUEBA`, desde la estación de Prueba, igual que la
   impresión exige su estación). `PruebaView.vue` muestra el expediente en error con "Autorizar reintento".
 - Cierra F1 y F2 de `docs/PENDIENTES_2026-10-20.md`. 450 pruebas. No probado en Chrome.
+
+## Despliegue de producción y CI (2026-10-21)
+
+Cubre D1, D2, D3 y D9 de `docs/PENDIENTES_2026-10-20.md`; el entorno de desarrollo (`docker-compose.yml`, `Dockerfile`) no cambia.
+
+- `backend/Dockerfile.prod`: sin `--reload`, usuario no root, un solo worker (R2), aplica `alembic upgrade head` al arrancar.
+- `frontend/Dockerfile.prod` + `frontend/nginx.conf`: build de Vite servido por nginx, `/api/` por proxy al backend (mismo origen, sin CORS: X4) y fallback de SPA.
+- `docker-compose.prod.yml` + `.env.prod.example`: Postgres y Redis solo en la red interna, sin código montado, `restart: unless-stopped`, zona horaria de Oaxaca, secretos por `.env.prod` (no versionado). Publica HTTP en `WEB_PORT`; el TLS lo termina un proxy delante (X3 sigue abierto).
+  Uso: `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`.
+- `.github/workflows/ci.yml`: backend (pytest contra Postgres 16) y frontend (Vitest + build) en cada push/PR. Aún no ha corrido en GitHub.
+- **Bug encontrado al probar el stack**: `requirements.txt` no declaraba `greenlet`; la imagen no arrancaba (en local lo traía el `.venv`). Ahora `sqlalchemy[asyncio]`.
+- Probado levantando el stack completo: SPA, `/api` vía nginx (401 sin sesión), migraciones y seed. Faltan D4 (respaldos), D5 (datos de arranque reales), D6 (manual), D7, D8.
