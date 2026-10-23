@@ -23,7 +23,7 @@ La auditoría de Sebas (10-14) dice **94.5 % cubierto (104 de 110 HU, 348 de 367
 
 | # | Qué falta | Quién | Qué desbloquea | HU / área |
 |---|---|---|---|---|
-| B1 | **Plantilla Word del certificado de RECHAZO** y regla de la **fecha límite para la siguiente verificación**. Hoy el rechazo sale en el layout Particular | Cliente | Certificado de rechazo correcto | HU-070, Etapa 9 |
+| B1 | ~~Plantilla Word del certificado de RECHAZO y fecha límite~~ **RESUELTO 2026-10-22** (`RECHAZO.doc` recibida; layout `_LAYOUT_RECHAZO`, fecha límite = fin + 30 días, a confirmar con el cliente). Queda abierto: variante diésel y calibración contra papel real | Cliente | Certificado de rechazo correcto | HU-070, Etapa 9 |
 | B2 | **Protocolo real de los equipos** (dinamómetro, analizador, opacímetro), puerto/URL por línea, secciones 03+ del Equipment Integration Contract | Proveedor / Luis | Reemplazar `SimuladorGateway` por el adaptador real | HU-041, 042, 043, 044, 046, 083 |
 | B3 | **Sistema central de sincronización**: URL, autenticación, contrato. Hoy el cliente HTTP es un contrato **asumido** (upsert por id, `Idempotency-Key`) | Cliente / Luis | `enviar_uno_a_central` real; Etapa 12 completa | HU-101, 102, 103, 107 |
 | B4 | **Alcance de "sin internet"**: qué debe poder hacerse offline y qué no | Luis | Cerrar HU-101/102/103 | HU-101, 102, 103 |
