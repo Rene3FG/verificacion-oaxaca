@@ -2,6 +2,7 @@ import datetime
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -257,9 +258,31 @@ async def iniciar_sesion(
                 ip_address=payload.ip_address,
             )
         )
+        # HU-007: la pantalla de acceso denegado muestra qué sí tiene asignado
+        # el usuario (no solo el rechazo). Es info del propio usuario ya
+        # autenticado, no de terceros.
+        asignados = (
+            await db.execute(
+                select(UserStationPermission).where(
+                    UserStationPermission.user_id == usuario.id,
+                    UserStationPermission.can_operate.is_(True),
+                )
+            )
+        ).scalars().all()
         await db.commit()
-        raise HTTPException(
-            status_code=403, detail="No tienes permiso para operar esta estación."
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": "No tienes permiso para operar esta estación.",
+                "permisos_asignados": [
+                    {
+                        "station_type": p.station_type.value,
+                        "center_id": p.center_id,
+                        "line_id": p.line_id,
+                    }
+                    for p in asignados
+                ],
+            },
         )
 
     sesion = StationSession(

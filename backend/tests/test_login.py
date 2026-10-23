@@ -130,6 +130,12 @@ async def test_login_denegado_por_linea_distinta(client, db_session):
     )
 
     assert resp.status_code == 403
+    # HU-007: el 403 informa qué sí tiene asignado el usuario.
+    cuerpo = resp.json()
+    assert cuerpo["detail"] == "No tienes permiso para operar esta estación."
+    assert cuerpo["permisos_asignados"] == [
+        {"station_type": "prueba", "center_id": "OAX-01", "line_id": 2}
+    ]
 
 
 async def test_login_permitido_para_supervisor_con_line_id_null(client, db_session):

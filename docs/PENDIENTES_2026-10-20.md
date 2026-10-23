@@ -23,7 +23,7 @@ La auditoría de Sebas (10-14) dice **94.5 % cubierto (104 de 110 HU, 348 de 367
 
 | # | Qué falta | Quién | Qué desbloquea | HU / área |
 |---|---|---|---|---|
-| B1 | **Plantilla Word del certificado de RECHAZO** y regla de la **fecha límite para la siguiente verificación**. Hoy el rechazo sale en el layout Particular | Cliente | Certificado de rechazo correcto | HU-070, Etapa 9 |
+| B1 | ~~Plantilla Word del certificado de RECHAZO y fecha límite~~ **RESUELTO 2026-10-22** (`RECHAZO.doc` recibida; layout `_LAYOUT_RECHAZO`, fecha límite = fin + 30 días, a confirmar con el cliente). Queda abierto: variante diésel y calibración contra papel real | Cliente | Certificado de rechazo correcto | HU-070, Etapa 9 |
 | B2 | **Protocolo real de los equipos** (dinamómetro, analizador, opacímetro), puerto/URL por línea, secciones 03+ del Equipment Integration Contract | Proveedor / Luis | Reemplazar `SimuladorGateway` por el adaptador real | HU-041, 042, 043, 044, 046, 083 |
 | B3 | **Sistema central de sincronización**: URL, autenticación, contrato. Hoy el cliente HTTP es un contrato **asumido** (upsert por id, `Idempotency-Key`) | Cliente / Luis | `enviar_uno_a_central` real; Etapa 12 completa | HU-101, 102, 103, 107 |
 | B4 | **Alcance de "sin internet"**: qué debe poder hacerse offline y qué no | Luis | Cerrar HU-101/102/103 | HU-101, 102, 103 |
@@ -65,11 +65,11 @@ El código funciona con estas decisiones tomadas "por defecto"; cada una vive en
 | F3 | **Historial de incidencias** | No hay tabla: "abierta" se deriva del estado. Por eso falta el filtro "Estado: abiertos / resueltos" del Figma | Supervisión |
 | F4 | **`equipo_id` real en `ResultadoPrueba`** | Hoy "equipo" es la estación | HU-042, 102 |
 | F5 | **Calibración periódica como bloqueo** | El contrato no la detalla; preguntar a Luis o al proveedor antes de construir | HU-041/044 |
-| F6 | **Fila "Rol asignado" en acceso denegado** | Requiere que el 403 devuelva los permisos | HU-007 |
+| F6 | ~~Fila "Rol asignado" en acceso denegado~~ **HECHO 2026-10-22**: el 403 devuelve `permisos_asignados` y la pantalla lista las estaciones asignadas | HU-007 |
 | F7 | **Pausar prueba** | No se hizo "porque sin equipo no hay nada que pausar"; se reevalúa con el adaptador real | HU-045 |
 | F8 | **HU-024: crear el `PrintJob` de rechazo al rechazar** | El texto del Sheet lo pide al rechazar; hoy se crea al imprimir. Decidir si se cambia el código o el texto | HU-024 |
 | F9 | **Contador "sincronizando" siempre en 0** | La fila `SYNCING` nunca es visible porque se confirma al final del lote | HU-104 |
-| F10 | **Rango de lotes de folios sin tope** | Un supervisor puede registrar un rango arbitrariamente grande | Folios |
+| F10 | ~~Rango de lotes sin tope~~ **YA ESTABA HECHO** (`MAX_FOLIOS_POR_LOTE` = 10 000, desde 2026-09-22, con prueba en `test_folios.py`); esta lista estaba desactualizada | Folios |
 | F11 | **Catálogo de municipios fuera de Oaxaca** | Solo hay 570 municipios de Oaxaca | HU-016 |
 
 ### 3.2 Robustez de datos / sincronización

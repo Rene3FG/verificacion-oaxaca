@@ -60,6 +60,18 @@ const tipoEstacion = computed(
 
 const centroYLinea = computed(() => `${centro.value} · ${lineas.value}`);
 
+// HU-007: lo que el usuario sí tiene asignado (viene en el 403 del login).
+const asignadas = computed(() => {
+  const lista = session.permisosAsignados;
+  if (!lista.length) return "Ninguna";
+  return lista
+    .map((p) => {
+      const tipo = TIPO_ESTACION[p.station_type] ?? p.station_type;
+      return `${tipo} · ${p.center_id} · ${p.line_id == null ? "todas las líneas" : `línea ${p.line_id}`}`;
+    })
+    .join("; ");
+});
+
 // Estado que se renderiza: A = estación no configurada, B = acceso denegado
 // (403), C = formulario de login (incluye el error de credenciales, 401).
 const estado = computed(() => {
@@ -117,6 +129,10 @@ const estado = computed(() => {
           <div class="fila-meta"><span>Usuario</span><strong>{{ session.usuarioDenegado }}</strong></div>
           <div class="fila-meta"><span>Estación</span><strong>{{ session.estacion.name }}</strong></div>
           <div class="fila-meta"><span>Centro / línea</span><strong>{{ centroYLinea }}</strong></div>
+          <div class="fila-meta">
+            <span>Estaciones asignadas</span>
+            <strong>{{ asignadas }}</strong>
+          </div>
         </div>
 
         <v-alert type="error" variant="tonal" class="mb-4" icon="mdi-lock-outline">

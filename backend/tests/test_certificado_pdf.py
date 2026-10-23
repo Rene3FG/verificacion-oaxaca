@@ -207,6 +207,63 @@ def test_plantilla_particular_tres_copias_con_lecturas_y_placa_grande(monkeypatc
     assert "COEFICIENTE" not in html
 
 
+def test_plantilla_rechazo_sin_holograma_y_con_fecha_limite(monkeypatch):
+    """`RECHAZO.doc` (2026-10-22): igual que Particular salvo sin placa
+    grande y con la fecha límite (fin + 30 días) en la 3ª copia."""
+
+    capturado = _capturar_html(monkeypatch)
+    proyeccion = {
+        "certificate_type": "RECHAZO",
+        "semestre": 2,
+        "method": "GAS_DYNAMIC",
+        "generated_at": "2026-10-05T18:00:00+00:00",
+        "fields": {},
+    }
+
+    generar_pdf_certificado(_verificacion(), _vehiculo_completo(), proyeccion)
+    html = capturado["html"]
+
+    assert html.count("05/10/2026") == 3  # fecha de la prueba
+    assert html.count("04/11/2026") == 3  # fecha límite, una por copia
+    assert html.count("TST0001") == 3  # sin placa grande
+    assert 'class="c grande"' not in html
+    assert html.count("RECHAZO") == 3
+
+
+def test_rechazo_dias_vigencia_configurable(monkeypatch):
+    capturado = _capturar_html(monkeypatch)
+    proyeccion = {
+        "certificate_type": "RECHAZO",
+        "semestre": 2,
+        "method": "GAS_DYNAMIC",
+        "generated_at": "2026-10-05T18:00:00+00:00",
+        "fields": {},
+    }
+
+    generar_pdf_certificado(
+        _verificacion(), _vehiculo_completo(), proyeccion, config={"rechazo_dias_vigencia": 15}
+    )
+
+    assert capturado["html"].count("20/10/2026") == 3
+
+
+def test_rechazo_diesel_no_imprime_etiquetas_de_gasolina(monkeypatch):
+    capturado = _capturar_html(monkeypatch)
+    proyeccion = {
+        "certificate_type": "RECHAZO",
+        "semestre": 1,
+        "method": "DIESEL_OPACITY",
+        "generated_at": "2026-03-01T18:00:00+00:00",
+        "fields": {"coefficient_absorption_final_k_m1": 3.1},
+    }
+
+    generar_pdf_certificado(_verificacion(), _vehiculo_completo(), proyeccion)
+    html = capturado["html"]
+
+    assert "HC ppm" not in html
+    assert html.count("31/03/2026") == 3  # fecha límite igual que en gasolina
+
+
 def test_plantilla_intensivo_para_diesel(monkeypatch):
     capturado = _capturar_html(monkeypatch)
     proyeccion = {

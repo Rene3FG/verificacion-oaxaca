@@ -2958,3 +2958,27 @@ Cubre D1, D2, D3 y D9 de `docs/PENDIENTES_2026-10-20.md`; el entorno de desarrol
 caracteres (ya existía), al menos una letra y un número, fuera de una lista corta de contraseñas comunes, y distinta del
 usuario (422 con el motivo). No hay caducidad ni rotación forzada. Las contraseñas de `seed.py` (`operador1`, `supervisor1`…)
 son de desarrollo y no pasarían esta política: en producción hay que dar de alta los usuarios reales desde Administración (D5).
+
+## Acceso denegado con permisos asignados (2026-10-22, HU-007)
+
+`POST /api/estaciones/login` responde 403 con `{"detail", "permisos_asignados": [{station_type, center_id, line_id}]}`
+(solo los permisos `can_operate` del propio usuario ya autenticado). `LoginView.vue` los muestra en la fila
+"Estaciones asignadas" del estado B. No hay rol global en el modelo, por eso se muestran estaciones y no un "rol".
+
+## Certificado de RECHAZO: layout de sobreimpresión (2026-10-22)
+
+Llegó `RECHAZO.doc`; Sebastián extrajo las coordenadas (ingeniería inversa)
+y se cargaron como `_LAYOUT_RECHAZO` en `app/services/certificado.py`.
+Igual que Particular salvo: sin `placa_grande` (sin holograma) y campo
+`fecha_limite` en (463.5, 279.5) = fin de la prueba + 30 días naturales
+(plazo de la 2ª verificación según Sebastián; no verificado contra la norma;
+configurable con el parámetro `certificado_rechazo_dias_vigencia`, 1-365). Se elige cuando `proyeccion["certificate_type"] == "RECHAZO"`,
+antes de la rama diésel.
+
+- **Hueco**: `RECHAZO.doc` es de gasolina. Un diésel rechazado por prueba usa
+  el mismo layout pero NO imprime etiquetas de gasolina vacías y tampoco el
+  coeficiente K (no hay coordenadas confirmadas). Preguntar a Sebastián/cliente
+  si existe variante diésel de RECHAZO.
+- Coordenadas medidas del render de LibreOffice; calibrar con los offsets de
+  `cat_parametros_sistema` contra papel real.
+- Pruebas en `tests/test_certificado_pdf.py`. 459 pruebas.

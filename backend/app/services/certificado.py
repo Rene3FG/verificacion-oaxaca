@@ -111,9 +111,9 @@ async def determinar_tipo_certificado(
 #   Particular); el texto "PARTICULAR" fijo de la plantilla se reemplaza por
 #   el tipo real. Confirmado por el cliente (2026-10-09): la plantilla de
 #   gasolina/diésel es la misma para Particular, Intensivo y Doble Cero.
-#   PENDIENTE: el RECHAZO usa un formato distinto (sin holograma, con
-#   "fecha límite para la siguiente verificación") — falta su plantilla
-#   Word; mientras tanto se imprime sobre el layout Particular;
+#   El RECHAZO usa `RECHAZO.doc` (recibida 2026-10-22): igual que Particular
+#   pero sin placa grande (holograma) y con "fecha límite" (fin + 30 días
+#   naturales) en la esquina inferior derecha;
 # - `<NombrePropietario> <ApellidoPatPro> <ApellidoMatPro>` ← `razon_social`
 #   (nombre completo / razón social, confirmado), `<Serie1>` ← NIV,
 #   `<SubMarca>` ← línea del vehículo;
@@ -167,6 +167,15 @@ _LAYOUT_PARTICULAR = {
     ],
 }
 
+_LAYOUT_RECHAZO = {
+    "copias": ((0.0, 0.0, 0.0), (0.0, 239.4, 239.4), (4.7, 484.6, 471.1)),
+    "y_bloque_inferior": 190.0,
+    "placa_grande": None,  # sin holograma
+    "campos": _LAYOUT_PARTICULAR["campos"] + [("fecha_limite", "l", 463.5, 279.5)],
+    "etiquetas": _LAYOUT_PARTICULAR["etiquetas"],
+    "lecturas": _LAYOUT_PARTICULAR["lecturas"],
+}
+
 _LAYOUT_INTENSIVO = {
     "copias": ((0.0, 0.0, 0.0), (2.3, 258.4, 264.3), (2.3, 510.0, 514.3)),
     "y_bloque_inferior": 150.0,
@@ -205,6 +214,7 @@ CONFIG_CERTIFICADO_DEFAULT = {
     "imprime_folio": True,
     "offset_x_mm": 0.0,
     "offset_y_mm": 0.0,
+    "rechazo_dias_vigencia": 30,
 }
 
 
@@ -223,6 +233,9 @@ async def cargar_config_certificado(db: AsyncSession) -> dict:
         "imprime_folio": (await get_parametro(db, "certificado_imprime_folio")) == "true",
         "offset_x_mm": float(await get_parametro(db, "certificado_offset_x_mm")),
         "offset_y_mm": float(await get_parametro(db, "certificado_offset_y_mm")),
+        "rechazo_dias_vigencia": int(
+            await get_parametro(db, "certificado_rechazo_dias_vigencia")
+        ),
     }
 
 
@@ -317,7 +330,12 @@ def html_certificado(
 
     cfg = {**CONFIG_CERTIFICADO_DEFAULT, **(config or {})}
     metodo = proyeccion.get("method")
-    layout = _LAYOUT_INTENSIVO if metodo == "DIESEL_OPACITY" else _LAYOUT_PARTICULAR
+    if proyeccion.get("certificate_type") == "RECHAZO":
+        layout = _LAYOUT_RECHAZO
+    elif metodo == "DIESEL_OPACITY":
+        layout = _LAYOUT_INTENSIVO
+    else:
+        layout = _LAYOUT_PARTICULAR
     fields = proyeccion.get("fields") or {}
 
     generado = proyeccion.get("generated_at")
@@ -361,6 +379,7 @@ def html_certificado(
         "certificado_anterior": _txt(getattr(verificacion, "certificado_anterior", None)),
         "multa": _txt(getattr(verificacion, "folio_multa", None)),
         "fecha": fin.strftime("%d/%m/%Y"),
+        "fecha_limite": (fin + datetime.timedelta(days=int(cfg["rechazo_dias_vigencia"]))).strftime("%d/%m/%Y"),
         "horas": _txt(horas),
         "folio": _txt(verificacion.folio_externo) if cfg["imprime_folio"] else "",
         "coeficiente": _txt(_num(fields.get("coefficient_absorption_final_k_m1"))),
@@ -379,14 +398,17 @@ def html_certificado(
             piezas.append(
                 _div(valores[campo], anclaje, x + dx, y + dy(y), ancho_max=ancho[0] if ancho else None)
             )
-        if metodo:
+        # RECHAZO.doc es de gasolina: en un diésel rechazado por prueba no hay
+        # dónde poner el coeficiente (coordenadas sin confirmar), así que no
+        # se imprimen etiquetas de gasolina vacías.
+        if metodo and not (layout is _LAYOUT_RECHAZO and metodo == "DIESEL_OPACITY"):
             for etiqueta, x, y in layout["etiquetas"]:
                 piezas.append(_div(_txt(etiqueta), "l", x + dx, y + dy(y)))
             for campo, y in layout["lecturas"]:
                 for fase, anclaje, x in (("ralenti", "r", 293.6), ("crucero", "c", 330.3)):
                     v = (fields.get(fase) or {}).get(campo)
                     piezas.append(_div(_txt(_num(v)), anclaje, x + dx, y + dy(y)))
-        if indice == 1:
+        if indice == 1 and layout.get("placa_grande"):
             px, py = layout["placa_grande"]
             piezas.append(_div(valores["placa"], "l", px + ox, py + oy, "grande"))
 

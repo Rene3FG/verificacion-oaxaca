@@ -26,6 +26,7 @@ export const useSessionStore = defineStore("session", {
     // Usuario tecleado en el intento denegado por 403, para mostrarlo en la
     // pantalla de acceso denegado (el backend no lo devuelve en el error).
     usuarioDenegado: null,
+    permisosAsignados: [],
   }),
 
   getters: {
@@ -87,6 +88,7 @@ export const useSessionStore = defineStore("session", {
         const status = err.response?.status;
         this.errorTipo = status === 403 ? "sin_permiso" : "credenciales";
         this.usuarioDenegado = status === 403 ? username : null;
+        this.permisosAsignados = status === 403 ? err.response?.data?.permisos_asignados || [] : [];
         this.error =
           err.response?.data?.detail || "No tienes permiso para operar esta estación.";
         throw err;
@@ -101,6 +103,7 @@ export const useSessionStore = defineStore("session", {
       this.error = null;
       this.errorTipo = null;
       this.usuarioDenegado = null;
+      this.permisosAsignados = [];
     },
 
     async cerrarSesion() {
