@@ -2971,8 +2971,8 @@ Llegó `RECHAZO.doc`; Sebastián extrajo las coordenadas (ingeniería inversa)
 y se cargaron como `_LAYOUT_RECHAZO` en `app/services/certificado.py`.
 Igual que Particular salvo: sin `placa_grande` (sin holograma) y campo
 `fecha_limite` en (463.5, 279.5) = fin de la prueba + 30 días naturales
-(plazo de la 2ª verificación según Sebastián; no verificado contra la norma,
-no configurable). Se elige cuando `proyeccion["certificate_type"] == "RECHAZO"`,
+(plazo de la 2ª verificación según Sebastián; no verificado contra la norma;
+configurable con el parámetro `certificado_rechazo_dias_vigencia`, 1-365). Se elige cuando `proyeccion["certificate_type"] == "RECHAZO"`,
 antes de la rama diésel.
 
 - **Hueco**: `RECHAZO.doc` es de gasolina. Un diésel rechazado por prueba usa
@@ -2981,4 +2981,4 @@ antes de la rama diésel.
   si existe variante diésel de RECHAZO.
 - Coordenadas medidas del render de LibreOffice; calibrar con los offsets de
   `cat_parametros_sistema` contra papel real.
-- Pruebas en `tests/test_certificado_pdf.py`. 458 pruebas.
+- Pruebas en `tests/test_certificado_pdf.py`. 459 pruebas.

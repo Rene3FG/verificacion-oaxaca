@@ -29,6 +29,9 @@ DEFAULTS = {
     "certificado_imprime_folio": "true",
     "certificado_offset_x_mm": "0",
     "certificado_offset_y_mm": "0",
+    # RECHAZO.doc (2026-10-22): plazo de la 2ª verificación, en días naturales
+    # posteriores a la prueba (por norma, según Sebastián; a confirmar).
+    "certificado_rechazo_dias_vigencia": "30",
 }
 
 DESCRIPCIONES = {
@@ -42,6 +45,7 @@ DESCRIPCIONES = {
     "certificado_imprime_folio": "Si el sistema sobreimprime el folio en la fila \"Folio Certificado\" de los 3 tantos (cliente, 2026-10-09).",
     "certificado_offset_x_mm": "Calibración horizontal de la sobreimpresión en mm (+ derecha, − izquierda).",
     "certificado_offset_y_mm": "Calibración vertical de la sobreimpresión en mm (+ abajo, − arriba).",
+    "certificado_rechazo_dias_vigencia": "Días naturales después de la prueba para la fecha límite de la siguiente verificación (certificado de RECHAZO).",
 }
 
 
@@ -81,6 +85,9 @@ def validar_valor(clave: str, valor: str) -> str | None:
     elif clave in ("certificado_clave_centro", "certificado_marca_equipo", "certificado_numero_equipo"):
         if not valor.strip() or len(valor) > 30:
             return f"{clave} no puede quedar vacío ni pasar de 30 caracteres."
+    elif clave == "certificado_rechazo_dias_vigencia":
+        if not valor.isdigit() or not 1 <= int(valor) <= 365:
+            return "certificado_rechazo_dias_vigencia debe ser un número entero de días entre 1 y 365."
     elif clave in ("gasolina_permite_cambio_estatica", "certificado_imprime_folio"):
         if valor not in ("true", "false"):
             return f"{clave} debe ser 'true' o 'false'."

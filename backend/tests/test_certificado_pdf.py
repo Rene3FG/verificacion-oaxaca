@@ -230,6 +230,23 @@ def test_plantilla_rechazo_sin_holograma_y_con_fecha_limite(monkeypatch):
     assert html.count("RECHAZO") == 3
 
 
+def test_rechazo_dias_vigencia_configurable(monkeypatch):
+    capturado = _capturar_html(monkeypatch)
+    proyeccion = {
+        "certificate_type": "RECHAZO",
+        "semestre": 2,
+        "method": "GAS_DYNAMIC",
+        "generated_at": "2026-10-05T18:00:00+00:00",
+        "fields": {},
+    }
+
+    generar_pdf_certificado(
+        _verificacion(), _vehiculo_completo(), proyeccion, config={"rechazo_dias_vigencia": 15}
+    )
+
+    assert capturado["html"].count("20/10/2026") == 3
+
+
 def test_rechazo_diesel_no_imprime_etiquetas_de_gasolina(monkeypatch):
     capturado = _capturar_html(monkeypatch)
     proyeccion = {

@@ -214,6 +214,7 @@ CONFIG_CERTIFICADO_DEFAULT = {
     "imprime_folio": True,
     "offset_x_mm": 0.0,
     "offset_y_mm": 0.0,
+    "rechazo_dias_vigencia": 30,
 }
 
 
@@ -232,6 +233,9 @@ async def cargar_config_certificado(db: AsyncSession) -> dict:
         "imprime_folio": (await get_parametro(db, "certificado_imprime_folio")) == "true",
         "offset_x_mm": float(await get_parametro(db, "certificado_offset_x_mm")),
         "offset_y_mm": float(await get_parametro(db, "certificado_offset_y_mm")),
+        "rechazo_dias_vigencia": int(
+            await get_parametro(db, "certificado_rechazo_dias_vigencia")
+        ),
     }
 
 
@@ -375,7 +379,7 @@ def html_certificado(
         "certificado_anterior": _txt(getattr(verificacion, "certificado_anterior", None)),
         "multa": _txt(getattr(verificacion, "folio_multa", None)),
         "fecha": fin.strftime("%d/%m/%Y"),
-        "fecha_limite": (fin + datetime.timedelta(days=30)).strftime("%d/%m/%Y"),
+        "fecha_limite": (fin + datetime.timedelta(days=int(cfg["rechazo_dias_vigencia"]))).strftime("%d/%m/%Y"),
         "horas": _txt(horas),
         "folio": _txt(verificacion.folio_externo) if cfg["imprime_folio"] else "",
         "coeficiente": _txt(_num(fields.get("coefficient_absorption_final_k_m1"))),
