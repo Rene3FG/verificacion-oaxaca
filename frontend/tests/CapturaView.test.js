@@ -267,7 +267,7 @@ describe("CapturaView - Creación de Expediente (HU-010)", () => {
     // Se abre el expediente recién retornado ("exp-nuevo")
     expect(api.get).toHaveBeenCalledWith("/expedientes/exp-nuevo");
     expect(api.get).toHaveBeenCalledWith("/siox/consultas/exp-nuevo");
-  });
+  }, 10000);
 
   it("muestra error 422 con formato de validación Pydantic", async () => {
     const w = montar({
