@@ -394,7 +394,10 @@ def html_certificado(
             piezas.append(
                 _div(valores[campo], anclaje, x + dx, y + dy(y), ancho_max=ancho[0] if ancho else None)
             )
-        if metodo:
+        # RECHAZO.doc es de gasolina: en un diésel rechazado por prueba no hay
+        # dónde poner el coeficiente (coordenadas sin confirmar), así que no
+        # se imprimen etiquetas de gasolina vacías.
+        if metodo and not (layout is _LAYOUT_RECHAZO and metodo == "DIESEL_OPACITY"):
             for etiqueta, x, y in layout["etiquetas"]:
                 piezas.append(_div(_txt(etiqueta), "l", x + dx, y + dy(y)))
             for campo, y in layout["lecturas"]:

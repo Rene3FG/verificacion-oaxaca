@@ -230,6 +230,23 @@ def test_plantilla_rechazo_sin_holograma_y_con_fecha_limite(monkeypatch):
     assert html.count("RECHAZO") == 3
 
 
+def test_rechazo_diesel_no_imprime_etiquetas_de_gasolina(monkeypatch):
+    capturado = _capturar_html(monkeypatch)
+    proyeccion = {
+        "certificate_type": "RECHAZO",
+        "semestre": 1,
+        "method": "DIESEL_OPACITY",
+        "generated_at": "2026-03-01T18:00:00+00:00",
+        "fields": {"coefficient_absorption_final_k_m1": 3.1},
+    }
+
+    generar_pdf_certificado(_verificacion(), _vehiculo_completo(), proyeccion)
+    html = capturado["html"]
+
+    assert "HC ppm" not in html
+    assert html.count("31/03/2026") == 3  # fecha límite igual que en gasolina
+
+
 def test_plantilla_intensivo_para_diesel(monkeypatch):
     capturado = _capturar_html(monkeypatch)
     proyeccion = {
