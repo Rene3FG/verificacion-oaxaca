@@ -291,4 +291,74 @@ describe("LoginView - Estado B: Acceso Denegado (HTTP 403)", () => {
     expect(w.text()).toContain("Iniciar sesión");
     expect(w.text()).not.toContain("Acceso denegado");
   });
+
+  async function denegar403(data) {
+    api.get.mockResolvedValueOnce({ data: ESTACION_PRUEBA });
+    api.post.mockRejectedValueOnce({ response: { status: 403, data } });
+
+    const w = montar();
+    await flushPromises();
+
+    w.vm.username = "operador_ajeno";
+    w.vm.password = "PasswordValido1";
+    await w.vm.entrar();
+    await flushPromises();
+    return w;
+  }
+
+  it("HU-007: muestra las estaciones asignadas devueltas en el 403", async () => {
+    const w = await denegar403({
+      detail: "Sin permiso.",
+      permisos_asignados: [
+        { station_type: "captura", center_id: "reforma", line_id: null },
+        { station_type: "prueba", center_id: "reforma", line_id: 2 },
+      ],
+    });
+
+    const t = w.text();
+    expect(t).toContain("Estaciones asignadas");
+    expect(t).toContain("Captura · reforma · todas las líneas");
+    expect(t).toContain("Prueba · reforma · línea 2");
+    expect(useSessionStore().permisosAsignados).toHaveLength(2);
+  });
+
+  it("HU-007: muestra 'Ninguna' si el 403 no trae permisos o la lista viene vacía", async () => {
+    const sinCampo = await denegar403({ detail: "Sin permiso." });
+    expect(sinCampo.text()).toContain("Estaciones asignadas");
+    expect(sinCampo.text()).toContain("Ninguna");
+
+    vi.clearAllMocks();
+    const vacia = await denegar403({ detail: "Sin permiso.", permisos_asignados: [] });
+    expect(vacia.text()).toContain("Ninguna");
+  });
+
+  it("HU-007: conserva el tipo crudo si no está en el catálogo de estaciones", async () => {
+    const w = await denegar403({
+      detail: "Sin permiso.",
+      permisos_asignados: [{ station_type: "supervision", center_id: "reforma", line_id: 1 }],
+    });
+    expect(w.text()).toContain("supervision · reforma · línea 1");
+  });
+
+  it("HU-007: un 401 no expone permisos asignados y cambiarUsuario los limpia", async () => {
+    api.get.mockResolvedValueOnce({ data: ESTACION_PRUEBA });
+    api.post.mockRejectedValueOnce({
+      response: { status: 401, data: { detail: "Credenciales inválidas." } },
+    });
+    const w = montar();
+    await flushPromises();
+    w.vm.username = "x";
+    w.vm.password = "y";
+    await w.vm.entrar();
+    await flushPromises();
+    expect(useSessionStore().permisosAsignados).toEqual([]);
+
+    const w2 = await denegar403({
+      detail: "Sin permiso.",
+      permisos_asignados: [{ station_type: "captura", center_id: "reforma", line_id: null }],
+    });
+    w2.vm.cambiarUsuario();
+    await flushPromises();
+    expect(useSessionStore().permisosAsignados).toEqual([]);
+  });
 });
