@@ -566,4 +566,39 @@ describe("ImpresionView - HU-006: estación Impresión Central, centro y líneas
     await flushPromises();
     expect(w.text()).toContain("Estación IMPRESION-07");
   });
+
+  it("sin allowed_line_ids (ausente o vacío) la cabecera dice 'Ninguna' y el filtro solo ofrece 'Todas las líneas'", async () => {
+    for (const lineas of [undefined, []]) {
+      const w = montar((s) => {
+        s.estacion = {
+          id: "est-impresion-03",
+          station_type: "impresion",
+          center_id: "OAX-01",
+          allowed_line_ids: lineas,
+        };
+      });
+      await flushPromises();
+
+      const cabecera = w.find("h1").element.parentElement.textContent.replace(/\s+/g, " ");
+      expect(cabecera).toContain("Líneas Ninguna");
+      expect(cabecera).not.toContain("1, 2");
+      expect(w.vm.opcionesFiltroLinea).toEqual([{ title: "Todas las líneas", value: "TODAS" }]);
+    }
+  });
+
+  it("sin workstation_id ni id la cabecera muestra 'Estación —'; con solo id usa el id", async () => {
+    const sinNada = montar((s) => {
+      s.estacion = { station_type: "impresion", center_id: "OAX-01", allowed_line_ids: [1, 2] };
+    });
+    await flushPromises();
+    const cabecera = sinNada.find("h1").element.parentElement.textContent.replace(/\s+/g, " ");
+    expect(cabecera).toContain("Estación —");
+    expect(cabecera).not.toContain("IMPRESION-01");
+
+    const soloId = montar((s) => {
+      s.estacion = { id: "est-impresion-09", station_type: "impresion", center_id: "OAX-01", allowed_line_ids: [1, 2] };
+    });
+    await flushPromises();
+    expect(soloId.text()).toContain("Estación est-impresion-09");
+  });
 });

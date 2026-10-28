@@ -115,7 +115,7 @@ const conteosPorEstado = computed(() => {
 });
 
 const opcionesFiltroLinea = computed(() => {
-  const permitidas = session.estacion?.allowed_line_ids || [1, 2];
+  const permitidas = session.estacion?.allowed_line_ids || [];
   const items = [{ title: "Todas las líneas", value: "TODAS" }];
   permitidas.forEach((l) => {
     items.push({ title: `Línea ${l}`, value: String(l) });
@@ -486,8 +486,8 @@ onMounted(cargarCola);
         <div>
           <h1 class="text-h5 font-weight-bold">Cola de Impresión Central</h1>
           <p class="text-caption text-medium-emphasis mb-0">
-            Centro {{ session.estacion?.center_id }} · Estación {{ session.estacion?.workstation_id || 'IMPRESION-01' }} · Líneas
-            {{ session.estacion?.allowed_line_ids?.join(', ') || '1, 2' }}
+            Centro {{ session.estacion?.center_id || '—' }} · Estación {{ session.estacion?.workstation_id || session.estacion?.id || '—' }} · Líneas
+            {{ session.estacion?.allowed_line_ids?.length ? session.estacion.allowed_line_ids.join(', ') : 'Ninguna' }}
           </p>
         </div>
         <v-btn
