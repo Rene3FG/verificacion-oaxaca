@@ -346,16 +346,15 @@ describe("PruebaView - Inspección visual", () => {
     expect(llamadasPost("/inspeccion/")).toHaveLength(1);
   });
 
-  // DEFECTO CONOCIDO (PruebaView.vue, de René): registrarInspeccion asigna
-  // aviso y luego cerrarExpediente() lo pone en null, así que el operador
-  // nunca ve "Inspección rechazada…". it.fails pasa mientras el defecto
-  // exista y se pondrá en rojo cuando se corrija: ahí quitar el .fails.
-  it.fails("el aviso de inspección rechazada sobrevive al cierre del expediente", async () => {
+  // Corregido por René (d791bb8): registrarInspeccion cierra con
+  // cerrarExpediente(true) y el aviso se anuncia en la lista.
+  it("el aviso de inspección rechazada sobrevive al cierre del expediente", async () => {
     srv.postHandlers["/inspeccion/"] = () => Promise.resolve({ data: { resultado: "RECHAZADA" } });
     const w = await conChecklist();
     await w.vm.registrarInspeccion();
     await flushPromises();
-    expect(w.vm.aviso).toContain("Inspección rechazada");
+    expect(w.vm.aviso).toBe("Inspección rechazada. El expediente se envió a Impresión Central.");
+    expect(w.text()).toContain("Inspección rechazada. El expediente se envió a Impresión Central.");
   });
 
   it("muestra el error del backend si no se puede registrar la inspección", async () => {
@@ -643,15 +642,18 @@ describe("PruebaView - Captura manual del resultado", () => {
     expect(w.vm.expediente).toBeNull();
   });
 
-  // DEFECTO CONOCIDO (mismo que en inspección): guardarResultadoPrueba asigna
-  // aviso y cerrarExpediente() lo borra. Quitar .fails al corregirlo.
-  it.fails("el aviso de prueba rechazada sobrevive al cierre del expediente", async () => {
+  // Corregido por René (d791bb8): guardarResultadoPrueba cierra con
+  // cerrarExpediente(true) y el aviso se anuncia en la lista.
+  it("el aviso de prueba rechazada sobrevive al cierre del expediente", async () => {
     srv.postHandlers["/pruebas/resultado/"] = () =>
       Promise.resolve({ data: { estado_expediente: "PENDIENTE_DE_IMPRESION_RECHAZO" } });
     const w = await enProceso({ tipo_prueba_final: "DINAMICA" });
     await w.vm.guardarResultadoPrueba();
     await flushPromises();
-    expect(w.vm.aviso).toContain("Prueba rechazada");
+    expect(w.vm.aviso).toBe(
+      "Prueba rechazada (fuera de límites). Expediente enviado a Impresión Central."
+    );
+    expect(w.text()).toContain("Prueba rechazada (fuera de límites)");
   });
 
   it("detail de texto se muestra tal cual", async () => {
@@ -954,5 +956,164 @@ describe("PruebaView - Corrección de datos del vehículo", () => {
     expect(w.vm.error).toBe("NIV duplicado");
     expect(w.vm.editandoVehiculo).toBe(true);
     expect(w.vm.guardandoVehiculo).toBe(false);
+  });
+});
+
+describe("PruebaView - Avisos de resultado: color y vida del aviso (d791bb8)", () => {
+  async function conExpediente(extra = {}) {
+    srv.expediente = expedienteBase(extra);
+    const w = montar();
+    await flushPromises();
+    await abrir(w);
+    return w;
+  }
+
+  function claseAlertaAviso(w) {
+    return w.find(".v-alert").classes().join(" ");
+  }
+
+  describe("avisoTipo", () => {
+    it.each([
+      ["Inspección rechazada. El expediente se envió a Impresión Central.", "warning"],
+      ["Prueba rechazada (fuera de límites). Expediente enviado a Impresión Central.", "warning"],
+      ["PRUEBA RECHAZADA", "warning"],
+      ["Prueba aprobada. Expediente enviado a Impresión Central.", "success"],
+      ["Inspección visual aprobada.", "success"],
+      ["Prueba iniciada.", "success"],
+    ])("%s -> %s", async (texto, tipo) => {
+      const w = montar();
+      await flushPromises();
+      w.vm.aviso = texto;
+      await flushPromises();
+      expect(w.vm.avisoTipo).toBe(tipo);
+    });
+
+    it("sin aviso el tipo es success y no se dibuja ninguna alerta", async () => {
+      const w = montar();
+      await flushPromises();
+      expect(w.vm.aviso).toBeNull();
+      expect(w.vm.avisoTipo).toBe("success");
+      expect(w.find(".v-alert").exists()).toBe(false);
+    });
+  });
+
+  describe("aviso visible en la lista tras cerrar", () => {
+    it("prueba rechazada: se ve en la lista en ámbar, no en verde", async () => {
+      srv.postHandlers["/pruebas/resultado/"] = () =>
+        Promise.resolve({ data: { estado_expediente: "PENDIENTE_DE_IMPRESION_RECHAZO" } });
+      const w = await conExpediente({ estado: "PRUEBA_EN_PROCESO", tipo_prueba_final: "DINAMICA" });
+
+      await w.vm.guardarResultadoPrueba();
+      await flushPromises();
+
+      expect(w.vm.expediente).toBeNull();
+      expect(w.text()).toContain("Estación de Prueba");
+      expect(w.text()).toContain("Prueba rechazada (fuera de límites)");
+      expect(claseAlertaAviso(w)).toMatch(/warning/);
+      expect(claseAlertaAviso(w)).not.toMatch(/success/);
+    });
+
+    it("prueba aprobada: se ve en la lista en verde", async () => {
+      srv.postHandlers["/pruebas/resultado/"] = () =>
+        Promise.resolve({ data: { estado_expediente: "PENDIENTE_DE_IMPRESION" } });
+      const w = await conExpediente({ estado: "PRUEBA_EN_PROCESO", tipo_prueba_final: "DINAMICA" });
+
+      await w.vm.guardarResultadoPrueba();
+      await flushPromises();
+
+      expect(w.vm.expediente).toBeNull();
+      expect(w.text()).toContain("Prueba aprobada. Expediente enviado a Impresión Central.");
+      expect(claseAlertaAviso(w)).toMatch(/success/);
+    });
+
+    it("inspección rechazada: se ve en la lista en ámbar", async () => {
+      srv.postHandlers["/inspeccion/"] = () => Promise.resolve({ data: { resultado: "RECHAZADA" } });
+      const w = await conExpediente();
+
+      await w.vm.registrarInspeccion();
+      await flushPromises();
+
+      expect(w.vm.expediente).toBeNull();
+      expect(w.text()).toContain("Inspección rechazada");
+      expect(claseAlertaAviso(w)).toMatch(/warning/);
+    });
+
+    it("inspección aprobada: el aviso queda en el detalle, que sigue abierto", async () => {
+      srv.postHandlers["/inspeccion/"] = () => Promise.resolve({ data: { resultado: "APROBADA" } });
+      const w = await conExpediente();
+
+      await w.vm.registrarInspeccion();
+      await flushPromises();
+
+      expect(w.vm.expediente).not.toBeNull();
+      expect(w.text()).toContain("Inspección visual aprobada.");
+      expect(claseAlertaAviso(w)).toMatch(/success/);
+    });
+
+    it("el aviso se puede cerrar con la X de la alerta", async () => {
+      srv.postHandlers["/inspeccion/"] = () => Promise.resolve({ data: { resultado: "RECHAZADA" } });
+      const w = await conExpediente();
+      await w.vm.registrarInspeccion();
+      await flushPromises();
+
+      await w.find(".v-alert .v-alert__close button").trigger("click");
+      await flushPromises();
+
+      expect(w.vm.aviso).toBeNull();
+      expect(w.find(".v-alert").exists()).toBe(false);
+    });
+  });
+
+  describe("cuándo se limpia el aviso", () => {
+    it("cerrarExpediente() sin argumento limpia el aviso", async () => {
+      const w = await conExpediente();
+      w.vm.aviso = "Inspección visual aprobada.";
+      w.vm.cerrarExpediente();
+      await flushPromises();
+      expect(w.vm.aviso).toBeNull();
+    });
+
+    it("cerrarExpediente(true) conserva el aviso y vuelve a cargar la lista", async () => {
+      const w = await conExpediente();
+      w.vm.aviso = "Prueba aprobada. Expediente enviado a Impresión Central.";
+      api.get.mockClear();
+
+      w.vm.cerrarExpediente(true);
+      await flushPromises();
+
+      expect(w.vm.aviso).toBe("Prueba aprobada. Expediente enviado a Impresión Central.");
+      expect(w.vm.expediente).toBeNull();
+      expect(api.get).toHaveBeenCalledWith("/expedientes", expect.anything());
+    });
+
+    it("el botón 'Volver a la lista' limpia el aviso (no hereda el evento del clic como conservarAviso)", async () => {
+      const w = await conExpediente();
+      w.vm.aviso = "Inspección visual aprobada.";
+      await flushPromises();
+
+      const volver = w.findAll("button").find((b) => b.text().includes("Volver a la lista"));
+      await volver.trigger("click");
+      await flushPromises();
+
+      expect(w.vm.expediente).toBeNull();
+      expect(w.vm.aviso).toBeNull();
+    });
+
+    it("al abrir un expediente desde la lista se limpia el aviso del resultado anterior", async () => {
+      srv.postHandlers["/pruebas/resultado/"] = () =>
+        Promise.resolve({ data: { estado_expediente: "PENDIENTE_DE_IMPRESION_RECHAZO" } });
+      const w = await conExpediente({ estado: "PRUEBA_EN_PROCESO", tipo_prueba_final: "DINAMICA" });
+      await w.vm.guardarResultadoPrueba();
+      await flushPromises();
+      expect(w.vm.aviso).toContain("Prueba rechazada");
+
+      srv.expediente = expedienteBase({ id: "exp-2", placa: "BBB-002", estado: "LISTO_PARA_PRUEBA" });
+      const fila = w.findAll(".v-list-item").find((i) => i.text().includes("BBB-002"));
+      await fila.trigger("click");
+      await flushPromises();
+
+      expect(w.vm.expediente?.id).toBe("exp-2");
+      expect(w.vm.aviso).toBeNull();
+    });
   });
 });
