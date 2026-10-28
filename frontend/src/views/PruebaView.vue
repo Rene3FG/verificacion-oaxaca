@@ -416,11 +416,13 @@ async function abrirExpediente(id) {
   }
 }
 
-function cerrarExpediente() {
+// `conservarAviso`: tras cerrar la inspección o la prueba el resultado se
+// anuncia en la lista, no en el detalle que ya se cerró.
+function cerrarExpediente(conservarAviso = false) {
   detenerSondeoCorrida();
   corrida.value = null;
   expediente.value = null;
-  aviso.value = null;
+  if (!conservarAviso) aviso.value = null;
   cargarExpedientesEnCurso();
 }
 
@@ -438,7 +440,7 @@ async function registrarInspeccion() {
     });
     if (data.resultado === "RECHAZADA") {
       aviso.value = "Inspección rechazada. El expediente se envió a Impresión Central.";
-      cerrarExpediente();
+      cerrarExpediente(true);
     } else {
       aviso.value = "Inspección visual aprobada.";
       await recargarExpediente();
@@ -596,7 +598,7 @@ async function guardarResultadoPrueba() {
       data.estado_expediente === "PENDIENTE_DE_IMPRESION_RECHAZO"
         ? "Prueba rechazada (fuera de límites). Expediente enviado a Impresión Central."
         : "Prueba aprobada. Expediente enviado a Impresión Central.";
-    cerrarExpediente();
+    cerrarExpediente(true);
   } catch (err) {
     const detail = err.response?.data?.detail;
     error.value =
@@ -628,6 +630,9 @@ onUnmounted(detenerSondeoCorrida);
       <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = null">
         {{ error }}
       </v-alert>
+      <v-alert v-if="aviso" :type="avisoTipo" class="mb-4" closable @click:close="aviso = null">
+        {{ aviso }}
+      </v-alert>
 
       <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title class="d-flex align-center ga-2">
@@ -646,7 +651,7 @@ onUnmounted(detenerSondeoCorrida);
               :key="exp.id"
               :title="`Placa ${exp.placa}`"
               :subtitle="textoEstado(exp.estado)"
-              @click="abrirExpediente(exp.id)"
+              @click="aviso = null; abrirExpediente(exp.id)"
             />
           </v-list>
         </v-card-text>
@@ -655,7 +660,7 @@ onUnmounted(detenerSondeoCorrida);
 
     <template v-else>
       <div class="d-flex align-center mb-2">
-        <v-btn variant="text" prepend-icon="mdi-arrow-left" @click="cerrarExpediente">
+        <v-btn variant="text" prepend-icon="mdi-arrow-left" @click="cerrarExpediente()">
           Volver a la lista
         </v-btn>
       </div>
