@@ -74,14 +74,14 @@ verificacion-oaxaca/
 │   │   ├── stores/session.js              # Pinia store (estacion, sesion, errorTipo, usuarioDenegado, permisosAsignados)
 │   │   ├── utils/                         # catalogos.js, estado.js, format.js
 │   │   └── views/                         # LoginView.vue, CapturaView.vue, PruebaView.vue, ImpresionView.vue, SupervisorView.vue
-│   ├── tests/                             # 10 suites Vitest (313 tests passing)
+│   ├── tests/                             # 10 suites Vitest (315 tests passing)
 │   │   ├── setup.js                       # ResizeObserver polyfill para Vuetify
 │   │   ├── session.test.js                # 14 tests del store de sesión
 │   │   ├── LoginView.test.js              # 19 tests de LoginView (incluye HU-005, HU-006, HU-007)
 │   │   ├── CapturaView.test.js            # 18 tests de CapturaView
 │   │   ├── PruebaView.test.js             # 78 tests de PruebaView (avisos warning/success y persistencia)
 │   │   ├── SupervisorView.test.js         # 101 tests de SupervisorView (1 it.fails: actualizarPermiso)
-│   │   ├── ImpresionView.test.js          # 23 tests de ImpresionView (incluye HU-006)
+│   │   ├── ImpresionView.test.js          # 25 tests de ImpresionView (incluye HU-006 y limpieza de fallbacks)
 │   │   ├── ExpedienteHeader.test.js       # 9 tests del header
 │   │   ├── TopAppBar.test.js              # 15 tests de barra y sync (incluye HU-005, HU-006)
 │   │   ├── format.test.js                 # 7 tests de format y catalogos
@@ -124,7 +124,7 @@ verificacion-oaxaca/
 
 ### 4.1 Qué está 100% probado y funcional
 - **Backend:** 459 pruebas en pytest pasando al 100%. `_LAYOUT_RECHAZO` integrado, login 403 con `permisos_asignados`, docker prod y CI listos.
-- **Frontend:** 313 pruebas en Vitest pasando al 100% (10 suites). `ImpresionView` (23), `LoginView` (19), `CapturaView` (18), `PruebaView` (78), `SupervisorView` (101), `ExpedienteHeader` (9), `TopAppBar` (15), `session` (14), `format` (7), `estado` (29).
+- **Frontend:** 315 pruebas en Vitest pasando al 100% (10 suites). `ImpresionView` (25), `LoginView` (19), `CapturaView` (18), `PruebaView` (78), `SupervisorView` (101), `ExpedienteHeader` (9), `TopAppBar` (15), `session` (14), `format` (7), `estado` (29).
 - **Compilación:** `npm run build` genera 694 módulos limpios sin errores.
 
 ### 4.2 Siguientes Tareas Inmediatas
