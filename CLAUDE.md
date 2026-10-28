@@ -26,7 +26,7 @@ Sistema de control y certificación de emisiones vehiculares del Estado de Oaxac
 ## 2. Comandos Clave
 
 ```powershell
-# Pruebas de Frontend (Vitest: 10 suites, 315 tests pasando al 100%)
+# Pruebas de Frontend (Vitest: 11 suites, 376 tests pasando al 100%)
 npm --prefix frontend test
 
 # Compilación de Producción de Frontend (0 errores, 694 módulos)
@@ -65,7 +65,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
   - Despliegue D1–D3 (Dockerfiles prod + Nginx) y CI D9 (`.github/workflows/ci.yml`).
   - Bloqueo B1 / HU-070 RESUELTO: layout `_LAYOUT_RECHAZO` integrado en `certificado.py` con `fecha_limite` y parámetro configurable `certificado_rechazo_dias_vigencia`.
   - HU-007 RESUELTO: `LoginView.vue` renderiza `permisos_asignados` en acceso denegado (Estado B).
-- **Frontend:** 315/315 pruebas aprobadas en Vitest (10 suites: `session`, `TopAppBar`, `ExpedienteHeader`, `format`, `estado`, `ImpresionView`, `LoginView`, `CapturaView`, `PruebaView`, `SupervisorView`; Q1 cerrado, fallbacks de ImpresionView limpiados).
+- **Frontend:** 376/376 pruebas aprobadas en Vitest (11 suites: `session`, `TopAppBar`, `ExpedienteHeader`, `format`, `estado`, `ImpresionView`, `LoginView`, `CapturaView`, `PruebaView`, `SupervisorView`, `AdministracionPanel`; 100% de componentes cubiertos).
 - **Build de producción:** 694 módulos compilados limpiamente en Vite (0 errores).
 
 ---
