@@ -44,6 +44,8 @@ const cargandoExpediente = ref(false);
 
 const error = ref(null);
 const aviso = ref(null);
+// Un rechazo se muestra en ámbar: en verde se confunde con un aprobado.
+const avisoTipo = computed(() => (/rechazad/i.test(aviso.value ?? "") ? "warning" : "success"));
 
 // --- Corregir datos del vehículo (decisión de producto 2026-08-14: si
 // Inspección Visual detecta un error, Prueba debe poder corregirlo sin
@@ -665,7 +667,7 @@ onUnmounted(detenerSondeoCorrida);
       <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = null">
         {{ error }}
       </v-alert>
-      <v-alert v-if="aviso" type="success" class="mb-4" closable @click:close="aviso = null">
+      <v-alert v-if="aviso" :type="avisoTipo" class="mb-4" closable @click:close="aviso = null">
         {{ aviso }}
       </v-alert>
 
