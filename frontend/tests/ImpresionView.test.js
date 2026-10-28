@@ -531,3 +531,39 @@ describe("ImpresionView - Flujos Operativos y Llamadas a la API", () => {
     expect(w.vm.aviso).toBe("Expediente cerrado.");
   });
 });
+
+describe("ImpresionView - HU-006: estación Impresión Central, centro y líneas visibles", () => {
+  it("la cabecera identifica la estación como Impresión Central con su centro y sus líneas", async () => {
+    const w = montar();
+    await flushPromises();
+    const cabecera = w.find("h1").element.parentElement.textContent.replace(/\s+/g, " ");
+    expect(w.find("h1").text()).toBe("Cola de Impresión Central");
+    expect(cabecera).toContain("Centro OAX-01");
+    expect(cabecera).toContain("Líneas 1, 2");
+  });
+
+  it("las líneas y el centro visibles salen de la estación configurada, no de valores fijos", async () => {
+    const w = montar((s) => {
+      s.estacion = {
+        id: "est-impresion-02",
+        station_type: "impresion",
+        center_id: "REFORMA",
+        allowed_line_ids: [2, 3],
+      };
+    });
+    await flushPromises();
+    const t = w.text();
+    expect(t).toContain("Centro REFORMA");
+    expect(t).toContain("Líneas 2, 3");
+    expect(t).not.toContain("Centro OAX-01");
+    expect(t).not.toContain("Líneas 1, 2");
+  });
+
+  it("muestra la estación por su identificador de workstation cuando existe", async () => {
+    const w = montar((s) => {
+      s.estacion = { ...s.estacion, workstation_id: "IMPRESION-07" };
+    });
+    await flushPromises();
+    expect(w.text()).toContain("Estación IMPRESION-07");
+  });
+});

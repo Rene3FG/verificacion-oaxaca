@@ -362,3 +362,52 @@ describe("LoginView - Estado B: Acceso Denegado (HTTP 403)", () => {
     expect(useSessionStore().permisosAsignados).toEqual([]);
   });
 });
+
+// HU-005 / HU-006: antes de iniciar sesión el panel de estación detectada
+// muestra tipo, centro y línea(s) de la estación configurada.
+describe("LoginView - HU-005 / HU-006: contexto de la estación en la pantalla inicial", () => {
+  function fila(w, etiqueta) {
+    const f = w
+      .findAll(".fila-meta")
+      .find((el) => el.find("span").text() === etiqueta);
+    return f ? f.find("strong").text() : null;
+  }
+
+  it("HU-005: estación de Prueba muestra nombre, centro, línea y tipo", async () => {
+    api.get.mockResolvedValueOnce({ data: ESTACION_PRUEBA });
+    const w = montar();
+    await flushPromises();
+    expect(fila(w, "Estación")).toBe("Prueba Línea 1");
+    expect(fila(w, "Centro")).toBe("Reforma");
+    expect(fila(w, "Línea")).toBe("Línea 1");
+    expect(fila(w, "Tipo")).toBe("Prueba");
+  });
+
+  it("HU-006: estación de Impresión muestra nombre, centro y todas sus líneas", async () => {
+    api.get.mockResolvedValueOnce({ data: ESTACION_IMPRESION });
+    const w = montar();
+    await flushPromises();
+    expect(fila(w, "Estación")).toBe("Impresión Reforma 01");
+    expect(fila(w, "Centro")).toBe("Reforma");
+    expect(fila(w, "Línea")).toBe("Líneas 1 y 2");
+    expect(fila(w, "Tipo")).toBe("Impresión");
+  });
+
+  it("HU-006: con tres o más líneas las lista separadas por comas y la última con 'y'", async () => {
+    api.get.mockResolvedValueOnce({
+      data: { ...ESTACION_IMPRESION, allowed_line_ids: [1, 2, 3] },
+    });
+    const w = montar();
+    await flushPromises();
+    expect(fila(w, "Línea")).toBe("Líneas 1, 2 y 3");
+  });
+
+  it("HU-006: con una sola línea permitida usa singular", async () => {
+    api.get.mockResolvedValueOnce({
+      data: { ...ESTACION_IMPRESION, allowed_line_ids: [2] },
+    });
+    const w = montar();
+    await flushPromises();
+    expect(fila(w, "Línea")).toBe("Línea 2");
+  });
+});

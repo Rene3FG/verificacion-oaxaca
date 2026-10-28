@@ -73,3 +73,84 @@ describe("TopAppBar (HU-004, HU-104)", () => {
     expect(w.text()).toContain("Supervisor");
   });
 });
+
+// El backend entrega station_type en minúsculas ("prueba", "impresion"): la
+// barra lo muestra tal cual, junto al centro, la línea y el usuario activo.
+describe("TopAppBar (HU-005): estación de Prueba", () => {
+  function montarPrueba(extra) {
+    return montar((s) => {
+      s.estacion = { station_type: "prueba", center_id: "OAX-01", line_id: 2, ...extra };
+      s.usuario = "operador_prueba";
+    });
+  }
+
+  it("muestra estación de Prueba, centro, línea y usuario activo", async () => {
+    const w = montarPrueba();
+    await flushPromises();
+    expect(w.text()).toMatch(/prueba · OAX-01\s+· Línea 2/);
+    expect(w.text()).toContain("operador_prueba");
+  });
+
+  it("la línea mostrada es la de la estación, no un valor fijo", async () => {
+    const w = montarPrueba({ line_id: 5 });
+    await flushPromises();
+    expect(w.text()).toContain("Línea 5");
+    expect(w.text()).not.toContain("Línea 2");
+  });
+
+  it("muestra el centro de la estación configurada", async () => {
+    const w = montarPrueba({ center_id: "REFORMA" });
+    await flushPromises();
+    expect(w.text()).toContain("prueba · REFORMA");
+    expect(w.text()).not.toContain("OAX-01");
+  });
+
+  it("sin usuario en sesión no muestra nombre de usuario", async () => {
+    const w = montar((s) => {
+      s.estacion = { station_type: "prueba", center_id: "OAX-01", line_id: 1 };
+      s.usuario = null;
+    });
+    await flushPromises();
+    expect(w.text()).toMatch(/prueba · OAX-01\s+· Línea 1/);
+    expect(w.text()).not.toContain("null");
+  });
+});
+
+describe("TopAppBar (HU-006): estación de Impresión Central", () => {
+  function montarImpresion(extra) {
+    return montar((s) => {
+      s.estacion = {
+        station_type: "impresion",
+        center_id: "OAX-01",
+        allowed_line_ids: [1, 2],
+        ...extra,
+      };
+      s.usuario = "operador_impresion";
+    });
+  }
+
+  it("muestra estación de Impresión, centro y usuario activo", async () => {
+    ruta.name = "impresion";
+    const w = montarImpresion();
+    await flushPromises();
+    expect(w.text()).toContain("impresion · OAX-01");
+    expect(w.text()).toContain("operador_impresion");
+  });
+
+  // La estación de Impresión atiende varias líneas (allowed_line_ids) y no
+  // tiene line_id: la barra no inventa "Línea N". Las líneas visibles se
+  // muestran en la cabecera de ImpresionView (ver ImpresionView.test.js).
+  it("no muestra 'Línea N' porque la estación atiende varias líneas", async () => {
+    ruta.name = "impresion";
+    const w = montarImpresion();
+    await flushPromises();
+    expect(w.text()).not.toMatch(/Línea \d/);
+  });
+
+  it("si la estación de impresión trae line_id, la barra sí lo muestra", async () => {
+    ruta.name = "impresion";
+    const w = montarImpresion({ line_id: 2 });
+    await flushPromises();
+    expect(w.text()).toMatch(/impresion · OAX-01\s+· Línea 2/);
+  });
+});
