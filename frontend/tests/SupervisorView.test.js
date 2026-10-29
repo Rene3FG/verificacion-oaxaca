@@ -367,11 +367,7 @@ describe("SupervisorView - Permisos (HU-121)", () => {
     expect(api.get).toHaveBeenCalledWith("/permisos", expect.anything());
   });
 
-  // DEFECTO CONOCIDO (SupervisorView.vue, de René): el catch de
-  // actualizarPermiso fija error y luego llama a cargarPermisos(), que empieza
-  // con error = null; el supervisor nunca ve por qué se rechazó el cambio.
-  // it.fails pasa mientras el defecto exista; quitar .fails al corregirlo.
-  it.fails("el mensaje de error al actualizar un permiso sobrevive a la recarga", async () => {
+  it("el mensaje de error al actualizar un permiso sobrevive a la recarga", async () => {
     srv.patch["/permisos/"] = () => rechazo("No puedes quitarte tu propio permiso");
     const { w } = await montar();
     await w.vm.actualizarPermiso({ id: "p1" }, "can_operate", false);
@@ -433,7 +429,7 @@ describe("SupervisorView - Errores y reintentos", () => {
     w.vm.filtrosIncidencias.origen = "Sincronización";
     await w.vm.cargarIncidencias();
     expect(api.get).toHaveBeenCalledWith("/supervision/incidencias", {
-      params: { q: "AAA", linea_id: 2, origen: "Sincronización" },
+      params: { estado: "abiertas", q: "AAA", linea_id: 2, origen: "Sincronización" },
     });
 
     api.get.mockClear();
@@ -441,7 +437,7 @@ describe("SupervisorView - Errores y reintentos", () => {
     w.vm.filtrosIncidencias.linea_id = null;
     w.vm.filtrosIncidencias.origen = null;
     await w.vm.cargarIncidencias();
-    expect(api.get).toHaveBeenCalledWith("/supervision/incidencias", { params: {} });
+    expect(api.get).toHaveBeenCalledWith("/supervision/incidencias", { params: { estado: "abiertas" } });
   });
 
   it("la línea 0 sí cuenta como filtro (no se confunde con vacío)", async () => {
@@ -449,7 +445,7 @@ describe("SupervisorView - Errores y reintentos", () => {
     api.get.mockClear();
     w.vm.filtrosIncidencias.linea_id = 0;
     await w.vm.cargarIncidencias();
-    expect(api.get).toHaveBeenCalledWith("/supervision/incidencias", { params: { linea_id: 0 } });
+    expect(api.get).toHaveBeenCalledWith("/supervision/incidencias", { params: { estado: "abiertas", linea_id: 0 } });
   });
 
   it("limpiar filtros los restablece y vuelve a consultar", async () => {
@@ -457,11 +453,46 @@ describe("SupervisorView - Errores y reintentos", () => {
     w.vm.filtrosIncidencias.q = "x";
     w.vm.filtrosIncidencias.linea_id = 2;
     w.vm.filtrosIncidencias.origen = "Impresión Central";
+    w.vm.filtrosIncidencias.estado = "resueltas";
     api.get.mockClear();
     w.vm.limpiarFiltrosIncidencias();
     await flushPromises();
-    expect(w.vm.filtrosIncidencias).toEqual({ q: "", linea_id: null, origen: null });
-    expect(api.get).toHaveBeenCalledWith("/supervision/incidencias", { params: {} });
+    expect(w.vm.filtrosIncidencias).toEqual({ q: "", linea_id: null, origen: null, estado: "abiertas" });
+    expect(api.get).toHaveBeenCalledWith("/supervision/incidencias", { params: { estado: "abiertas" } });
+  });
+
+  it("el filtro de estado consulta incidencias resueltas o todas", async () => {
+    const { w } = await montar();
+    api.get.mockClear();
+    w.vm.filtrosIncidencias.estado = "resueltas";
+    await w.vm.cargarIncidencias();
+    expect(api.get).toHaveBeenCalledWith("/supervision/incidencias", { params: { estado: "resueltas" } });
+
+    api.get.mockClear();
+    w.vm.filtrosIncidencias.estado = "todas";
+    await w.vm.cargarIncidencias();
+    expect(api.get).toHaveBeenCalledWith("/supervision/incidencias", { params: { estado: "todas" } });
+  });
+
+  it("las incidencias resueltas muestran chip Resuelta y deshabilitan la acción de reintento", async () => {
+    const incidenciaResuelta = {
+      ...INCIDENCIAS[0],
+      id: "inc-resuelta",
+      resuelta_at: "2026-10-28T18:00:00Z",
+    };
+    srv.get["/supervision/incidencias"] = [incidenciaResuelta];
+    const { w } = await montar({ station_type: "impresion" });
+    w.vm.tab = "errores";
+    await flushPromises();
+
+    expect(w.text()).toContain("Resuelta");
+    const chip = w.findAllComponents({ name: "VChip" }).find((c) => c.text().includes("Resuelta"));
+    expect(chip).toBeDefined();
+    expect(chip.props("color")).toBe("success");
+
+    const btnReintentar = w.findAllComponents({ name: "VBtn" }).find((b) => b.text().includes("Reintentar impresión"));
+    expect(btnReintentar).toBeDefined();
+    expect(btnReintentar.attributes("disabled")).toBeDefined();
   });
 
   it("una respuesta vieja que llega tarde no pisa a la consulta más reciente", async () => {

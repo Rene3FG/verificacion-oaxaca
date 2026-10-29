@@ -542,8 +542,35 @@ describe("CapturaView - Reglas de Negocio de Normalización (HU-010 / HU-020)", 
     await flushPromises();
 
     expect(api.post).toHaveBeenCalledWith("/expedientes/exp-001/normalizar");
-    // Al confirmar, se invoca cerrarExpediente() y vuelve a la lista de expedientes
+    // Al confirmar, se invoca cerrarExpediente(true) y vuelve a la lista de expedientes conservando el aviso
     expect(w.text()).toContain("Nuevo expediente");
     expect(w.text()).toContain("Expedientes en curso en esta línea");
+    expect(w.vm.aviso).toBe("Expediente enviado a Inspección Visual.");
+    expect(w.text()).toContain("Expediente enviado a Inspección Visual.");
+  });
+
+  it("el aviso de normalización exitosa sobrevive al volver a la lista y se muestra en la alerta de éxito", async () => {
+    const expListo = {
+      ...MOCK_EXPEDIENTE_DETALLE,
+      estado: "DATOS_SIOX_IMPORTADOS",
+      vehiculo: { ...MOCK_EXPEDIENTE_DETALLE.vehiculo, combustible: "GASOLINA" },
+    };
+    const w = montar({ customExpediente: expListo });
+    await flushPromises();
+
+    const item = w.findComponent({ name: "VListItem" });
+    await item.trigger("click");
+    await flushPromises();
+
+    const btnConfirmar = w.findAllComponents({ name: "VBtn" }).find((b) => b.text().includes("Confirmar datos"));
+    await btnConfirmar.trigger("click");
+    await flushPromises();
+
+    // El expediente se cerró volviendo a la lista, pero el aviso se mantiene
+    expect(w.vm.expediente).toBeNull();
+    expect(w.vm.aviso).toBe("Expediente enviado a Inspección Visual.");
+    const alerta = w.findAllComponents({ name: "VAlert" }).find((a) => a.text().includes("Expediente enviado a Inspección Visual."));
+    expect(alerta).toBeDefined();
+    expect(alerta.props("type")).toBe("success");
   });
 });
