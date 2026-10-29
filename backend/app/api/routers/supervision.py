@@ -1,4 +1,5 @@
 import datetime
+from typing import Literal
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -276,6 +277,7 @@ class IncidenciaRead(BaseModel):
     mensaje_tecnico: str | None
     guia: str
     accion: str
+    resuelta_at: datetime.datetime | None = None
 
 
 # Fase 1 de la auditoría de Sebastián (2026-10-12, frame Figma #66:2950):
@@ -343,6 +345,7 @@ async def incidencias_centro(
     linea_id: int | None = None,
     origen: str | None = None,
     q: str | None = None,
+    estado: Literal["abiertas", "resueltas", "todas"] = "abiertas",
     session: SessionContext = Depends(requiere_supervisor),
     db: AsyncSession = Depends(get_db),
 ) -> list[IncidenciaRead]:
@@ -480,6 +483,12 @@ async def incidencias_centro(
             )
         )
 
+    if estado != "abiertas":
+        resueltas = await _incidencias_resueltas(db, session.center_id)
+        incidencias = resueltas if estado == "resueltas" else incidencias + resueltas
+    if estado == "resueltas":
+        incidencias = [i for i in incidencias if i.resuelta_at is not None]
+
     if linea_id is not None:
         incidencias = [i for i in incidencias if i.linea_id == linea_id]
     if origen:
@@ -503,6 +512,72 @@ async def incidencias_centro(
         reverse=True,
     )
     return incidencias
+
+
+_ESTADOS_DE_ERROR = (
+    EstadoVerificacion.IMPRESION_FALLIDA,
+    EstadoVerificacion.FOLIO_ERROR,
+    EstadoVerificacion.ERROR_INTEGRACION,
+)
+
+
+async def _incidencias_resueltas(db: AsyncSession, centro_id: str) -> list[IncidenciaRead]:
+    """Historial derivado de `event_log` (sin tabla propia): cada entrada a un
+    estado de error es una incidencia; está resuelta cuando el expediente salió
+    de ese estado, y `resuelta_at` es el momento de esa salida. Las de
+    sincronización no se rastrean: la fila SYNCED no conserva que fue un error."""
+
+    entradas = (
+        await db.execute(
+            select(EventLog, Verificacion, CatUsuario.nombre_completo)
+            .join(Verificacion, Verificacion.id == EventLog.verificacion_id)
+            .outerjoin(CatUsuario, CatUsuario.id == EventLog.usuario_id)
+            .where(
+                Verificacion.centro_id == centro_id,
+                EventLog.estado_nuevo.in_(_ESTADOS_DE_ERROR),
+            )
+        )
+    ).all()
+    resueltas: list[IncidenciaRead] = []
+    for evento, exp, responsable in entradas:
+        if evento.estado_nuevo == EstadoVerificacion.ERROR_INTEGRACION and (
+            evento.evento != "prueba_error_equipo"
+        ):
+            continue  # ERROR_INTEGRACION de SIOX/OBD no es de esta bandeja
+        salida = (
+            await db.execute(
+                select(EventLog.created_at)
+                .where(
+                    EventLog.verificacion_id == exp.id,
+                    EventLog.estado_anterior == evento.estado_nuevo,
+                    EventLog.created_at >= evento.created_at,
+                )
+                .order_by(EventLog.created_at)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if salida is None:
+            continue  # sigue abierta (o el mismo evento aún es el vigente)
+        detalle = evento.detalle_json or {}
+        tecnico = " · ".join(
+            x for x in (detalle.get("motivo"), detalle.get("mensaje_tecnico")) if x
+        ) or None
+        resueltas.append(
+            _incidencia(
+                evento.estado_nuevo.value,
+                id=f"RESUELTA:{evento.id}",
+                expediente_id=exp.id,
+                placa=exp.placa,
+                linea_id=exp.linea_id,
+                estado=exp.estado.value,
+                responsable=responsable,
+                ultimo_intento=evento.created_at,
+                intentos=detalle.get("intento", 1),
+                mensaje_tecnico=tecnico,
+                resuelta_at=salida,
+            )
+        )
+    return resueltas
 
 
 def _uuid_o_none(valor) -> uuid.UUID | None:

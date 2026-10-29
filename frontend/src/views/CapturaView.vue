@@ -4,11 +4,11 @@ import { api } from "../api/client";
 import ExpedienteHeader from "../components/ExpedienteHeader.vue";
 import { estadoColors } from "../plugins/vuetify";
 import { useSessionStore } from "../stores/session";
-import { esOaxaca, limpiarPayload, useCatalogos } from "../utils/catalogos";
+import { limpiarPayload, municipiosDe, useCatalogos } from "../utils/catalogos";
 import { textoEstado } from "../utils/estado";
 
 const session = useSessionStore();
-const { entidades, municipiosOaxaca, carrocerias } = useCatalogos();
+const { entidades, carrocerias } = useCatalogos();
 
 // Estados en los que el expediente sigue siendo "de Captura". A partir de
 // DATOS_NORMALIZADOS pasa a Inspección Visual, que corre en la estación de
@@ -225,10 +225,10 @@ async function crearExpediente() {
   }
 }
 
-function cerrarExpediente() {
+function cerrarExpediente(conservarAviso = false) {
   expediente.value = null;
   historialSiox.value = [];
-  aviso.value = null;
+  if (conservarAviso !== true) aviso.value = null;
   cargarExpedientesEnCurso();
 }
 
@@ -303,7 +303,7 @@ async function confirmarNormalizacion() {
   try {
     await api.post(`/expedientes/${expediente.value.id}/normalizar`);
     aviso.value = "Expediente enviado a Inspección Visual.";
-    cerrarExpediente();
+    cerrarExpediente(true);
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudo confirmar la normalización.";
   } finally {
@@ -324,6 +324,9 @@ onMounted(cargarExpedientesEnCurso);
 
       <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = null">
         {{ error }}
+      </v-alert>
+      <v-alert v-if="aviso" type="success" class="mb-4" closable @click:close="aviso = null">
+        {{ aviso }}
       </v-alert>
 
       <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
@@ -651,7 +654,7 @@ onMounted(cargarExpedientesEnCurso);
             <v-col cols="12" md="4">
               <v-combobox
                 v-model="vehiculoForm.propietario_municipio"
-                :items="esOaxaca(vehiculoForm.propietario_estado) ? municipiosOaxaca : []"
+                :items="municipiosDe(vehiculoForm.propietario_estado)"
                 label="Municipio"
                 variant="outlined"
                 density="comfortable"

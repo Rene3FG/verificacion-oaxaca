@@ -3,11 +3,12 @@ cliente, 2026-10-09): en "Mpio." va la clave del municipio (Oaxaca de
 Juárez → 67) y en "Estado" la clave de la entidad (Oaxaca → 20), mientras
 que "Población" va en texto.
 
-Los 570 municipios de Oaxaca vienen del Marco Geoestadístico de INEGI
-(`gaia.inegi.org.mx/wscatgeo/v2/mgem/20`, descargado 2026-10-12) en
-`app/data/municipios_oaxaca.json`. Solo se incluye Oaxaca: un propietario
-con domicilio en otro estado imprime la clave de su entidad, pero el
-municipio queda como texto (no hay catálogo de los otros 31 estados).
+Los 2 478 municipios de las 32 entidades vienen del Marco Geoestadístico de
+INEGI (`gaia.inegi.org.mx/wscatgeo/v2/mgem/{entidad}`; Oaxaca descargado
+2026-10-12, el resto 2026-10-28, misma fuente) en
+`app/data/municipios_mexico.json`, indexado por clave de entidad. Un
+propietario con domicilio en otro estado también imprime la clave de su
+municipio.
 
 Las claves no se guardan en `Vehiculo`: se derivan del nombre al imprimir,
 así que Captura debe elegir el nombre del catálogo (`GET
@@ -75,14 +76,24 @@ def _normalizar(texto: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def municipios_oaxaca() -> list[dict]:
-    ruta = Path(__file__).resolve().parent.parent / "data" / "municipios_oaxaca.json"
+def _municipios_por_entidad() -> dict[str, list[dict]]:
+    ruta = Path(__file__).resolve().parent.parent / "data" / "municipios_mexico.json"
     return json.loads(ruta.read_text(encoding="utf-8"))
 
 
-@lru_cache(maxsize=1)
-def _indice_municipios() -> dict[str, str]:
-    return {_normalizar(m["nombre"]): m["clave"] for m in municipios_oaxaca()}
+def municipios(clave_ent: str) -> list[dict]:
+    """Municipios de una entidad ('20' → los 570 de Oaxaca); [] si no existe."""
+
+    return _municipios_por_entidad().get(clave_ent, [])
+
+
+def municipios_oaxaca() -> list[dict]:
+    return municipios(CLAVE_OAXACA)
+
+
+@lru_cache(maxsize=32)
+def _indice_municipios(clave_ent: str) -> dict[str, str]:
+    return {_normalizar(m["nombre"]): m["clave"] for m in municipios(clave_ent)}
 
 
 @lru_cache(maxsize=1)
@@ -105,18 +116,19 @@ def clave_entidad(nombre: str | None) -> str | None:
 
 def clave_municipio(nombre: str | None, entidad: str | None) -> str | None:
     """'Oaxaca de Juárez' (entidad Oaxaca) → '067'. Sin entidad capturada
-    se asume Oaxaca (el sistema opera en el estado); otra entidad → None."""
+    se asume Oaxaca (el sistema opera en el estado); entidad no reconocida
+    → None."""
 
     if not nombre or not nombre.strip():
         return None
     clave_ent = clave_entidad(entidad) if entidad else CLAVE_OAXACA
-    if clave_ent != CLAVE_OAXACA:
+    if clave_ent is None:
         return None
     texto = nombre.strip()
     if texto.isdigit():
         clave = texto.zfill(3)
-        return clave if any(m["clave"] == clave for m in municipios_oaxaca()) else None
-    return _indice_municipios().get(_normalizar(texto))
+        return clave if any(m["clave"] == clave for m in municipios(clave_ent)) else None
+    return _indice_municipios(clave_ent).get(_normalizar(texto))
 
 
 def clave_impresa(clave: str | None) -> str:

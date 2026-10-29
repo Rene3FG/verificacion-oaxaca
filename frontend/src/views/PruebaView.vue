@@ -3,11 +3,11 @@ import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { api } from "../api/client";
 import ExpedienteHeader from "../components/ExpedienteHeader.vue";
 import { useSessionStore } from "../stores/session";
-import { esOaxaca, limpiarPayload, useCatalogos } from "../utils/catalogos";
+import { limpiarPayload, municipiosDe, useCatalogos } from "../utils/catalogos";
 import { textoEstado } from "../utils/estado";
 
 const session = useSessionStore();
-const { entidades, municipiosOaxaca, carrocerias } = useCatalogos();
+const { entidades, carrocerias } = useCatalogos();
 
 // Estados que le corresponden a esta estación (Inspección Visual y OBD/SBD
 // corren aquí, decisión de negocio 2026-08-07 — ver CLAUDE.md). Fuera de
@@ -709,7 +709,7 @@ onUnmounted(detenerSondeoCorrida);
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.entidad_federativa" label="Entidad federativa de la placa" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="6"><v-text-field v-model="vehiculoForm.tarjeta_circulacion" label="Tarjeta de circulación" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="4"><v-combobox v-model="vehiculoForm.propietario_estado" :items="entidades" label="Estado" variant="outlined" density="compact" /></v-col>
-            <v-col cols="12" sm="4"><v-combobox v-model="vehiculoForm.propietario_municipio" :items="esOaxaca(vehiculoForm.propietario_estado) ? municipiosOaxaca : []" label="Municipio" variant="outlined" density="compact" /></v-col>
+            <v-col cols="12" sm="4"><v-combobox v-model="vehiculoForm.propietario_municipio" :items="municipiosDe(vehiculoForm.propietario_estado)" label="Municipio" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="4"><v-text-field v-model="vehiculoForm.propietario_colonia" label="Colonia" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="5"><v-text-field v-model="vehiculoForm.propietario_calle" label="Calle" variant="outlined" density="compact" /></v-col>
             <v-col cols="12" sm="3"><v-text-field v-model="vehiculoForm.propietario_numero_exterior" label="No. exterior" variant="outlined" density="compact" /></v-col>

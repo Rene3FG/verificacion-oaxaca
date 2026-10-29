@@ -607,6 +607,14 @@ async def test_catalogos_requieren_sesion_y_devuelven_datos(client, db_session):
 
     assert len(municipios) == 570
     assert {"clave": "20", "nombre": "Oaxaca"} in entidades
+
+    puebla = (await client.get("/api/catalogos/municipios?entidad=21", headers=h)).json()
+    assert {"clave": "114", "nombre": "Puebla"} in puebla
+    por_nombre = (await client.get("/api/catalogos/municipios?entidad=CDMX", headers=h)).json()
+    assert len(por_nombre) == 16
+    assert (
+        await client.get("/api/catalogos/municipios?entidad=Texas", headers=h)
+    ).status_code == 422
     assert {c["clave"] for c in carrocerias} >= {"SEDAN", "CERRADA", "PLATAFORMA"}
 
 

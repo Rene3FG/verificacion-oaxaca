@@ -2989,3 +2989,11 @@ POST /api/estaciones/login responde 403 con {'detail', 'permisos_asignados': [{s
 ## Certificado de RECHAZO: layout de sobreimpresión (2026-10-22)
 Llegó RECHAZO.doc; Sebastián extrajo las coordenadas y se cargaron como _LAYOUT_RECHAZO en app/services/certificado.py.
 Igual que Particular salvo: sin placa_grande (sin holograma) y campo fecha_limite en (463.5, 279.5) = fin de la prueba + 30 días naturales (configurable con certificado_rechazo_dias_vigencia, 1-365).
+
+
+## Historial de incidencias: filtro abiertas/resueltas (2026-10-28)
+GET /api/supervision/incidencias?estado=abiertas|resueltas|todas (default abiertas). El historial se deriva de event_log (cada entrada a IMPRESION_FALLIDA / FOLIO_ERROR / ERROR_INTEGRACION por prueba_error_equipo es una incidencia; resuelta cuando el expediente salio de ese estado, resuelta_at = esa transicion). Pestana Errores y reintentos con selector Estado y chip Resuelta.
+Mismo dia: actualizarPermiso conserva el error tras recargar y el aviso de normalizar se muestra en la lista de Captura.
+
+## Catalogo INEGI nacional de 32 entidades (2026-10-28, F11)
+Incorporado municipios_mexico.json con todos los municipios de las 32 entidades federativas. GET /api/catalogos/municipios?entidad={clave|nombre} permite filtrar por entidad (por default Oaxaca). Actualizados CapturaView.vue, PruebaView.vue y catalogos.js. Cierra F11 y HU-016.
