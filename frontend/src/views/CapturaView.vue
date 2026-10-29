@@ -225,10 +225,10 @@ async function crearExpediente() {
   }
 }
 
-function cerrarExpediente() {
+function cerrarExpediente(conservarAviso = false) {
   expediente.value = null;
   historialSiox.value = [];
-  aviso.value = null;
+  if (conservarAviso !== true) aviso.value = null;
   cargarExpedientesEnCurso();
 }
 
@@ -303,7 +303,7 @@ async function confirmarNormalizacion() {
   try {
     await api.post(`/expedientes/${expediente.value.id}/normalizar`);
     aviso.value = "Expediente enviado a Inspección Visual.";
-    cerrarExpediente();
+    cerrarExpediente(true);
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudo confirmar la normalización.";
   } finally {
@@ -324,6 +324,9 @@ onMounted(cargarExpedientesEnCurso);
 
       <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = null">
         {{ error }}
+      </v-alert>
+      <v-alert v-if="aviso" type="success" class="mb-4" closable @click:close="aviso = null">
+        {{ aviso }}
       </v-alert>
 
       <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">

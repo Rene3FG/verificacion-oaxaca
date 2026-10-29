@@ -159,8 +159,9 @@ async function actualizarPermiso(permiso, campo, valor) {
     await api.patch(`/permisos/${permiso.id}`, { [campo]: valor });
     await cargarPermisos();
   } catch (err) {
-    error.value = err.response?.data?.detail || "No se pudo actualizar el permiso.";
+    // cargarPermisos() limpia `error`; recargar primero y avisar después.
     await cargarPermisos();
+    error.value = err.response?.data?.detail || "No se pudo actualizar el permiso.";
   }
 }
 
