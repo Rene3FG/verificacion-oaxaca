@@ -377,3 +377,16 @@ async def test_error_de_equipo_aparece_como_incidencia_y_se_reintenta(client, db
         )
     ).json()
     assert not [i for i in inc if i["expediente_id"] == str(exp.id)]
+
+    for estado, esperadas in (("resueltas", 1), ("abiertas", 0), ("todas", 1)):
+        inc = (
+            await client.get(
+                f"/api/supervision/incidencias?estado={estado}",
+                headers={"X-Session-Id": str(supervisor.id)},
+            )
+        ).json()
+        mias = [i for i in inc if i["expediente_id"] == str(exp.id)]
+        assert len(mias) == esperadas, estado
+        if esperadas:
+            assert mias[0]["resuelta_at"] is not None
+            assert mias[0]["tipo"] == "ERROR_INTEGRACION"

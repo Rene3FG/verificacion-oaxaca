@@ -181,7 +181,12 @@ const ORIGENES_INCIDENCIA = ["Impresión Central", "Sincronización"];
 const incidencias = ref([]);
 const incidenciaSel = ref(null);
 const cargandoIncidencias = ref(false);
-const filtrosIncidencias = reactive({ q: "", linea_id: null, origen: null });
+const ESTADOS_INCIDENCIA = [
+  { title: "Abiertas", value: "abiertas" },
+  { title: "Resueltas", value: "resueltas" },
+  { title: "Todas", value: "todas" },
+];
+const filtrosIncidencias = reactive({ q: "", linea_id: null, origen: null, estado: "abiertas" });
 const reintentando = ref(false);
 const destinoAdmin = ref(null);
 let consultaIncidencias = 0;
@@ -209,6 +214,7 @@ async function cargarIncidencias() {
     if (filtrosIncidencias.q.trim()) params.q = filtrosIncidencias.q.trim();
     if (filtrosIncidencias.linea_id != null) params.linea_id = filtrosIncidencias.linea_id;
     if (filtrosIncidencias.origen) params.origen = filtrosIncidencias.origen;
+    params.estado = filtrosIncidencias.estado;
     const { data } = await api.get("/supervision/incidencias", { params });
     if (consulta !== consultaIncidencias) return;
     incidencias.value = data;
@@ -223,7 +229,7 @@ async function cargarIncidencias() {
 }
 
 function limpiarFiltrosIncidencias() {
-  Object.assign(filtrosIncidencias, { q: "", linea_id: null, origen: null });
+  Object.assign(filtrosIncidencias, { q: "", linea_id: null, origen: null, estado: "abiertas" });
   cargarIncidencias();
 }
 
@@ -735,7 +741,7 @@ onMounted(() => {
             Errores y reintentos
             <v-spacer />
             <span class="text-body-2 text-medium-emphasis">
-              {{ incidencias.length }} incidencia{{ incidencias.length === 1 ? "" : "s" }} abierta{{ incidencias.length === 1 ? "" : "s" }}
+              {{ incidencias.length }} incidencia{{ incidencias.length === 1 ? "" : "s" }}
             </span>
             <v-btn variant="text" icon="mdi-refresh" :loading="cargandoIncidencias" @click="cargarIncidencias" />
           </v-card-title>
@@ -760,7 +766,15 @@ onMounted(() => {
                   @update:model-value="cargarIncidencias"
                 />
               </v-col>
-              <v-col cols="6" md="3">
+              <v-col cols="6" md="2">
+                <v-select
+                  v-model="filtrosIncidencias.estado"
+                  :items="ESTADOS_INCIDENCIA"
+                  label="Estado"
+                  @update:model-value="cargarIncidencias"
+                />
+              </v-col>
+              <v-col cols="6" md="2">
                 <v-select
                   v-model="filtrosIncidencias.origen"
                   :items="ORIGENES_INCIDENCIA"
@@ -769,7 +783,7 @@ onMounted(() => {
                   @update:model-value="cargarIncidencias"
                 />
               </v-col>
-              <v-col cols="12" md="3" class="d-flex align-center">
+              <v-col cols="12" md="2" class="d-flex align-center">
                 <v-btn variant="text" @click="limpiarFiltrosIncidencias">Limpiar</v-btn>
               </v-col>
             </v-row>
@@ -784,7 +798,12 @@ onMounted(() => {
                     @click="incidenciaSel = inc"
                   >
                     <template #prepend>
-                      <v-chip color="error" size="small" prepend-icon="mdi-close-circle" class="mr-3">Error</v-chip>
+                      <v-chip
+                        :color="inc.resuelta_at ? 'success' : 'error'"
+                        size="small"
+                        :prepend-icon="inc.resuelta_at ? 'mdi-check-circle' : 'mdi-close-circle'"
+                        class="mr-3"
+                      >{{ inc.resuelta_at ? "Resuelta" : "Error" }}</v-chip>
                     </template>
                     <v-list-item-title>{{ inc.titulo }}</v-list-item-title>
                     <v-list-item-subtitle>
@@ -796,7 +815,7 @@ onMounted(() => {
                   </v-list-item>
                 </v-list>
                 <p v-else-if="!cargandoIncidencias" class="text-body-2 text-medium-emphasis">
-                  No hay incidencias abiertas.
+                  No hay incidencias en este filtro.
                 </p>
               </v-col>
 
@@ -805,7 +824,11 @@ onMounted(() => {
                   <v-card-title class="d-flex align-center">
                     {{ incidenciaSel.placa }}
                     <v-spacer />
-                    <v-chip color="error" size="small" prepend-icon="mdi-close-circle">Error</v-chip>
+                    <v-chip
+                      :color="incidenciaSel.resuelta_at ? 'success' : 'error'"
+                      size="small"
+                      :prepend-icon="incidenciaSel.resuelta_at ? 'mdi-check-circle' : 'mdi-close-circle'"
+                    >{{ incidenciaSel.resuelta_at ? "Resuelta" : "Error" }}</v-chip>
                   </v-card-title>
                   <v-card-text>
                     <v-table density="compact" class="mb-3">
@@ -818,6 +841,10 @@ onMounted(() => {
                           <td>{{ incidenciaSel.ultimo_intento ? new Date(incidenciaSel.ultimo_intento).toLocaleString() : "—" }}</td>
                         </tr>
                         <tr><td class="text-medium-emphasis">Intentos</td><td>{{ incidenciaSel.intentos }}</td></tr>
+                        <tr v-if="incidenciaSel.resuelta_at">
+                          <td class="text-medium-emphasis">Resuelta</td>
+                          <td>{{ new Date(incidenciaSel.resuelta_at).toLocaleString() }}</td>
+                        </tr>
                       </tbody>
                     </v-table>
                     <v-alert type="error" variant="tonal" density="compact" class="mb-3">
@@ -857,7 +884,7 @@ onMounted(() => {
                       color="primary"
                       variant="flat"
                       :loading="reintentando"
-                      :disabled="accionBloqueada(incidenciaSel)"
+                      :disabled="accionBloqueada(incidenciaSel) || !!incidenciaSel.resuelta_at"
                       @click="reintentarIncidencia(incidenciaSel)"
                     >
                       {{ TEXTO_ACCION[incidenciaSel.accion] }}
