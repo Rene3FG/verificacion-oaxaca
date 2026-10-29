@@ -125,11 +125,11 @@ verificacion-oaxaca/
 
 ### 4.1 Qué está 100% probado y funcional
 - **Backend:** 459 pruebas en pytest pasando al 100%. `_LAYOUT_RECHAZO` integrado, login 403 con `permisos_asignados`, docker prod y CI listos.
-- **Frontend:** 376 pruebas en Vitest pasando al 100% (11 suites). `SupervisorView` (101), `PruebaView` (78), `AdministracionPanel` (61), `estado` (29), `ImpresionView` (25), `LoginView` (19), `CapturaView` (18), `TopAppBar` (15), `session` (14), `ExpedienteHeader` (9), `format` (7).
+- **Frontend:** 379 pruebas en Vitest pasando al 100% (11 suites). `SupervisorView` (103), `PruebaView` (78), `AdministracionPanel` (61), `estado` (29), `ImpresionView` (25), `CapturaView` (19), `LoginView` (19), `TopAppBar` (15), `session` (14), `ExpedienteHeader` (9), `format` (7). 100% de componentes cubiertos y 0 pruebas con `.fails`.
 - **Compilación:** `npm run build` genera 694 módulos limpios sin errores.
 
 ### 4.2 Siguientes Tareas Inmediatas
 
 1. **Confirmar `git push origin frontend-impresion-central`:** Subir el merge `a9bd56f`, las pruebas de PruebaView `a1dc8a3` y el commit de documentación `docs:`.
-2. **Defectos de avisos restantes (de René):** Mantener el `it.fails` de `SupervisorView.test.js` (`actualizarPermiso`) y añadir prueba en `CapturaView.test.js` en cuanto René lo corrija en su vista.
+2. **Defectos de avisos de René:** Oficialmente resueltos e integrados. `actualizarPermiso` conserva el error, el aviso de normalización sobrevive en la lista de expedientes de Captura y el filtro de incidencias abiertas/resueltas está cubierto al 100%.
 3. **Siguiente prioridad:** Revisar `docs/PENDIENTES_2026-10-20.md` para elegir la siguiente prioridad (ej. pruebas de `AdministracionPanel.vue` o bloqueos B2-B11).
