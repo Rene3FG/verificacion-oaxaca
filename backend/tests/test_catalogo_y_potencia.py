@@ -8,6 +8,7 @@ from app.services.catalogo_inegi import (
     clave_entidad,
     clave_impresa,
     clave_municipio,
+    municipios,
     municipios_oaxaca,
 )
 from app.services.potencia_dinamometro import potencia_2540, potencia_5024, potencias_por_fase
@@ -17,6 +18,15 @@ def test_catalogo_oaxaca_completo():
     municipios = municipios_oaxaca()
     assert len(municipios) == 570
     assert {"clave": "067", "nombre": "Oaxaca de Juárez"} in municipios
+
+
+def test_catalogo_nacional_completo():
+    # Marco Geoestadístico de INEGI, 2026-10-28: 32 entidades, 2 478 municipios.
+    from app.services.catalogo_inegi import ENTIDADES
+
+    assert sum(len(municipios(clave)) for clave in ENTIDADES) == 2478
+    assert all(municipios(clave) for clave in ENTIDADES)
+    assert municipios("99") == []
 
 
 @pytest.mark.parametrize(
@@ -33,7 +43,9 @@ def test_clave_entidad(nombre, esperada):
     [("Oaxaca de Juárez", "Oaxaca", "067"), ("OAXACA DE JUAREZ", None, "067"),
      ("oaxaca de juarez", "20", "067"), ("67", "OAXACA", "067"),
      ("Santa Lucía del Camino", "Oaxaca", "390"), ("Oaxaca de Juárez", "Puebla", None),
-     ("No existe", "Oaxaca", None), ("999", "Oaxaca", None)],
+     ("No existe", "Oaxaca", None), ("999", "Oaxaca", None),
+     ("Puebla", "Puebla", "114"), ("Coyoacán", "CDMX", "003"), ("COYOACAN", "09", "003"),
+     ("Coyoacán", "Texas", None)],
 )
 def test_clave_municipio(nombre, entidad, esperada):
     assert clave_municipio(nombre, entidad) == esperada

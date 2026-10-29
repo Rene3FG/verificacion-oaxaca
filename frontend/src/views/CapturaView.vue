@@ -4,11 +4,11 @@ import { api } from "../api/client";
 import ExpedienteHeader from "../components/ExpedienteHeader.vue";
 import { estadoColors } from "../plugins/vuetify";
 import { useSessionStore } from "../stores/session";
-import { esOaxaca, limpiarPayload, useCatalogos } from "../utils/catalogos";
+import { limpiarPayload, municipiosDe, useCatalogos } from "../utils/catalogos";
 import { textoEstado } from "../utils/estado";
 
 const session = useSessionStore();
-const { entidades, municipiosOaxaca, carrocerias } = useCatalogos();
+const { entidades, carrocerias } = useCatalogos();
 
 // Estados en los que el expediente sigue siendo "de Captura". A partir de
 // DATOS_NORMALIZADOS pasa a Inspección Visual, que corre en la estación de
@@ -654,7 +654,7 @@ onMounted(cargarExpedientesEnCurso);
             <v-col cols="12" md="4">
               <v-combobox
                 v-model="vehiculoForm.propietario_municipio"
-                :items="esOaxaca(vehiculoForm.propietario_estado) ? municipiosOaxaca : []"
+                :items="municipiosDe(vehiculoForm.propietario_estado)"
                 label="Municipio"
                 variant="outlined"
                 density="comfortable"
