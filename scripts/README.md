@@ -12,6 +12,8 @@ Este directorio contiene las herramientas ejecutables para cumplir con la polít
 | `restore_db.sh` | Linux (Ubuntu Server / Debian) | Restauración de base de datos con `pg_restore --clean --if-exists`. |
 | `backup_db.ps1` | Windows / PowerShell | Script equivalente para entornos de prueba y desarrollo local. |
 | `restore_db.ps1` | Windows / PowerShell | Script equivalente de restauración para Windows / PowerShell. |
+| `respaldo.sh` / `restaurar.sh` | Linux | Variante de respaldo y restauración con `pg_dump` comprimido y confirmación explícita (ver `README.md` de la raíz). |
+| `smoke_e2e_flujo.mjs` | Node.js 18+ (cualquier SO) | Prueba de humo del ciclo vehicular completo contra la API local. Ver sección 4. |
 
 ---
 
@@ -56,3 +58,42 @@ sudo crontab -e
 # Restauración
 .\scripts\restore_db.ps1 -BackupFile .\backups\verificacion_verificacion_20261022_120000.dump
 ```
+
+---
+
+## 4. Prueba de humo del ciclo vehicular (`smoke_e2e_flujo.mjs`)
+
+Recorre el ciclo completo contra la API local y confirma el estado del expediente después de cada paso, hasta `IMPRESO`. Sirve para comprobar, tras un despliegue o un cambio grande, que Captura, Prueba y Impresión Central siguen conectadas entre sí. Usa solo `fetch` nativo (Node.js 18 o superior) y no instala dependencias.
+
+**Pasos que valida** (cada uno imprime `✓` o `✗`):
+
+1. Detección de estación y login en Captura.
+2. Creación del expediente con una placa única `PRU-` + 6 dígitos del reloj.
+3. Captura de datos del vehículo y del certificado, y normalización.
+4. Login en Prueba, inspección visual aprobada (el checklist se lee de `GET /api/inspeccion/checklist`) y evaluación OBD/SBD.
+5. Configuración, inicio y resultado de la prueba con lecturas aprobadas (modo de equipo `manual`, o `simulador` con escenario `APROBADO`).
+6. Login en Impresión Central, verificación del inventario de folios (da de alta un lote si no quedan), tipo de certificado, solicitud de folio e impresión, con estado final `IMPRESO`.
+
+Al terminar cierra las sesiones que abrió, incluso si un paso falla. Termina con código `0` si todo salió bien y `1` si falló alguno.
+
+**Requisitos:** backend, PostgreSQL y Redis arriba, y los datos de desarrollo cargados (`python -m app.seed`, que crea las estaciones `CAPTURA-REFORMA-L1`, `PRUEBA-REFORMA-L1` e `IMPRESION-REFORMA-01` y los usuarios `operador1` y `supervisor1`).
+
+```powershell
+# Contra el backend local (http://localhost:8000)
+node scripts\smoke_e2e_flujo.mjs
+
+# Contra otra URL o con otras credenciales
+$env:API_URL = "http://127.0.0.1:8000"
+$env:SMOKE_USUARIO = "operador1"; $env:SMOKE_PASSWORD = "operador1"
+node scripts\smoke_e2e_flujo.mjs
+```
+
+| Variable | Por defecto | Uso |
+|---|---|---|
+| `API_URL` | `http://localhost:8000` | Dirección base de la API. |
+| `SMOKE_USUARIO` / `SMOKE_PASSWORD` | `operador1` / `operador1` | Operador con permisos de Captura, Prueba e Impresión en la línea 1. |
+| `SMOKE_SUPERVISOR` / `SMOKE_SUPERVISOR_PASSWORD` | `supervisor1` / `supervisor1` | Solo se usa para dar de alta folios si el inventario está vacío. |
+| `SMOKE_EST_CAPTURA` / `SMOKE_EST_PRUEBA` / `SMOKE_EST_IMPRESION` | estaciones de la semilla | `device_identifier` de cada estación. |
+| `SMOKE_TIPO_CERTIFICADO` / `SMOKE_TIPO_VERIFICACION` | `PARTICULAR` / `ORDINARIA` | Tipo de certificado y de verificación a usar. |
+
+> **Datos que deja:** cada corrida crea un expediente `PRU-…` en `IMPRESO` y consume un folio. Úsalo en desarrollo o en un ambiente de pruebas, no en producción. Tras 5 contraseñas incorrectas seguidas el backend bloquea al usuario 15 minutos (X1); el script no reintenta logins fallidos.
