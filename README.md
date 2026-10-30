@@ -27,6 +27,20 @@ El estado se revisa con `docker compose ... ps` (el contenedor del backend tiene
 | `LOGIN_MAX_INTENTOS` / `LOGIN_BLOQUEO_MIN` | Bloqueo de login tras intentos fallidos (0 apaga) | 5 / 15 |
 | `SESION_INACTIVIDAD_MIN` | Caducidad de sesión por inactividad (0 apaga) | 30 |
 
+## Datos de arranque (primer supervisor)
+
+En producción no corre ningún seed: sin este paso nadie puede iniciar sesión.
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec -e BOOTSTRAP_PASSWORD='...' backend \
+  python -m app.bootstrap_prod --centro reforma --lineas 2 --usuario admin --nombre "Administrador"
+```
+
+Crea parámetros, límites NOM-041/045, estaciones por línea (Captura y Prueba) más una de Impresión, y el supervisor
+con permiso en todos los tipos de estación. Es idempotente y no cambia contraseñas existentes. El `device_identifier`
+de cada estación es su nombre (p. ej. `CAPTURA-REFORMA-L1`); cada equipo se configura una sola vez abriendo
+`http://servidor/?estacion=CAPTURA-REFORMA-L1` (se guarda en ese navegador; en desarrollo basta `VITE_DEVICE_IDENTIFIER`). Usuarios, permisos y lotes de folios se dan de alta después desde Administración.
+
 ## Respaldos (el sistema es el registro oficial de verificaciones)
 
 ```bash
