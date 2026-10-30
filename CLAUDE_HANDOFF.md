@@ -2,9 +2,9 @@
 
 **De:** Antigravity (AI Pair Programmer)  
 **Para:** Claude (AI Assistant) & Sebas  
-**Fecha de corte:** 29 de octubre de 2026 (Semana 7 — Jueves)  
-**Rama activa:** `frontend-impresion-central` (merge de upstream `5bc31cd` integrado)  
-**Estado upstream:** Upstream de René (`origin/etapa1-y-siox` en `a3aeafd`) integrado vía merge `5bc31cd` (conflictos solo en `.gitignore` y `CLAUDE.md`, resueltos).
+**Fecha de corte:** 30 de octubre de 2026 (Semana 7 — Viernes)  
+**Rama activa:** `frontend-impresion-central` (merge de upstream `7d36cdc` integrado)  
+**Estado upstream:** Upstream de René (`origin/etapa1-y-siox` en `8632769`) integrado vía merge `7d36cdc`: F9 (contador `sincronizando`, `14469e3`) y F4 (catálogo de equipos, `8632769`).
 
 ---
 
@@ -51,6 +51,11 @@
    - **Suite Frontend: 390 pruebas en 11 suites al 100%.** Build limpio.
    - **Matriz de trazabilidad 2026-10-29:** sin HUs promovidas; HECHO se mantiene en 96 (337 SP / 83.0%). HU-016 ya estaba en HECHO (el catálogo INEGI nacional amplía su evidencia, no su criterio) y HU-083 sigue en PARCIAL (falta la detección real del error por el equipo, Fase 2). Se amplió la evidencia de ambas con pruebas de backend y Vitest.
    - **Prueba de humo `scripts/smoke_e2e_flujo.mjs`:** recorre Captura, Inspección, OBD, Prueba, Folio e Impresión hasta `IMPRESO` con fetch nativo. Validado contra un servidor simulado del contrato (equipo manual y simulador, y falla de impresión con código de salida 1 y sesiones cerradas); **aún no se ha ejecutado contra el backend real**. Uso en `scripts/README.md`, sección 4.
+
+6. **F4/F9 de René, matriz 2026-10-30 y propuesta NOM-047:**
+   - **Merge `7d36cdc`:** F9 hace visible el contador `sincronizando` durante el envío por lotes (HU-104); F4 agrega el catálogo `cat_equipos` y el equipo resuelto por el servidor al guardar el resultado (HU-042, HU-102), con administración en `SupervisorView.vue`. `SupervisorView.test.js` pasó de 103 a 110 pruebas. **Suite Frontend: 397 pruebas en 11 suites al 100%.**
+   - **Matriz de trazabilidad 2026-10-30:** HU-042, HU-101, HU-102 y HU-103 pasan a HECHO. HECHO sube a 100 HUs (358 SP, 88,2%); PARCIAL baja a 6 HUs (30 SP, 7,4%); DESFASADA_SHEET se mantiene en 4. HU-101 y HU-103 se promovieron porque `PENDIENTES` las une con HU-102 en el bloqueo B4, que el cliente respondió; esa promoción depende de la respuesta reportada y `PENDIENTES` todavía lista B4 como abierto. Matiz de HU-042: el equipo se fija al guardar el resultado, no al configurar la prueba. Las 24 citas nuevas de archivos y pruebas se verificaron contra el disco.
+   - **Propuesta `docs/PROPUESTA_FLUJO_INSPECCION_VISUAL_NOM047.md`:** el rechazo directo por inspección visual y el OBD antes de la prueba **ya existen** en la máquina de estados; lo que cambia es la estación que registra la inspección visual (hoy Prueba, el cliente indica Captura) y el campo 001 del certificado (hoy parámetro fijo, el cliente indica ID del técnico, lo que requiere una clave por usuario). Recomienda mover la estación sin tocar los estados (Opción A). Sin código modificado y pendiente de coordinar con René.
 
 ---
 
@@ -134,15 +139,17 @@ verificacion-oaxaca/
 ## 4. Estado Actual (Working State) y Próximos Pasos (TODOs)
 
 ### 4.1 Qué está 100% probado y funcional
-- **Backend:** 459 pruebas en pytest pasando al 100% (último recuento registrado; no se re-ejecutó el 2026-10-29). `_LAYOUT_RECHAZO` integrado, login 403 con `permisos_asignados`, docker prod, CI y datos de arranque de producción listos.
+- **Backend:** 468 pruebas en pytest pasando al 100% (recuento reportado por el equipo; no se re-ejecutó en esta sesión). `_LAYOUT_RECHAZO` integrado, login 403 con `permisos_asignados`, docker prod, CI y datos de arranque de producción listos.
 - **Frontend:** 397 pruebas en Vitest pasando al 100% (11 suites). `SupervisorView` (110), `PruebaView` (78), `AdministracionPanel` (61), `estado` (29), `ImpresionView` (25), `session` (25), `CapturaView` (19), `LoginView` (19), `TopAppBar` (15), `ExpedienteHeader` (9), `format` (7). 100% de componentes cubiertos. Queda 1 prueba `it.fails` (defecto de `session.js`, ver sección 1, punto 5).
 - **Compilación:** `npm run build` genera 694 módulos limpios sin errores.
-- **Clarificaciones Normativas NOM-047 (2026-10-30):** B4 cerrado (operación 100% offline sin SIOX confirmada), B7/Q1 aclarado (Inspección Visual antes de cerrar captura; si falla, rechazo directo sin emisiones; OBD antes de emisiones), B10(b) cerrado (001 es ID de técnico) y plantillas únicas oficializadas.
+- **Clarificaciones normativas NOM-047 (2026-10-30, reportadas por el equipo):** B4 cerrado (operación sin internet), B7/Q1 aclarado (inspección visual antes de terminar la captura; rechazo directo sin emisiones; OBD antes de emisiones) y campo 001 = ID del técnico. **Sin confirmar:** el cliente dice que las plantillas son las mismas para aprobados y rechazados, lo que choca con `_LAYOUT_RECHAZO` (de `RECHAZO.doc`); ver sección 6 de la propuesta.
 
 ### 4.2 Siguientes Tareas Inmediatas
 
-1. **Ejecutar `scripts/smoke_e2e_flujo.mjs` contra el backend real** (Postgres y Redis arriba, `python -m app.seed` aplicado) y ajustar lo que difiera del contrato simulado.
-2. **Avisar a René** del defecto de `?estacion=` con `localStorage` bloqueado (quitar el `.fails` cuando lo corrija) y del nuevo `CLAUDE.md` condensado con el historial en `docs/HISTORIAL_DETALLADO_PROYECTO.md`.
-3. **Acordar con René qué juego de scripts de respaldo queda** (`respaldo.sh`/`restaurar.sh` o `backup_db.*`/`restore_db.*`) y si `README.md` de la raíz y `docs/MANUAL_INSTALACION_Y_OPERACION.md` se unifican.
-4. **Bloqueos B2-B11 de `docs/PENDIENTES_2026-10-20.md`:** dependen de terceros (hardware del proveedor, papel real, hosting). Las 10 HUs en PARCIAL se cierran con ellos, no con más código de interfaz.
-5. **`git push`** de los commits locales solo con confirmación explícita.
+1. **Coordinar con René la propuesta NOM-047** (`docs/PROPUESTA_FLUJO_INSPECCION_VISUAL_NOM047.md`): elegir entre la Opción A (mover la estación) y la B (reordenar estados), y resolver las preguntas abiertas con el cliente (qué significa "terminar la captura", qué plantilla imprime un rechazo, a qué técnico corresponde el 001). Hasta entonces no se modifica código de René.
+2. **Actualizar `docs/PENDIENTES_2026-10-20.md`** con las respuestas del cliente (B4, B7, B1/B9/B10(b)), porque hoy sigue listándolas como abiertas.
+3. **Avisar a René** del defecto de `?estacion=` con `localStorage` bloqueado (hay 1 `it.fails` en `session.test.js`; quitar el `.fails` cuando lo corrija).
+4. **Ejecutar `scripts/smoke_e2e_flujo.mjs` contra el backend real** en una sesión dedicada de QA (Docker, Postgres y Redis arriba, `python -m app.seed` aplicado).
+5. **Acordar con René qué juego de scripts de respaldo queda** y si `README.md` de la raíz y `docs/MANUAL_INSTALACION_Y_OPERACION.md` se unifican.
+6. **Bloqueos B2-B11** que siguen abiertos dependen de terceros (hardware del proveedor, papel real, hosting). Las 6 HUs en PARCIAL se cierran con ellos, no con más código de interfaz.
+7. **`git push`** de los commits locales solo con confirmación explícita.
