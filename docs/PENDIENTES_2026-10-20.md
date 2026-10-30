@@ -63,7 +63,7 @@ El código funciona con estas decisiones tomadas "por defecto"; cada una vive en
 | F1 | **`ERROR_INTEGRACION` en prueba** | Ningún endpoint lo asigna. HU-054 pide guardar el estado de error con mensaje técnico y operativo y posibilidad de reintento; hoy solo existe la interrupción con motivo | HU-054 |
 | F2 | **Incidencias de equipo en "Errores y reintentos"** | Un error de equipo se registra al interrumpir pero no queda abierto como incidencia | HU-083, Supervisión |
 | F3 | **Historial de incidencias** | No hay tabla: "abierta" se deriva del estado. Por eso falta el filtro "Estado: abiertos / resueltos" del Figma | Supervisión |
-| F4 | **`equipo_id` real en `ResultadoPrueba`** | Hoy "equipo" es la estación | HU-042, 102 |
+| F4 | ~~`equipo_id` real en `ResultadoPrueba`~~ **HECHO 2026-10-30**: catálogo `cat_equipos` (Administración › Equipos); el servidor resuelve el equipo por estación+método (analizador/opacímetro/escáner OBD), valida el que mande el cliente (422) y deja NULL si la línea no tiene un único equipo activo de ese tipo | HU-042, 102 |
 | F5 | **Calibración periódica como bloqueo** | El contrato no la detalla; preguntar a Luis o al proveedor antes de construir | HU-041/044 |
 | F6 | ~~Fila "Rol asignado" en acceso denegado~~ **HECHO 2026-10-22**: el 403 devuelve `permisos_asignados` y la pantalla lista las estaciones asignadas | HU-007 |
 | F7 | **Pausar prueba** | No se hizo "porque sin equipo no hay nada que pausar"; se reevalúa con el adaptador real | HU-045 |

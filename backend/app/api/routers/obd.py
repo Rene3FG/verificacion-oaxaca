@@ -12,6 +12,7 @@ from app.models.enums import EstadoVerificacion, ResultadoPruebaEnum, StationTyp
 from app.models.resultado_obd_sbd import ResultadoObdSbd
 from app.models.verificacion import Verificacion
 from app.services import state_machine
+from app.services.equipos import TIPO_OBD, EquipoInvalido, resolver_equipo
 from app.services.parametros import get_parametro, obd_aplica
 
 router = APIRouter(prefix="/api/obd", tags=["obd"])
@@ -199,6 +200,16 @@ async def guardar_resultado_obd(
     datos_raw = dict(payload.datos_raw or {})
     if payload.sin_comunicacion:
         datos_raw.update(sin_comunicacion=True, mensaje_tecnico=payload.mensaje_tecnico)
+    # F4: el escáner lo resuelve el servidor desde el catálogo de la estación.
+    try:
+        equipo_id = await resolver_equipo(
+            db,
+            workstation_id=session.workstation_id,
+            tipo=TIPO_OBD,
+            solicitado=payload.equipo_id,
+        )
+    except EquipoInvalido as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     fila = await _fila_obd(db, verificacion.id)
     if fila is None:
         fila = ResultadoObdSbd(verificacion_id=verificacion.id, aplica=True)
@@ -206,7 +217,7 @@ async def guardar_resultado_obd(
     fila.resultado = resultado
     fila.codigos_error = payload.codigos_error
     fila.datos_raw = datos_raw or None
-    fila.equipo_id = payload.equipo_id
+    fila.equipo_id = equipo_id
     fila.operador_id = session.user_id
     fila.recibido_at = datetime.datetime.now(datetime.timezone.utc)
 

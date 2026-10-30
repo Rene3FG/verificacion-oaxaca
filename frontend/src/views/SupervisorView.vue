@@ -461,6 +461,88 @@ async function guardarCapacidad(estacion) {
   }
 }
 
+// --- Catálogo de equipos por estación de Prueba (F4, HU-042/102) ---
+const TIPOS_EQUIPO = [
+  { value: "ANALIZADOR_GASES", title: "Analizador de gases" },
+  { value: "DINAMOMETRO", title: "Dinamómetro" },
+  { value: "OPACIMETRO", title: "Opacímetro" },
+  { value: "ESCANER_OBD", title: "Escáner OBD" },
+];
+const equipos = ref([]);
+const cargandoEquipos = ref(false);
+const equipoAbierto = ref(false);
+const guardandoEquipo = ref(false);
+const equipoForm = reactive({
+  id: null,
+  workstation_id: null,
+  tipo: null,
+  marca: "",
+  modelo: "",
+  numero_serie: "",
+  is_active: true,
+});
+
+function textoTipoEquipo(tipo) {
+  return TIPOS_EQUIPO.find((t) => t.value === tipo)?.title ?? tipo;
+}
+
+function textoEstacion(id) {
+  const e = estacionesPrueba.value.find((x) => x.id === id);
+  return e ? `Línea ${e.line_id ?? "—"} · ${e.name}` : "—";
+}
+
+async function cargarEquipos() {
+  cargandoEquipos.value = true;
+  error.value = null;
+  try {
+    const { data } = await api.get("/equipos");
+    equipos.value = data;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo cargar el catálogo de equipos.";
+  } finally {
+    cargandoEquipos.value = false;
+  }
+}
+
+function abrirEquipo(equipo = null) {
+  Object.assign(equipoForm, {
+    id: equipo?.id ?? null,
+    workstation_id: equipo?.workstation_id ?? null,
+    tipo: equipo?.tipo ?? null,
+    marca: equipo?.marca ?? "",
+    modelo: equipo?.modelo ?? "",
+    numero_serie: equipo?.numero_serie ?? "",
+    is_active: equipo?.is_active ?? true,
+  });
+  equipoAbierto.value = true;
+}
+
+async function guardarEquipo() {
+  guardandoEquipo.value = true;
+  error.value = null;
+  const cuerpo = {
+    tipo: equipoForm.tipo,
+    marca: equipoForm.marca || null,
+    modelo: equipoForm.modelo || null,
+    numero_serie: equipoForm.numero_serie,
+  };
+  try {
+    if (equipoForm.id) {
+      await api.patch(`/equipos/${equipoForm.id}`, { ...cuerpo, is_active: equipoForm.is_active });
+    } else {
+      await api.post("/equipos", { ...cuerpo, workstation_id: equipoForm.workstation_id });
+    }
+    equipoAbierto.value = false;
+    aviso.value = `Equipo ${equipoForm.numero_serie} guardado.`;
+    await cargarEquipos();
+  } catch (err) {
+    const detalle = err.response?.data?.detail;
+    error.value = typeof detalle === "string" ? detalle : "No se pudo guardar el equipo.";
+  } finally {
+    guardandoEquipo.value = false;
+  }
+}
+
 // --- Semestre y prórroga (sección 5 del handoff) ---
 const semestreInfo = ref(null);
 const cargandoSemestre = ref(false);
@@ -651,6 +733,7 @@ onMounted(() => {
   cargarInventarioFolios();
   cargarLimitesEmision();
   cargarEstacionesPrueba();
+  cargarEquipos();
   cargarSemestre();
 });
 </script>
@@ -1243,6 +1326,57 @@ onMounted(() => {
                 </v-table>
               </v-card-text>
             </v-card>
+            <v-card class="mt-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
+              <v-card-title class="d-flex align-center ga-2">
+                Equipos registrados
+                <v-spacer />
+                <v-btn variant="text" icon="mdi-refresh" :loading="cargandoEquipos" @click="cargarEquipos" />
+                <v-btn color="primary" prepend-icon="mdi-plus" @click="abrirEquipo()">Nuevo equipo</v-btn>
+              </v-card-title>
+              <v-card-subtitle class="text-wrap">
+                El resultado de cada prueba guarda el equipo que midió: analizador de gases
+                (gasolina), opacímetro (diésel) o escáner (OBD). Si una línea no tiene un único
+                equipo activo de ese tipo, el resultado queda sin equipo.
+              </v-card-subtitle>
+              <v-card-text>
+                <v-progress-linear v-if="cargandoEquipos" indeterminate class="mb-4" />
+                <p v-else-if="equipos.length === 0" class="text-medium-emphasis">
+                  Sin equipos registrados en este centro.
+                </p>
+                <v-table v-else density="compact">
+                  <thead>
+                    <tr>
+                      <th>Estación</th>
+                      <th>Tipo</th>
+                      <th>Marca / modelo</th>
+                      <th>Número de serie</th>
+                      <th>Estado</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="equipo in equipos" :key="equipo.id">
+                      <td>{{ textoEstacion(equipo.workstation_id) }}</td>
+                      <td>{{ textoTipoEquipo(equipo.tipo) }}</td>
+                      <td>{{ [equipo.marca, equipo.modelo].filter(Boolean).join(" ") || "—" }}</td>
+                      <td>{{ equipo.numero_serie }}</td>
+                      <td>
+                        <v-chip
+                          size="small"
+                          class="rounded-institucional-full"
+                          :color="equipo.is_active ? 'success' : undefined"
+                        >
+                          {{ equipo.is_active ? "Activo" : "Inactivo" }}
+                        </v-chip>
+                      </td>
+                      <td>
+                        <v-btn size="small" variant="text" @click="abrirEquipo(equipo)">Editar</v-btn>
+                      </td>
+                    </tr>
+                  </tbody>
+                </v-table>
+              </v-card-text>
+            </v-card>
           </template>
           <template #folios>
             <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
@@ -1605,6 +1739,57 @@ onMounted(() => {
             @click="crearPermiso"
           >
             Crear
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="equipoAbierto" max-width="480">
+      <v-card class="rounded-institucional-lg">
+        <v-card-title>{{ equipoForm.id ? "Editar equipo" : "Nuevo equipo" }}</v-card-title>
+        <v-card-text>
+          <v-select
+            v-model="equipoForm.workstation_id"
+            :items="estacionesPrueba"
+            :item-title="(e) => `Línea ${e.line_id ?? '—'} · ${e.name}`"
+            item-value="id"
+            label="Estación de Prueba"
+            variant="outlined"
+            density="comfortable"
+            :disabled="!!equipoForm.id"
+          />
+          <v-select
+            v-model="equipoForm.tipo"
+            :items="TIPOS_EQUIPO"
+            label="Tipo"
+            variant="outlined"
+            density="comfortable"
+          />
+          <v-text-field v-model="equipoForm.marca" label="Marca" variant="outlined" density="comfortable" />
+          <v-text-field v-model="equipoForm.modelo" label="Modelo" variant="outlined" density="comfortable" />
+          <v-text-field
+            v-model="equipoForm.numero_serie"
+            label="Número de serie"
+            variant="outlined"
+            density="comfortable"
+          />
+          <v-switch
+            v-if="equipoForm.id"
+            v-model="equipoForm.is_active"
+            label="Activo"
+            color="primary"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="equipoAbierto = false">Cancelar</v-btn>
+          <v-btn
+            color="primary"
+            :loading="guardandoEquipo"
+            :disabled="!equipoForm.workstation_id || !equipoForm.tipo || !equipoForm.numero_serie.trim()"
+            @click="guardarEquipo"
+          >
+            Guardar
           </v-btn>
         </v-card-actions>
       </v-card>

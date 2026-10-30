@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.api.routers import (
     catalogos,
+    equipos,
     estaciones,
     expedientes,
     folios,
@@ -49,6 +50,7 @@ app.include_router(sync.router)
 app.include_router(usuarios.router)
 app.include_router(parametros.router)
 app.include_router(catalogos.router)
+app.include_router(equipos.router)
 
 
 @app.get("/health")

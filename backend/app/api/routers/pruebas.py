@@ -48,6 +48,7 @@ from app.services.evaluacion_prueba import (
     evaluar_diesel,
     evaluar_gasolina,
 )
+from app.services.equipos import TIPO_POR_METODO, EquipoInvalido, resolver_equipo
 from app.services.equipo_gateway import (
     CorridaNoEncontrada,
     EquipmentGateway,
@@ -555,6 +556,17 @@ async def guardar_resultado_prueba(
     except MetodoSinMapeo as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    # F4: el equipo lo resuelve el servidor desde el catálogo de la estación.
+    try:
+        equipo_id = await resolver_equipo(
+            db,
+            workstation_id=session.workstation_id,
+            tipo=TIPO_POR_METODO.get(metodo),
+            solicitado=payload.equipo_id,
+        )
+    except EquipoInvalido as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     if payload.test_run_id is not None:
         lecturas = await _lecturas_de_corrida_finalizada(verificacion, payload.test_run_id, gateway)
     elif payload.normalized_payload is not None:
@@ -610,7 +622,7 @@ async def guardar_resultado_prueba(
         resultado=resultado.value if resultado else None,
         valores_medidos_json=valores_medidos,
         limites_aplicados_json=limits_applied,
-        equipo_id=payload.equipo_id,
+        equipo_id=equipo_id,
         linea_id=verificacion.linea_id,
         operador_id=session.user_id,
         started_at=inicio.isoformat(),
@@ -625,7 +637,7 @@ async def guardar_resultado_prueba(
         resultado=resultado,
         valores_medidos_json=valores_medidos,
         limites_aplicados_json=limits_applied,
-        equipo_id=payload.equipo_id,
+        equipo_id=equipo_id,
         linea_id=verificacion.linea_id,
         operador_id=session.user_id,
         started_at=inicio,
@@ -653,7 +665,7 @@ async def guardar_resultado_prueba(
             "resultado": resultado.value if resultado else None,
             "valores_medidos_json": valores_medidos,
             "limites_aplicados_json": limits_applied,
-            "equipo_id": str(payload.equipo_id) if payload.equipo_id else None,
+            "equipo_id": str(equipo_id) if equipo_id else None,
             "linea_id": verificacion.linea_id,
             "operador_id": str(session.user_id) if session.user_id else None,
             "started_at": inicio.isoformat(),
