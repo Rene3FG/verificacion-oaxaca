@@ -135,8 +135,9 @@ verificacion-oaxaca/
 
 ### 4.1 Qué está 100% probado y funcional
 - **Backend:** 459 pruebas en pytest pasando al 100% (último recuento registrado; no se re-ejecutó el 2026-10-29). `_LAYOUT_RECHAZO` integrado, login 403 con `permisos_asignados`, docker prod, CI y datos de arranque de producción listos.
-- **Frontend:** 390 pruebas en Vitest pasando al 100% (11 suites). `SupervisorView` (103), `PruebaView` (78), `AdministracionPanel` (61), `estado` (29), `ImpresionView` (25), `session` (25), `CapturaView` (19), `LoginView` (19), `TopAppBar` (15), `ExpedienteHeader` (9), `format` (7). 100% de componentes cubiertos. Queda 1 prueba `it.fails` (defecto de `session.js`, ver sección 1, punto 5).
+- **Frontend:** 397 pruebas en Vitest pasando al 100% (11 suites). `SupervisorView` (110), `PruebaView` (78), `AdministracionPanel` (61), `estado` (29), `ImpresionView` (25), `session` (25), `CapturaView` (19), `LoginView` (19), `TopAppBar` (15), `ExpedienteHeader` (9), `format` (7). 100% de componentes cubiertos. Queda 1 prueba `it.fails` (defecto de `session.js`, ver sección 1, punto 5).
 - **Compilación:** `npm run build` genera 694 módulos limpios sin errores.
+- **Clarificaciones Normativas NOM-047 (2026-10-30):** B4 cerrado (operación 100% offline sin SIOX confirmada), B7/Q1 aclarado (Inspección Visual antes de cerrar captura; si falla, rechazo directo sin emisiones; OBD antes de emisiones), B10(b) cerrado (001 es ID de técnico) y plantillas únicas oficializadas.
 
 ### 4.2 Siguientes Tareas Inmediatas
 
