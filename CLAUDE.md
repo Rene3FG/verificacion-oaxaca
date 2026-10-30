@@ -65,6 +65,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
   - Despliegue D1–D3 (Dockerfiles prod + Nginx) y CI D9 (`.github/workflows/ci.yml`).
   - Bloqueo B1 / HU-070 RESUELTO: layout `_LAYOUT_RECHAZO` integrado en `certificado.py` con `fecha_limite` y parámetro configurable `certificado_rechazo_dias_vigencia`.
   - HU-007 RESUELTO: `LoginView.vue` renderiza `permisos_asignados` en acceso denegado (Estado B).
+  - Operaciones D4–D8: `scripts/respaldo.sh`/`restaurar.sh` (Linux), `backup_db.*`/`restore_db.*` (PowerShell), `python -m app.bootstrap_prod` (datos de arranque), rotación de logs en `docker-compose.prod.yml`, `README.md`. La estación del equipo se fija con `?estacion=NOMBRE` en la URL (guardado en `localStorage`). Detalle en `docs/HISTORIAL_DETALLADO_PROYECTO.md`.
 - **Frontend:** 379/379 pruebas aprobadas en Vitest (11 suites: `session`, `TopAppBar`, `ExpedienteHeader`, `format`, `estado`, `ImpresionView`, `LoginView`, `CapturaView`, `PruebaView`, `SupervisorView`, `AdministracionPanel`; 100% de componentes cubiertos).
 - **Build de producción:** 694 módulos compilados limpiamente en Vite (0 errores).
 

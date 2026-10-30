@@ -1,11 +1,25 @@
 import { defineStore } from "pinia";
 import { api } from "../api/client";
 
-// El identificador de esta computadora como estación operativa. En
-// producción vendría de configuración local de la máquina, no de env var
-// de build; placeholder simple para desarrollo.
-const DEVICE_IDENTIFIER =
-  import.meta.env.VITE_DEVICE_IDENTIFIER || "CAPTURA-REFORMA-L1";
+// El identificador de esta computadora como estación operativa. Orden:
+// 1) `?estacion=NOMBRE` en la URL (se guarda en este navegador, así cada
+//    equipo se configura una vez abriendo esa dirección), 2) lo guardado,
+// 3) VITE_DEVICE_IDENTIFIER de build (desarrollo), 4) un valor de ejemplo.
+function resolverDeviceIdentifier() {
+  try {
+    const delUrl = new URLSearchParams(window.location.search).get("estacion");
+    if (delUrl) {
+      localStorage.setItem("device_identifier", delUrl);
+      return delUrl;
+    }
+    const guardado = localStorage.getItem("device_identifier");
+    if (guardado) return guardado;
+  } catch {
+    // Sin localStorage (modo privado): se usa el valor de build.
+  }
+  return import.meta.env.VITE_DEVICE_IDENTIFIER || "CAPTURA-REFORMA-L1";
+}
+const DEVICE_IDENTIFIER = resolverDeviceIdentifier();
 
 export const useSessionStore = defineStore("session", {
   state: () => ({

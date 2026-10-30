@@ -9,3 +9,5 @@ dist/
 *.log
 MEMORY.md
 research_log.md
+.env.prod
+respaldos/

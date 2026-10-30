@@ -3,8 +3,16 @@
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 # El TLS se termina delante (proxy inverso del verificentro o balanceador):
 # este compose publica HTTP en WEB_PORT (PENDIENTES X3).
+# Rotación de logs de Docker (D7): sin esto crecen sin límite en el disco.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
+    logging: *logging
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -20,10 +28,12 @@ services:
       retries: 10
 
   redis:
+    logging: *logging
     image: redis:7-alpine
     restart: unless-stopped
 
   backend:
+    logging: *logging
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
@@ -51,6 +61,7 @@ services:
       retries: 3
 
   web:
+    logging: *logging
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
