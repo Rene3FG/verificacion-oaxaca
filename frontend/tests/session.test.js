@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/api/client", () => ({ api: { get: vi.fn(), post: vi.fn() } }));
 import { api } from "../src/api/client";
@@ -99,5 +99,132 @@ describe("cierre de sesión", () => {
     expect(s.usuario).toBeNull();
     expect(s.estadoSync).toBeNull();
     expect(api.post).toHaveBeenCalledWith("/estaciones/logout/s1");
+  });
+});
+
+// resolverDeviceIdentifier() se evalúa al importar el módulo: cada caso
+// reinicia los módulos, prepara URL/localStorage/entorno y reimporta el store.
+describe("identificador de estación del equipo (?estacion=)", () => {
+  const CLAVE = "device_identifier";
+
+  async function detectarCon({ search = "", guardado, env = "", storage } = {}) {
+    vi.resetModules();
+    window.history.replaceState({}, "", `/${search}`);
+    localStorage.clear();
+    if (guardado !== undefined) localStorage.setItem(CLAVE, guardado);
+    vi.stubEnv("VITE_DEVICE_IDENTIFIER", env);
+    storage?.();
+
+    const { createPinia: crearPinia, setActivePinia: activarPinia } = await import("pinia");
+    const { api: apiFresca } = await import("../src/api/client");
+    const { useSessionStore: usarStore } = await import("../src/stores/session");
+    activarPinia(crearPinia());
+    apiFresca.get.mockResolvedValue({ data: { id: "w1" } });
+
+    await usarStore().detectarEstacion();
+    return apiFresca.get.mock.calls[0][0];
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    localStorage.clear();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("?estacion=NOMBRE gana sobre lo guardado y se persiste en localStorage", async () => {
+    const url = await detectarCon({ search: "?estacion=CAPTURA-L2", guardado: "OTRO-EQUIPO", env: "DEV" });
+    expect(url).toBe("/estaciones/CAPTURA-L2");
+    expect(localStorage.getItem(CLAVE)).toBe("CAPTURA-L2");
+  });
+
+  it("sin parámetro en la URL usa el identificador guardado y no lo modifica", async () => {
+    const url = await detectarCon({ guardado: "PRUEBA-L1", env: "DEV" });
+    expect(url).toBe("/estaciones/PRUEBA-L1");
+    expect(localStorage.getItem(CLAVE)).toBe("PRUEBA-L1");
+  });
+
+  it("lo guardado se conserva entre cargas aunque la URL ya no traiga el parámetro", async () => {
+    await detectarCon({ search: "?estacion=IMPRESION-01" });
+    vi.resetModules();
+    window.history.replaceState({}, "", "/");
+    vi.stubEnv("VITE_DEVICE_IDENTIFIER", "");
+    const { createPinia: crearPinia, setActivePinia: activarPinia } = await import("pinia");
+    const { api: apiFresca } = await import("../src/api/client");
+    const { useSessionStore: usarStore } = await import("../src/stores/session");
+    activarPinia(crearPinia());
+    apiFresca.get.mockResolvedValue({ data: {} });
+    await usarStore().detectarEstacion();
+    expect(apiFresca.get).toHaveBeenCalledWith("/estaciones/IMPRESION-01");
+  });
+
+  it("sin URL ni guardado usa VITE_DEVICE_IDENTIFIER de build", async () => {
+    const url = await detectarCon({ env: "DEV-LOCAL-07" });
+    expect(url).toBe("/estaciones/DEV-LOCAL-07");
+    expect(localStorage.getItem(CLAVE)).toBeNull();
+  });
+
+  it("sin URL, guardado ni variable de build usa el valor de ejemplo", async () => {
+    const url = await detectarCon({ env: "" });
+    expect(url).toBe("/estaciones/CAPTURA-REFORMA-L1");
+  });
+
+  it("?estacion= vacío se ignora y no pisa lo guardado", async () => {
+    const url = await detectarCon({ search: "?estacion=", guardado: "PRUEBA-L1" });
+    expect(url).toBe("/estaciones/PRUEBA-L1");
+    expect(localStorage.getItem(CLAVE)).toBe("PRUEBA-L1");
+  });
+
+  it("otros parámetros de la URL no afectan la resolución", async () => {
+    const url = await detectarCon({ search: "?foo=1&debug=true", guardado: "PRUEBA-L1" });
+    expect(url).toBe("/estaciones/PRUEBA-L1");
+  });
+
+  it("si localStorage lanza al leer (modo privado) cae al valor de build", async () => {
+    const url = await detectarCon({
+      env: "DEV-LOCAL-07",
+      storage: () => vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new Error("SecurityError");
+      }),
+    });
+    expect(url).toBe("/estaciones/DEV-LOCAL-07");
+  });
+
+  it("si localStorage lanza al leer y no hay variable de build cae al valor de ejemplo", async () => {
+    const url = await detectarCon({
+      env: "",
+      storage: () => vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new Error("SecurityError");
+      }),
+    });
+    expect(url).toBe("/estaciones/CAPTURA-REFORMA-L1");
+  });
+
+  it("la resolución con localStorage roto no lanza excepción al importar el store", async () => {
+    await expect(
+      detectarCon({
+        search: "?estacion=CAPTURA-L2",
+        storage: () => vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+          throw new Error("QuotaExceededError");
+        }),
+      })
+    ).resolves.toBeTypeOf("string");
+  });
+
+  // DEFECTO CONOCIDO (session.js, de René): si el equipo se abre con
+  // ?estacion=NOMBRE pero localStorage.setItem lanza (modo privado, cuota), la
+  // excepción salta el `return delUrl` y el identificador de la URL se descarta
+  // en silencio: el equipo se identifica con el valor de build o el de ejemplo
+  // (otra estación). Debería usar el de la URL aunque no pueda guardarlo.
+  // it.fails pasa mientras el defecto exista; quitar .fails al corregirlo.
+  it.fails("con ?estacion=NOMBRE y localStorage no disponible usa igualmente el valor de la URL", async () => {
+    const url = await detectarCon({
+      search: "?estacion=CAPTURA-L2",
+      env: "DEV-LOCAL-07",
+      storage: () => vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new Error("QuotaExceededError");
+      }),
+    });
+    expect(url).toBe("/estaciones/CAPTURA-L2");
   });
 });
