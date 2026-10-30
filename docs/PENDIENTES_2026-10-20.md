@@ -68,7 +68,7 @@ El código funciona con estas decisiones tomadas "por defecto"; cada una vive en
 | F6 | ~~Fila "Rol asignado" en acceso denegado~~ **HECHO 2026-10-22**: el 403 devuelve `permisos_asignados` y la pantalla lista las estaciones asignadas | HU-007 |
 | F7 | **Pausar prueba** | No se hizo "porque sin equipo no hay nada que pausar"; se reevalúa con el adaptador real | HU-045 |
 | F8 | **HU-024: crear el `PrintJob` de rechazo al rechazar** | El texto del Sheet lo pide al rechazar; hoy se crea al imprimir. Decidir si se cambia el código o el texto | HU-024 |
-| F9 | **Contador "sincronizando" siempre en 0** | La fila `SYNCING` nunca es visible porque se confirma al final del lote | HU-104 |
+| F9 | ~~Contador "sincronizando" siempre en 0~~ **HECHO 2026-10-30**: el lote se marca `SYNCING` y se confirma antes de enviar; cada fila confirma al terminar; las omitidas por corte vuelven a su estado; una `SYNCING` huérfana (>`SYNC_SYNCING_CADUCIDAD_S`, 900 s) vuelve a ser candidata | HU-104 |
 | F10 | ~~Rango de lotes sin tope~~ **YA ESTABA HECHO** (`MAX_FOLIOS_POR_LOTE` = 10 000, desde 2026-09-22, con prueba en `test_folios.py`); esta lista estaba desactualizada | Folios |
 | F11 | **Catálogo de municipios fuera de Oaxaca** | Solo hay 570 municipios de Oaxaca | HU-016 |
 

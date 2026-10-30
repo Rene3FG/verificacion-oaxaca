@@ -525,3 +525,70 @@ async def test_estado_distingue_operando_sin_internet(client, db_session, monkey
         ahora=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=1),
     )
     assert (await client.get("/api/sync/estado", headers=h)).json()["central"] == "EN_LINEA"
+
+
+async def _contar_syncing(db_session) -> int:
+    return len(
+        (
+            await db_session.execute(
+                select(SyncOutbox.id).where(SyncOutbox.sync_status == SyncStatus.SYNCING)
+            )
+        ).all()
+    )
+
+
+async def test_lote_en_vuelo_queda_visible_como_syncing(db_session):
+    """F9: el lote se marca SYNCING antes de enviar y cada fila sale de ese
+    estado al terminar; antes el contador "sincronizando" siempre daba 0."""
+
+    for _ in range(3):
+        await _encolar(db_session)
+    await db_session.commit()
+
+    vistos: list[int] = []
+
+    async def _enviar(row: SyncOutbox) -> dict:
+        vistos.append(await _contar_syncing(db_session))
+        return {"ok": True}
+
+    resultado = await procesar_pendientes(db_session, enviar=_enviar)
+
+    assert resultado["enviados"] == 3
+    assert vistos == [3, 2, 1]
+    assert await _contar_syncing(db_session) == 0
+
+
+async def test_fila_syncing_huerfana_se_reintenta_tras_caducar(db_session):
+    """Si el proceso muere a mitad del envío la fila queda SYNCING; pasada
+    la caducidad vuelve a ser candidata (sin backoff). Una SYNCING reciente
+    sigue en vuelo y no se toca."""
+
+    ahora = datetime.datetime.now(datetime.timezone.utc)
+    huerfana = await _encolar(
+        db_session,
+        sync_status=SyncStatus.SYNCING,
+        attempts=1,
+        last_attempt_at=ahora - datetime.timedelta(hours=1),
+    )
+    en_vuelo = await _encolar(
+        db_session,
+        sync_status=SyncStatus.SYNCING,
+        attempts=1,
+        last_attempt_at=ahora - datetime.timedelta(seconds=5),
+    )
+    await db_session.commit()
+
+    enviados: list[uuid.UUID] = []
+
+    async def _enviar(row: SyncOutbox) -> dict:
+        enviados.append(row.id)
+        return {"ok": True}
+
+    await procesar_pendientes(db_session, enviar=_enviar, ahora=ahora)
+
+    assert enviados == [huerfana.id]
+    await db_session.refresh(huerfana)
+    await db_session.refresh(en_vuelo)
+    assert huerfana.sync_status == SyncStatus.SYNCED
+    assert huerfana.attempts == 2
+    assert en_vuelo.sync_status == SyncStatus.SYNCING
