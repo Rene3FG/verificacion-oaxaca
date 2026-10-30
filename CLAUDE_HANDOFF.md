@@ -146,10 +146,12 @@ verificacion-oaxaca/
 
 ### 4.2 Siguientes Tareas Inmediatas
 
-1. **Coordinar con René la propuesta NOM-047** (`docs/PROPUESTA_FLUJO_INSPECCION_VISUAL_NOM047.md`): elegir entre la Opción A (mover la estación) y la B (reordenar estados), y resolver las preguntas abiertas con el cliente (qué significa "terminar la captura", qué plantilla imprime un rechazo, a qué técnico corresponde el 001). Hasta entonces no se modifica código de René.
-2. **Actualizar `docs/PENDIENTES_2026-10-20.md`** con las respuestas del cliente (B4, B7, B1/B9/B10(b)), porque hoy sigue listándolas como abiertas.
-3. **Avisar a René** del defecto de `?estacion=` con `localStorage` bloqueado (hay 1 `it.fails` en `session.test.js`; quitar el `.fails` cuando lo corrija).
-4. **Ejecutar `scripts/smoke_e2e_flujo.mjs` contra el backend real** en una sesión dedicada de QA (Docker, Postgres y Redis arriba, `python -m app.seed` aplicado).
+1. **Esperar la respuesta de René a la propuesta NOM-047** (`docs/PROPUESTA_FLUJO_INSPECCION_VISUAL_NOM047.md`): Opción A (mover la estación de la inspección visual a Captura) u Opción B (reordenar estados). Hasta entonces no se modifica código de René. Al implementarse hay que mover las pruebas de la inspección visual de `PruebaView.test.js` a `CapturaView.test.js`.
+2. **Confirmación del cliente sobre la plantilla física de rechazo:** qué plantilla imprime un rechazo visual y uno por emisiones (choca con `_LAYOUT_RECHAZO`, ver B1, B9 y S5 de `PENDIENTES`), qué significa "terminar la captura" y a qué técnico corresponde el campo 001.
+3. **Sesión E2E con Docker** (Postgres y Redis arriba, backend y `python -m app.seed`) para correr `scripts/smoke_e2e_flujo.mjs` contra el backend real, que hasta ahora solo se validó contra un servidor simulado.
+4. **Avisar a René** del defecto de `?estacion=` con `localStorage` bloqueado (hay 1 `it.fails` en `session.test.js`; quitar el `.fails` cuando lo corrija).
 5. **Acordar con René qué juego de scripts de respaldo queda** y si `README.md` de la raíz y `docs/MANUAL_INSTALACION_Y_OPERACION.md` se unifican.
-6. **Bloqueos B2-B11** que siguen abiertos dependen de terceros (hardware del proveedor, papel real, hosting). Las 6 HUs en PARCIAL se cierran con ellos, no con más código de interfaz.
-7. **`git push`** de los commits locales solo con confirmación explícita.
+6. **Bloqueos que siguen abiertos** en `PENDIENTES`: B10(a) (potencia en fase 5024), B2, B3, B5, B9 (papel real) y los demás de terceros. HU-024 sigue en PARCIAL. Las 6 HUs en PARCIAL se cierran con esos bloqueos, no con más código de interfaz.
+7. **`git push`** de commits locales solo con confirmación explícita.
+
+**Hecho:** `docs/PENDIENTES_2026-10-20.md` quedó al día con las respuestas del cliente (B1, B4, B7, B9, B10(b), S5) y con los puntos de pruebas y calidad ya resueltos (D9, Q1, Q6, Q7 parcial).

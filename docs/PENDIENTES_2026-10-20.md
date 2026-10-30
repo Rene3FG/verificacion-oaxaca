@@ -107,20 +107,20 @@ Verificado con `grep` en `main.py`, `deps.py`, `estaciones.py` y `services/auth.
 | D6 | **Manual de instalación y de operación** (Fase 4) y las variables de entorno documentadas; no existe README en el repo |
 | D7 | **Monitoreo y bitácora de aplicación**: `/health` existe, pero no hay alertas ni rotación de logs |
 | D8 | **Reloj y zona horaria** de los equipos de cada verificentro (los certificados llevan fecha y hora; ya hubo un desfase de 6 h en otro proyecto, vigilar aquí) |
-| D9 | **CI**: no hay `.github/workflows`; las 445 + 60 pruebas solo corren a mano |
+| D9 | ~~**CI**: no hay `.github/workflows`; las 445 + 60 pruebas solo corren a mano~~ **RESUELTO 2026-10-21** (`.github/workflows/ci.yml`, commit `3ed5c2b`: en cada push y pull request corre `pytest` contra Postgres, y `npm test` y `npm run build` del frontend) |
 | D10 | **Migraciones en un ambiente nuevo**: se probó desde cero en la BD de pruebas, pero no un plan de actualización con datos reales entre versiones |
 
 ### 3.5 Pruebas y calidad
 
 | # | Falta |
 |---|---|
-| Q1 | Pruebas de frontend: hoy hay 60 (estado, sesión, TopAppBar, ExpedienteHeader). **Faltan** las vistas grandes: `ImpresionView` (1 053 líneas), `PruebaView`, `CapturaView`, `SupervisorView` |
+| Q1 | ~~Pruebas de frontend: hoy hay 60 (estado, sesión, TopAppBar, ExpedienteHeader). **Faltan** las vistas grandes: `ImpresionView` (1 053 líneas), `PruebaView`, `CapturaView`, `SupervisorView`~~ **RESUELTO 2026-10-23** (las cuatro vistas con suite: `ImpresionView` el 10-21, `CapturaView` el 10-22, `PruebaView` y `SupervisorView` el 10-23). Después se sumó `AdministracionPanel` (10-28): hoy hay 397 pruebas en 11 suites de Vitest y todos los componentes y vistas están cubiertos |
 | Q2 | Pruebas de extremo a extremo (Puppeteer): se han hecho a mano contra uvicorn pero no están guardadas como suite repetible |
 | Q3 | Cobertura 403 por router: completa en `impresion.py`; `obd`, `pruebas`, `folios` tienen guards probados (09-30) pero no todas las combinaciones |
 | Q4 | Pruebas de carga y concurrencia realistas (varias estaciones simultáneas, folios atómicos bajo carga) |
 | Q5 | **UAT de las 41 pantallas contra el Figma**, con lista de diferencias (Fase 4). El Figma no se relee desde el 09-28 |
-| Q6 | HU en SOLO_FRONTEND sin prueba: HU-005, 006, 050, 058, 059, 060 |
-| Q7 | HU PARCIAL por criterio ambiguo o sin prueba: HU-007 (texto en pantalla), 037 (OBD/visual en el header), 024 |
+| Q6 | ~~HU en SOLO_FRONTEND sin prueba: HU-005, 006, 050, 058, 059, 060~~ **RESUELTO 2026-10-27** (categoría `SOLO_FRONTEND` erradicada, 0 HUs; HU-005 y HU-006 con las pruebas de `27f2a5a`) |
+| Q7 | HU PARCIAL por criterio ambiguo o sin prueba: ~~HU-007 (texto en pantalla)~~ **RESUELTO 2026-10-22** (el 403 responde `permisos_asignados` y `LoginView.vue` muestra las estaciones asignadas; pruebas el 10-23), ~~037 (OBD/visual en el header)~~ **RESUELTO 2026-10-27** (HECHO en la matriz). **Sigue abierta HU-024**: el `PrintJob` se crea al imprimir, no al rechazar |
 | Q8 | Linter / formateador (ni `ruff` ni `eslint` configurados) |
 | Q9 | Ejecutar el plan de impresión **en papel real** con la impresora del cliente (B9) |
 
