@@ -32,7 +32,7 @@ import uuid
 from typing import Awaitable, Callable
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -172,6 +172,17 @@ async def enviar_uno_a_central(row: SyncOutbox) -> dict:
         return {"status_code": resp.status_code}
 
 
+def _es_candidata(ahora: datetime.datetime):
+    """PENDING/ERROR, o SYNCING cuya marca es más vieja que
+    `sync_syncing_caducidad_s`: el proceso murió a mitad del envío y la fila
+    quedaría atascada para siempre (F9)."""
+    limite = ahora - datetime.timedelta(seconds=settings.sync_syncing_caducidad_s)
+    return or_(
+        SyncOutbox.sync_status.in_([SyncStatus.PENDING, SyncStatus.ERROR]),
+        and_(SyncOutbox.sync_status == SyncStatus.SYNCING, SyncOutbox.last_attempt_at < limite),
+    )
+
+
 async def procesar_pendientes(
     db: AsyncSession,
     *,
@@ -219,7 +230,7 @@ async def procesar_pendientes(
         (
             await db.execute(
                 select(SyncOutbox)
-                .where(SyncOutbox.sync_status.in_([SyncStatus.PENDING, SyncStatus.ERROR]))
+                .where(_es_candidata(ahora))
                 .order_by(SyncOutbox.created_at)
                 .limit(ventana_candidatos)
             )
@@ -231,7 +242,9 @@ async def procesar_pendientes(
     en_backoff = 0
     listos: list[SyncOutbox] = []
     for row in candidatos:
-        if row.last_attempt_at is not None and not forzar:
+        # Una fila SYNCING huérfana ya pasó su caducidad (ver `_es_candidata`):
+        # se reintenta sin esperar backoff.
+        if row.sync_status != SyncStatus.SYNCING and row.last_attempt_at is not None and not forzar:
             espera = calcular_espera_segundos(row.attempts)
             transcurrido = (ahora - row.last_attempt_at).total_seconds()
             if transcurrido < espera:
@@ -251,7 +264,7 @@ async def procesar_pendientes(
                     select(SyncOutbox)
                     .where(
                         SyncOutbox.id.in_([r.id for r in listos]),
-                        SyncOutbox.sync_status.in_([SyncStatus.PENDING, SyncStatus.ERROR]),
+                        _es_candidata(ahora),
                     )
                     .order_by(SyncOutbox.created_at)
                     .with_for_update(skip_locked=True)
@@ -267,13 +280,22 @@ async def procesar_pendientes(
     omitidos = 0
     central_inalcanzable = False
 
-    for indice, row in enumerate(listos):
+    # F9 (HU-104): el lote se marca SYNCING y se confirma ANTES de enviar,
+    # para que `/sync/estado` lo vea en vuelo (antes todo se confirmaba al
+    # final y el contador "sincronizando" siempre daba 0). Al confirmar se
+    # liberan los bloqueos, pero otra corrida no las toma: solo busca
+    # PENDING/ERROR o SYNCING caducadas. Se guarda el estado previo para
+    # devolver las filas que no se lleguen a intentar.
+    previos = {row.id: (row.sync_status, row.attempts, row.last_attempt_at) for row in listos}
+    for row in listos:
         row.sync_status = SyncStatus.SYNCING
         row.attempts += 1
         row.last_attempt_at = ahora
         db.add(row)
-        await db.flush()
+    if listos:
+        await db.commit()
 
+    for indice, row in enumerate(listos):
         try:
             respuesta = await enviar(row)
         except httpx.TransportError as exc:
@@ -284,6 +306,14 @@ async def procesar_pendientes(
             db.add(row)
             central_inalcanzable = True
             omitidos = len(listos) - indice - 1
+            # Las no intentadas vuelven tal cual estaban: no gastan intento.
+            for restante in listos[indice + 1 :]:
+                (
+                    restante.sync_status,
+                    restante.attempts,
+                    restante.last_attempt_at,
+                ) = previos[restante.id]
+                db.add(restante)
             break
         except Exception as exc:  # noqa: BLE001 - cualquier falla de red/central
             row.sync_status = SyncStatus.ERROR
@@ -294,6 +324,8 @@ async def procesar_pendientes(
             row.server_response = respuesta
             enviados += 1
         db.add(row)
+        # Confirmar por fila: el contador baja conforme avanza el lote.
+        await db.commit()
 
     await db.commit()
     resultado = {

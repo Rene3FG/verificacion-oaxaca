@@ -4,6 +4,7 @@ from app.models.catalogos import (
     CatEstadoVerificacion,
     CatParametroSistema,
 )
+from app.models.equipo import Equipo
 from app.models.event_log import EventLog
 from app.models.folio import Folio, FolioLote
 from app.models.inspeccion_visual import InspeccionVisual
@@ -27,6 +28,7 @@ __all__ = [
     "CatEstadoVerificacion",
     "CatParametroSistema",
     "CatUsuario",
+    "Equipo",
     "EventLog",
     "Folio",
     "FolioLote",
