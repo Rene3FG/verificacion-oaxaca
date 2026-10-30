@@ -2988,3 +2988,7 @@ antes de la rama diésel.
 `GET /api/supervision/incidencias?estado=abiertas|resueltas|todas` (default `abiertas`, sin cambio para quien no lo manda). **Sin tabla nueva**: el historial se deriva de `event_log` (cada entrada a IMPRESION_FALLIDA / FOLIO_ERROR / ERROR_INTEGRACION por `prueba_error_equipo` es una incidencia; está resuelta cuando el expediente salió de ese estado, `resuelta_at` = esa transición). Limitación: los errores de sincronización no se rastrean (la fila SYNCED no conserva que fue error). Pestaña "Errores y reintentos" con selector Estado y chip "Resuelta"; sin acción de reintento en las resueltas. Si se necesita historial de sync, haría falta una tabla `incidencia_log`.
 
 Mismo día: `actualizarPermiso` conserva el error tras recargar y el aviso de normalizar se muestra en la lista de Captura (pendientes de Sebas).
+
+## D4/D6: respaldos y README (2026-10-29)
+
+`scripts/respaldo.sh` (pg_dump comprimido, valida el gzip, retención configurable) y `scripts/restaurar.sh` (pide confirmar "SI", detiene el backend, recrea la BD). Probados contra un Postgres desechable: 500 filas respaldadas, tabla borrada, restauradas. `README.md` nuevo (instalación, variables, respaldos, desarrollo). **Corrección**: `.env.prod` no estaba en `.gitignore` pese a documentarse como no versionado; ahora sí (junto con `respaldos/`). Siguen abiertos D5 (datos de arranque reales), D7, D8 de `docs/PENDIENTES_2026-10-20.md`.
