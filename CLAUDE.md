@@ -26,11 +26,14 @@ Sistema de control y certificación de emisiones vehiculares del Estado de Oaxac
 ## 2. Comandos Clave
 
 ```powershell
-# Pruebas de Frontend (Vitest: 11 suites, 379 tests pasando al 100%)
+# Pruebas de Frontend (Vitest: 11 suites, 390 tests pasando al 100%)
 npm --prefix frontend test
 
 # Compilación de Producción de Frontend (0 errores, 694 módulos)
 npm --prefix frontend run build
+
+# Prueba de humo del ciclo vehicular completo (requiere backend, Postgres y Redis arriba)
+node scripts/smoke_e2e_flujo.mjs
 
 # Pruebas de Backend (Pytest: 459 tests pasando al 100%)
 # Requiere contenedores Postgres/Redis arriba y DLLs de WeasyPrint en PATH
@@ -66,7 +69,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
   - Bloqueo B1 / HU-070 RESUELTO: layout `_LAYOUT_RECHAZO` integrado en `certificado.py` con `fecha_limite` y parámetro configurable `certificado_rechazo_dias_vigencia`.
   - HU-007 RESUELTO: `LoginView.vue` renderiza `permisos_asignados` en acceso denegado (Estado B).
   - Operaciones D4–D8: `scripts/respaldo.sh`/`restaurar.sh` (Linux), `backup_db.*`/`restore_db.*` (PowerShell), `python -m app.bootstrap_prod` (datos de arranque), rotación de logs en `docker-compose.prod.yml`, `README.md`. La estación del equipo se fija con `?estacion=NOMBRE` en la URL (guardado en `localStorage`). Detalle en `docs/HISTORIAL_DETALLADO_PROYECTO.md`.
-- **Frontend:** 379/379 pruebas aprobadas en Vitest (11 suites: `session`, `TopAppBar`, `ExpedienteHeader`, `format`, `estado`, `ImpresionView`, `LoginView`, `CapturaView`, `PruebaView`, `SupervisorView`, `AdministracionPanel`; 100% de componentes cubiertos).
+- **Frontend:** 390/390 pruebas aprobadas en Vitest (11 suites: `session`, `TopAppBar`, `ExpedienteHeader`, `format`, `estado`, `ImpresionView`, `LoginView`, `CapturaView`, `PruebaView`, `SupervisorView`, `AdministracionPanel`; 100% de componentes cubiertos; 1 `it.fails` documenta un defecto de `session.js`).
 - **Build de producción:** 694 módulos compilados limpiamente en Vite (0 errores).
 
 ---

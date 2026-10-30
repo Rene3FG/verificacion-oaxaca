@@ -2,9 +2,9 @@
 
 **De:** Antigravity (AI Pair Programmer)  
 **Para:** Claude (AI Assistant) & Sebas  
-**Fecha de corte:** 27 de octubre de 2026 (Semana 7 — Martes)  
-**Rama activa:** `frontend-impresion-central` (`HEAD a1dc8a3`, upstream de René integrado)  
-**Estado upstream:** Upstream de René (`origin/etapa1-y-siox` en `d791bb8`) integrado limpiamente vía merge `a9bd56f`.
+**Fecha de corte:** 29 de octubre de 2026 (Semana 7 — Jueves)  
+**Rama activa:** `frontend-impresion-central` (merge de upstream `5bc31cd` integrado)  
+**Estado upstream:** Upstream de René (`origin/etapa1-y-siox` en `a3aeafd`) integrado vía merge `5bc31cd` (conflictos solo en `.gitignore` y `CLAUDE.md`, resueltos).
 
 ---
 
@@ -44,6 +44,14 @@
    - [`CLAUDE.md`](file:///c:/Users/LENOVO%20330s/OneDrive/Escritorio/verificacion-oaxaca/verificacion-oaxaca/CLAUDE.md) condensado a 6,440 caracteres (< 10k límite).
    - Historial histórico íntegro (197 KB) archivado en [`docs/HISTORIAL_DETALLADO_PROYECTO.md`](file:///c:/Users/LENOVO%20330s/OneDrive/Escritorio/verificacion-oaxaca/verificacion-oaxaca/docs/HISTORIAL_DETALLADO_PROYECTO.md).
 
+5. **Merge de Upstream, Estación por URL y Matriz 2026-10-29 (`5bc31cd`, `c76435c`):**
+   - **Merge `5bc31cd`:** integra `ec0794b`, `e71fdb2`, `9d6b14c` y `a3aeafd` de René: `scripts/respaldo.sh` y `restaurar.sh`, `README.md` de la raíz, `backend/app/bootstrap_prod.py` (datos de arranque de producción), rotación de logs en `docker-compose.prod.yml` y `?estacion=` en `session.js`. `.gitignore` conserva las exclusiones de ambos lados; las secciones nuevas de `CLAUDE.md` de René pasaron a `docs/HISTORIAL_DETALLADO_PROYECTO.md`. Los scripts `respaldo.sh`/`restaurar.sh` conviven con `backup_db.*`/`restore_db.*` (decisión: no romper el flujo Linux de René ni el soporte PowerShell).
+   - **Pruebas de `session.js` (`c76435c`):** 11 pruebas nuevas de `resolverDeviceIdentifier()`: `?estacion=` gana y se guarda en `localStorage`, lectura de lo guardado, respaldo a `VITE_DEVICE_IDENTIFIER` y al valor de ejemplo, y resiliencia si `localStorage` lanza. Cada caso reimporta el módulo porque el valor se calcula al cargarlo.
+   - **Defecto conocido (de René, `session.js`):** si el equipo se abre con `?estacion=NOMBRE` y `localStorage.setItem` lanza (modo privado, cuota), la excepción salta el `return` y el identificador de la URL se descarta en silencio; el equipo se identifica con el valor de build o el de ejemplo. Documentado con 1 `it.fails` en `session.test.js` (quitar `.fails` al corregirlo).
+   - **Suite Frontend: 390 pruebas en 11 suites al 100%.** Build limpio.
+   - **Matriz de trazabilidad 2026-10-29:** sin HUs promovidas; HECHO se mantiene en 96 (337 SP / 83.0%). HU-016 ya estaba en HECHO (el catálogo INEGI nacional amplía su evidencia, no su criterio) y HU-083 sigue en PARCIAL (falta la detección real del error por el equipo, Fase 2). Se amplió la evidencia de ambas con pruebas de backend y Vitest.
+   - **Prueba de humo `scripts/smoke_e2e_flujo.mjs`:** recorre Captura, Inspección, OBD, Prueba, Folio e Impresión hasta `IMPRESO` con fetch nativo. Validado contra un servidor simulado del contrato (equipo manual y simulador, y falla de impresión con código de salida 1 y sesiones cerradas); **aún no se ha ejecutado contra el backend real**. Uso en `scripts/README.md`, sección 4.
+
 ---
 
 ## 2. Estado Actual de la Arquitectura y Árbol de Archivos
@@ -74,13 +82,13 @@ verificacion-oaxaca/
 │   │   ├── stores/session.js              # Pinia store (estacion, sesion, errorTipo, usuarioDenegado, permisosAsignados)
 │   │   ├── utils/                         # catalogos.js, estado.js, format.js
 │   │   └── views/                         # LoginView.vue, CapturaView.vue, PruebaView.vue, ImpresionView.vue, SupervisorView.vue
-│   ├── tests/                             # 11 suites Vitest (376 tests passing)
+│   ├── tests/                             # 11 suites Vitest (390 tests passing)
 │   │   ├── setup.js                       # ResizeObserver polyfill para Vuetify
-│   │   ├── session.test.js                # 14 tests del store de sesión
+│   │   ├── session.test.js                # 25 tests del store de sesión (incluye ?estacion=; 1 it.fails)
 │   │   ├── LoginView.test.js              # 19 tests de LoginView (incluye HU-005, HU-006, HU-007)
 │   │   ├── CapturaView.test.js            # 18 tests de CapturaView
 │   │   ├── PruebaView.test.js             # 78 tests de PruebaView (avisos warning/success y persistencia)
-│   │   ├── SupervisorView.test.js         # 101 tests de SupervisorView (1 it.fails: actualizarPermiso)
+│   │   ├── SupervisorView.test.js         # 103 tests de SupervisorView
 │   │   ├── AdministracionPanel.test.js    # 61 tests de AdministracionPanel (CRUD y navegación)
 │   │   ├── ImpresionView.test.js          # 25 tests de ImpresionView (incluye HU-006 y limpieza de fallbacks)
 │   │   ├── ExpedienteHeader.test.js       # 9 tests del header
@@ -95,8 +103,10 @@ verificacion-oaxaca/
 │   └── PENDIENTES_2026-10-20.md           # Lista maestra de bloqueos B1-B11 (B1 RESUELTO) y supuestos S1-S12
 ├── scripts/
 │   ├── backup_db.sh / restore_db.sh       # Scripts Bash de respaldo D4 (Linux)
+│   ├── respaldo.sh / restaurar.sh         # Variante de respaldo y restauración (René)
+│   ├── smoke_e2e_flujo.mjs                # Prueba de humo del ciclo vehicular (Node 18+)
 │   ├── backup_db.ps1 / restore_db.ps1     # Scripts PowerShell de respaldo D4 (Windows)
-│   └── README.md                          # Guía de automatización con cron diario
+│   └── README.md                          # Guía de respaldos y de la prueba de humo
 ├── docker-compose.yml                     # Compose de desarrollo local (db 5433, redis 6379)
 ├── docker-compose.prod.yml                # Compose de producción aislado (db, redis, backend, web)
 ├── .env.prod.example                      # Plantilla de variables de producción
@@ -124,12 +134,14 @@ verificacion-oaxaca/
 ## 4. Estado Actual (Working State) y Próximos Pasos (TODOs)
 
 ### 4.1 Qué está 100% probado y funcional
-- **Backend:** 459 pruebas en pytest pasando al 100%. `_LAYOUT_RECHAZO` integrado, login 403 con `permisos_asignados`, docker prod y CI listos.
-- **Frontend:** 379 pruebas en Vitest pasando al 100% (11 suites). `SupervisorView` (103), `PruebaView` (78), `AdministracionPanel` (61), `estado` (29), `ImpresionView` (25), `CapturaView` (19), `LoginView` (19), `TopAppBar` (15), `session` (14), `ExpedienteHeader` (9), `format` (7). 100% de componentes cubiertos y 0 pruebas con `.fails`.
+- **Backend:** 459 pruebas en pytest pasando al 100% (último recuento registrado; no se re-ejecutó el 2026-10-29). `_LAYOUT_RECHAZO` integrado, login 403 con `permisos_asignados`, docker prod, CI y datos de arranque de producción listos.
+- **Frontend:** 390 pruebas en Vitest pasando al 100% (11 suites). `SupervisorView` (103), `PruebaView` (78), `AdministracionPanel` (61), `estado` (29), `ImpresionView` (25), `session` (25), `CapturaView` (19), `LoginView` (19), `TopAppBar` (15), `ExpedienteHeader` (9), `format` (7). 100% de componentes cubiertos. Queda 1 prueba `it.fails` (defecto de `session.js`, ver sección 1, punto 5).
 - **Compilación:** `npm run build` genera 694 módulos limpios sin errores.
 
 ### 4.2 Siguientes Tareas Inmediatas
 
-1. **Confirmar `git push origin frontend-impresion-central`:** Subir el merge `a9bd56f`, las pruebas de PruebaView `a1dc8a3` y el commit de documentación `docs:`.
-2. **Defectos de avisos de René:** Oficialmente resueltos e integrados. `actualizarPermiso` conserva el error, el aviso de normalización sobrevive en la lista de expedientes de Captura y el filtro de incidencias abiertas/resueltas está cubierto al 100%.
-3. **Siguiente prioridad:** Revisar `docs/PENDIENTES_2026-10-20.md` para elegir la siguiente prioridad (ej. pruebas de `AdministracionPanel.vue` o bloqueos B2-B11).
+1. **Ejecutar `scripts/smoke_e2e_flujo.mjs` contra el backend real** (Postgres y Redis arriba, `python -m app.seed` aplicado) y ajustar lo que difiera del contrato simulado.
+2. **Avisar a René** del defecto de `?estacion=` con `localStorage` bloqueado (quitar el `.fails` cuando lo corrija) y del nuevo `CLAUDE.md` condensado con el historial en `docs/HISTORIAL_DETALLADO_PROYECTO.md`.
+3. **Acordar con René qué juego de scripts de respaldo queda** (`respaldo.sh`/`restaurar.sh` o `backup_db.*`/`restore_db.*`) y si `README.md` de la raíz y `docs/MANUAL_INSTALACION_Y_OPERACION.md` se unifican.
+4. **Bloqueos B2-B11 de `docs/PENDIENTES_2026-10-20.md`:** dependen de terceros (hardware del proveedor, papel real, hosting). Las 10 HUs en PARCIAL se cierran con ellos, no con más código de interfaz.
+5. **`git push`** de los commits locales solo con confirmación explícita.
