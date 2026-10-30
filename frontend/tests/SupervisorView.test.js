@@ -53,6 +53,32 @@ const INCIDENCIAS = [
   { id: "inc-2", placa: "BBB-002", expediente_id: "exp-2", linea_id: 3, accion: "REINTENTAR_PRUEBA" },
 ];
 
+const ESTACIONES = [
+  { id: "e1", line_id: 1, name: "Línea 1 Prueba", capacidad_dinamometro_kg: 3500 },
+  { id: "e2", line_id: null, name: "Estación Móvil", capacidad_dinamometro_kg: null },
+];
+
+const EQUIPOS = [
+  {
+    id: "eq-1",
+    workstation_id: "e1",
+    tipo: "ANALIZADOR_GASES",
+    marca: "Sensors",
+    modelo: "AMB II",
+    numero_serie: "SN-1001",
+    is_active: true,
+  },
+  {
+    id: "eq-2",
+    workstation_id: "e1",
+    tipo: "DINAMOMETRO",
+    marca: "Maha",
+    modelo: "ASM AF",
+    numero_serie: "SN-2002",
+    is_active: false,
+  },
+];
+
 // Servidor simulado: cada prueba ajusta srv antes de montar.
 let srv;
 
@@ -68,6 +94,7 @@ function reiniciarServidor() {
       "/folios/inventario": [],
       "/pruebas/limites-emision": [],
       "/estaciones": [],
+      "/equipos": [],
       "/supervision/semestre": { fecha_final: null },
     },
     fallas: {}, // url -> detail (o null para respuesta sin detail)
@@ -133,7 +160,7 @@ beforeEach(() => {
 });
 
 describe("SupervisorView - Carga inicial y monitor (HU-111)", () => {
-  it("al montar consulta las diez fuentes de datos de la vista", async () => {
+  it("al montar consulta las once fuentes de datos de la vista", async () => {
     await montar();
     const urls = api.get.mock.calls.map(([u]) => u);
     for (const esperada of [
@@ -146,6 +173,7 @@ describe("SupervisorView - Carga inicial y monitor (HU-111)", () => {
       "/folios/inventario",
       "/pruebas/limites-emision",
       "/estaciones",
+      "/equipos",
       "/supervision/semestre",
     ]) {
       expect(urls).toContain(esperada);
@@ -790,11 +818,6 @@ describe("SupervisorView - Límites de emisión", () => {
 });
 
 describe("SupervisorView - Capacidad del dinamómetro por línea", () => {
-  const ESTACIONES = [
-    { id: "e1", line_id: 1, capacidad_dinamometro_kg: 3500 },
-    { id: "e2", line_id: null, capacidad_dinamometro_kg: null },
-  ];
-
   it("carga las estaciones de prueba y copia la capacidad a un valor editable", async () => {
     srv.get["/estaciones"] = ESTACIONES;
     const { w } = await montar();
@@ -848,6 +871,132 @@ describe("SupervisorView - Capacidad del dinamómetro por línea", () => {
     expect(w.vm.estacionesPrueba[0]._valor).toBe(99999);
     expect(w.vm.estacionesPrueba[0].capacidad_dinamometro_kg).toBe(3500);
     expect(w.vm.guardandoCapacidad.e1).toBe(false);
+  });
+});
+
+describe("SupervisorView - Catálogo de equipos de prueba (F4, HU-042/102)", () => {
+  it("carga el catálogo de equipos al montar", async () => {
+    srv.get["/equipos"] = EQUIPOS;
+    const { w } = await montar();
+    expect(w.vm.equipos).toEqual(EQUIPOS);
+    expect(w.vm.cargandoEquipos).toBe(false);
+  });
+
+  it("textoTipoEquipo y textoEstacion formatean correctamente", async () => {
+    srv.get["/estaciones"] = ESTACIONES;
+    const { w } = await montar();
+    expect(w.vm.textoTipoEquipo("ANALIZADOR_GASES")).toBe("Analizador de gases");
+    expect(w.vm.textoTipoEquipo("DINAMOMETRO")).toBe("Dinamómetro");
+    expect(w.vm.textoTipoEquipo("OPACIMETRO")).toBe("Opacímetro");
+    expect(w.vm.textoTipoEquipo("ESCANER_OBD")).toBe("Escáner OBD");
+    expect(w.vm.textoTipoEquipo("OTRO")).toBe("OTRO");
+
+    expect(w.vm.textoEstacion("e1")).toBe("Línea 1 · Línea 1 Prueba");
+    expect(w.vm.textoEstacion("e-desconocida")).toBe("—");
+  });
+
+  it("abrirEquipo prepara el formulario para nuevo equipo o para edición", async () => {
+    const { w } = await montar();
+    w.vm.abrirEquipo();
+    expect(w.vm.equipoAbierto).toBe(true);
+    expect(w.vm.equipoForm).toEqual({
+      id: null,
+      workstation_id: null,
+      tipo: null,
+      marca: "",
+      modelo: "",
+      numero_serie: "",
+      is_active: true,
+    });
+
+    w.vm.abrirEquipo(EQUIPOS[0]);
+    expect(w.vm.equipoAbierto).toBe(true);
+    expect(w.vm.equipoForm).toEqual({
+      id: "eq-1",
+      workstation_id: "e1",
+      tipo: "ANALIZADOR_GASES",
+      marca: "Sensors",
+      modelo: "AMB II",
+      numero_serie: "SN-1001",
+      is_active: true,
+    });
+  });
+
+  it("guardarEquipo crea un nuevo equipo por POST, avisa y recarga", async () => {
+    srv.get["/equipos"] = EQUIPOS;
+    srv.post["/equipos"] = () =>
+      Promise.resolve({ data: { id: "eq-3", numero_serie: "SN-3003" } });
+    const { w } = await montar();
+    w.vm.abrirEquipo();
+    Object.assign(w.vm.equipoForm, {
+      workstation_id: "e1",
+      tipo: "OPACIMETRO",
+      marca: "Capelec",
+      modelo: "CAP3200",
+      numero_serie: "SN-3003",
+    });
+    api.get.mockClear();
+
+    await w.vm.guardarEquipo();
+
+    expect(api.post).toHaveBeenCalledWith("/equipos", {
+      tipo: "OPACIMETRO",
+      marca: "Capelec",
+      modelo: "CAP3200",
+      numero_serie: "SN-3003",
+      workstation_id: "e1",
+    });
+    expect(w.vm.equipoAbierto).toBe(false);
+    expect(w.vm.aviso).toBe("Equipo SN-3003 guardado.");
+    expect(api.get).toHaveBeenCalledWith("/equipos");
+    expect(w.vm.guardandoEquipo).toBe(false);
+  });
+
+  it("guardarEquipo edita un equipo existente por PATCH", async () => {
+    srv.patch["/equipos/eq-1"] = () =>
+      Promise.resolve({ data: { id: "eq-1", is_active: false } });
+    const { w } = await montar();
+    w.vm.abrirEquipo(EQUIPOS[0]);
+    w.vm.equipoForm.is_active = false;
+
+    await w.vm.guardarEquipo();
+
+    expect(api.patch).toHaveBeenCalledWith("/equipos/eq-1", {
+      tipo: "ANALIZADOR_GASES",
+      marca: "Sensors",
+      modelo: "AMB II",
+      numero_serie: "SN-1001",
+      is_active: false,
+    });
+    expect(w.vm.equipoAbierto).toBe(false);
+    expect(w.vm.aviso).toBe("Equipo SN-1001 guardado.");
+  });
+
+  it("si falla guardarEquipo muestra el error y mantiene abierto el formulario", async () => {
+    srv.post["/equipos"] = () => rechazo("Número de serie ya registrado");
+    const { w } = await montar();
+    w.vm.abrirEquipo();
+    Object.assign(w.vm.equipoForm, {
+      workstation_id: "e1",
+      tipo: "ESCANER_OBD",
+      numero_serie: "DUPLICADO",
+    });
+
+    await w.vm.guardarEquipo();
+
+    expect(w.vm.error).toBe("Número de serie ya registrado");
+    expect(w.vm.equipoAbierto).toBe(true);
+    expect(w.vm.guardandoEquipo).toBe(false);
+  });
+
+  it("si falla cargarEquipos muestra el error del backend o el genérico", async () => {
+    srv.fallas["/equipos"] = "Error al leer equipos";
+    const { w } = await montar();
+    expect(w.vm.error).toBe("Error al leer equipos");
+
+    srv.fallas["/equipos"] = undefined;
+    await w.vm.cargarEquipos();
+    expect(w.vm.error).toBe("No se pudo cargar el catálogo de equipos.");
   });
 });
 
