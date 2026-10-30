@@ -71,3 +71,8 @@ los datos de arranque reales (usuarios, estaciones, centros, lotes de folios, l�
 - `CLAUDE.md`: arquitectura, decisiones de producto y supuestos reversibles, sección por sección.
 - `docs/PENDIENTES_2026-10-20.md`: lo que falta y quién lo desbloquea.
 - `docs/trazabilidad/`: matriz HU → código → prueba.
+
+## Operación
+
+- **Logs:** Docker los rota solos (10 MB × 5 archivos por contenedor). Ver: `docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f backend`.
+- **Reloj y zona horaria:** los certificados llevan fecha y hora. El servidor usa `America/Mexico_City` (variable `TZ` del backend); mantener el reloj del servidor sincronizado (NTP) y revisar que las estaciones muestren la misma hora.

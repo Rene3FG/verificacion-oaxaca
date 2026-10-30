@@ -2998,3 +2998,7 @@ Mismo día: `actualizarPermiso` conserva el error tras recargar y el aviso de no
 - `python -m app.bootstrap_prod --centro C --lineas N --usuario U` (contraseña en `BOOTSTRAP_PASSWORD`, valida la política X6): parámetros, límites NOM-041/045, estaciones por línea + Impresión y el primer supervisor. Idempotente. Probado contra `verificacion_test` (2 corridas, 5 estaciones, 3 permisos; datos borrados después). Sin esto, producción no tiene ningún usuario: `app.seed` es de desarrollo.
 - **Hueco encontrado**: el identificador de estación se fijaba en build (`VITE_DEVICE_IDENTIFIER`, y `Dockerfile.prod` no lo pasa), así que todos los equipos de producción habrían sido `CAPTURA-REFORMA-L1`. Ahora `?estacion=NOMBRE` en la URL se guarda en `localStorage` y tiene prioridad; el valor de build queda como respaldo de desarrollo.
 - **F9 (contador "sincronizando" en 0) descartado a propósito**: mostrarlo exigiría confirmar `SYNCING` antes de enviar, lo que suelta el `FOR UPDATE SKIP LOCKED` y deja filas atascadas si el proceso cae. Es cosmético; no se hace.
+
+## D7/D8: rotación de logs y nota de reloj (2026-10-29)
+
+`docker-compose.prod.yml`: `json-file` con `max-size 10m` / `max-file 5` en los 4 servicios (validado con `docker compose config`). README: sección "Operación" (logs, NTP y zona horaria). Alertas/monitoreo externo siguen sin hacerse (D7 parcial).
