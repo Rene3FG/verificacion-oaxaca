@@ -60,9 +60,9 @@ El código funciona con estas decisiones tomadas "por defecto"; cada una vive en
 
 | # | Tarea | Detalle | HU |
 |---|---|---|---|
-| F1 | **`ERROR_INTEGRACION` en prueba** | Ningún endpoint lo asigna. HU-054 pide guardar el estado de error con mensaje técnico y operativo y posibilidad de reintento; hoy solo existe la interrupción con motivo | HU-054 |
-| F2 | **Incidencias de equipo en "Errores y reintentos"** | Un error de equipo se registra al interrumpir pero no queda abierto como incidencia | HU-083, Supervisión |
-| F3 | **Historial de incidencias** | No hay tabla: "abierta" se deriva del estado. Por eso falta el filtro "Estado: abiertos / resueltos" del Figma | Supervisión |
+| F1 | ~~**`ERROR_INTEGRACION` en prueba**~~ **HECHO 2026-10-21**: el error de comunicación o falla del equipo transiciona el expediente a `ERROR_INTEGRACION`, guarda detalle técnico/operativo y permite reintento explícito (`backend/app/api/routers/pruebas.py`, commit `53593dc`) | HU-054 |
+| F2 | ~~**Incidencias de equipo en "Errores y reintentos"**~~ **HECHO 2026-10-21**: todo error de equipo crea una incidencia abierta visible en Supervisión (`backend/app/api/routers/supervision.py`, commit `53593dc`) | HU-083, Supervisión |
+| F3 | ~~**Historial de incidencias**~~ **HECHO 2026-10-28**: filtro de incidencias abiertas vs resueltas derivado de la bitácora (`GET /supervision/incidencias?estado=abiertas|resueltas|todas`), con selector en `SupervisorView.vue` (commit `fe69352`) | Supervisión |
 | F4 | ~~`equipo_id` real en `ResultadoPrueba`~~ **HECHO 2026-10-30**: catálogo `cat_equipos` (Administración › Equipos); el servidor resuelve el equipo por estación+método (analizador/opacímetro/escáner OBD), valida el que mande el cliente (422) y deja NULL si la línea no tiene un único equipo activo de ese tipo | HU-042, 102 |
 | F5 | **Calibración periódica como bloqueo** | El contrato no la detalla; preguntar a Luis o al proveedor antes de construir | HU-041/044 |
 | F6 | ~~Fila "Rol asignado" en acceso denegado~~ **HECHO 2026-10-22**: el 403 devuelve `permisos_asignados` y la pantalla lista las estaciones asignadas | HU-007 |
@@ -70,7 +70,7 @@ El código funciona con estas decisiones tomadas "por defecto"; cada una vive en
 | F8 | **HU-024: crear el `PrintJob` de rechazo al rechazar** | El texto del Sheet lo pide al rechazar; hoy se crea al imprimir. Decidir si se cambia el código o el texto | HU-024 |
 | F9 | ~~Contador "sincronizando" siempre en 0~~ **HECHO 2026-10-30**: el lote se marca `SYNCING` y se confirma antes de enviar; cada fila confirma al terminar; las omitidas por corte vuelven a su estado; una `SYNCING` huérfana (>`SYNC_SYNCING_CADUCIDAD_S`, 900 s) vuelve a ser candidata | HU-104 |
 | F10 | ~~Rango de lotes sin tope~~ **YA ESTABA HECHO** (`MAX_FOLIOS_POR_LOTE` = 10 000, desde 2026-09-22, con prueba en `test_folios.py`); esta lista estaba desactualizada | Folios |
-| F11 | **Catálogo de municipios fuera de Oaxaca** | Solo hay 570 municipios de Oaxaca | HU-016 |
+| F11 | ~~**Catálogo de municipios fuera de Oaxaca**~~ **HECHO 2026-10-28**: catálogo INEGI nacional de las 32 entidades federativas (`backend/app/data/municipios_mexico.json`, 2 469 municipios) integrado en `catalogos.py`, `CapturaView.vue` y `PruebaView.vue` (commit `d276d5e`) | HU-016 |
 
 ### 3.2 Robustez de datos / sincronización
 
@@ -128,11 +128,11 @@ Verificado con `grep` en `main.py`, `deps.py`, `estaciones.py` y `services/auth.
 
 | Área | Estado | Qué impide el 100 % |
 |---|---|---|
-| Captura / SIOX | Completa; resiliente a SIOX caído | Solo catálogos fuera de Oaxaca (F11) |
+| Captura / SIOX | Completa; resiliente a SIOX caído | Cerrado (F11 resuelto con catálogo INEGI nacional) |
 | Inspección visual / OBD | Completa en código | B7 (¿Captura o Prueba?) |
-| Prueba / equipos | Completa **contra el simulador** | B2 (adaptador real), F4, F5 |
+| Prueba / equipos | Completa **contra el simulador** | B2 (adaptador real), F5 (calibración) |
 | Impresión / folios | Completa; filtros y bitácora cerrados | B1, B8, B9, B10 |
-| Supervisión / auditoría | Completa en Fase 1 | F2, F3 |
+| Supervisión / auditoría | Completa (F2 y F3 resueltos) | Ninguno pendiente en Fase 1 |
 | Administración | Completa (usuarios, estaciones, parámetros, folios, límites) | S8 (Superadmin) |
 | Sincronización | Cola local, reintentos, indicador "sin internet" listos | B3, B4, R1 |
 | Seguridad | Autorización por estación/línea sólida | X1–X7 |
