@@ -95,18 +95,18 @@ Verificado con `grep` en `main.py`, `deps.py`, `estaciones.py` y `services/auth.
 | X6 | **Sin política de contraseñas ni rotación** (no encontré validación de complejidad) | Cuentas con contraseñas triviales |
 | X7 | Revisión de seguridad completa prevista para la Fase 4 y aún no hecha; la auditoría de Sebas solo cubrió `impresion.py` (10 endpoints) | Los otros routers (obd, pruebas, folios, supervisión, usuarios, parámetros) tienen la auditoría de rutas del 10-13 pero no pruebas 403 exhaustivas |
 
-### 3.4 Despliegue y operación (hoy no existe nada de esto)
+### 3.4 Despliegue y operación
 
 | # | Falta |
 |---|---|
-| D1 | **Imagen de producción**: el `Dockerfile` arranca con `--reload` y `docker-compose.yml` monta el código como volumen |
-| D2 | **Servir el frontend**: no hay Dockerfile ni servidor para `frontend/dist`; hay que decidir nginx (o similar) con proxy a `/api` |
-| D3 | **Compose / script de producción** con variables de entorno distintas, secretos fuera del repo, `restart: unless-stopped` |
-| D4 | **Respaldos de PostgreSQL** (política, frecuencia, restauración probada). El sistema es el registro oficial de verificaciones |
-| D5 | **Datos de arranque** del cliente: usuarios reales, estaciones, centros, líneas, lotes de folios, límites de emisión, parámetros. Hoy hay un `seed_demo` |
-| D6 | **Manual de instalación y de operación** (Fase 4) y las variables de entorno documentadas; no existe README en el repo |
-| D7 | **Monitoreo y bitácora de aplicación**: `/health` existe, pero no hay alertas ni rotación de logs |
-| D8 | **Reloj y zona horaria** de los equipos de cada verificentro (los certificados llevan fecha y hora; ya hubo un desfase de 6 h en otro proyecto, vigilar aquí) |
+| D1 | ~~**Imagen de producción**: el `Dockerfile` arranca con `--reload` y `docker-compose.yml` monta el código como volumen~~ **RESUELTO 2026-10-21** (`backend/Dockerfile.prod`, `frontend/Dockerfile.prod`, commit `3ed5c2b`: imágenes multi-stage sin montaje de volumen ni `--reload`) |
+| D2 | ~~**Servir el frontend**: no hay Dockerfile ni servidor para `frontend/dist`; hay que decidir nginx (o similar) con proxy a `/api`~~ **RESUELTO 2026-10-21** (`frontend/nginx.conf`, commit `3ed5c2b`: nginx sirve `/dist` con proxy pass a `/api` y WebSocket) |
+| D3 | ~~**Compose / script de producción** con variables de entorno distintas, secretos fuera del repo, `restart: unless-stopped`~~ **RESUELTO 2026-10-21** (`docker-compose.prod.yml`, `.env.prod.example`, commit `3ed5c2b`: arranque productivo con `restart: unless-stopped`) |
+| D4 | ~~**Respaldos de PostgreSQL** (política, frecuencia, restauración probada). El sistema es el registro oficial de verificaciones~~ **RESUELTO 2026-10-29** (`respaldo.sh` y `backup_db.ps1`, commits `08f8618` y `ec0794b`: scripts en bash y powershell con compresión, retención y prueba de restauración) |
+| D5 | ~~**Datos de arranque** del cliente: usuarios reales, estaciones, centros, líneas, lotes de folios, límites de emisión, parámetros. Hoy hay un `seed_demo`~~ **RESUELTO 2026-10-29** (`backend/app/bootstrap_prod.py`, commit `9d6b14c`: carga paramétrica idempotente de centros, líneas, límites NOM-047 y parámetros de operación) |
+| D6 | ~~**Manual de instalación y de operación** (Fase 4) y las variables de entorno documentadas; no existe README en el repo~~ **RESUELTO 2026-10-29** (`docs/MANUAL_INSTALACION_Y_OPERACION.md` y `README.md`, commits `5e2ac29` y `ec0794b`) |
+| D7 | ~~**Monitoreo y bitácora de aplicación**: `/health` existe, pero no hay alertas ni rotación de logs~~ **RESUELTO 2026-10-30** (`docker-compose.prod.yml`, commit `a3aeafd`: rotación de logs `json-file` max-size 10m y max-file 5 en todos los servicios) |
+| D8 | ~~**Reloj y zona horaria** de los equipos de cada verificentro (los certificados llevan fecha y hora; ya hubo un desfase de 6 h en otro proyecto, vigilar aquí)~~ **RESUELTO 2026-10-30** (`docker-compose.prod.yml`, commit `a3aeafd`: zona horaria `America/Mexico_City` fijada en backend, frontend y postgres) |
 | D9 | ~~**CI**: no hay `.github/workflows`; las 445 + 60 pruebas solo corren a mano~~ **RESUELTO 2026-10-21** (`.github/workflows/ci.yml`, commit `3ed5c2b`: en cada push y pull request corre `pytest` contra Postgres, y `npm test` y `npm run build` del frontend) |
 | D10 | **Migraciones en un ambiente nuevo**: se probó desde cero en la BD de pruebas, pero no un plan de actualización con datos reales entre versiones |
 
@@ -136,8 +136,8 @@ Verificado con `grep` en `main.py`, `deps.py`, `estaciones.py` y `services/auth.
 | Administración | Completa (usuarios, estaciones, parámetros, folios, límites) | S8 (Superadmin) |
 | Sincronización | Cola local, reintentos, indicador "sin internet" listos | B3, B4, R1 |
 | Seguridad | Autorización por estación/línea sólida | X1–X7 |
-| Despliegue | **Nada listo** | D1–D10, B5 |
-| Documentación | CLAUDE.md muy completo; matriz y esta lista | D6, B6 |
+| Despliegue | **Casi completo (9/10 resueltos)** | D10 (plan de actualización entre versiones) y B5 |
+| Documentación | CLAUDE.md muy completo; matriz, manual y esta lista | B6 |
 
 ## 5. Orden sugerido
 
