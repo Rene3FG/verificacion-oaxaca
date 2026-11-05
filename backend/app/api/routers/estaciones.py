@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
@@ -19,11 +19,52 @@ from app.schemas.estacion import (
     WorkstationRead,
     WorkstationUpdate,
 )
-from app.services.auth import verify_password
+from app.services.auth import hash_password, verify_password
 
 router = APIRouter(prefix="/api/estaciones", tags=["estaciones"])
 
 MOTIVO_CREDENCIALES = "Credenciales inválidas"
+
+# X1-c: si el usuario no existe se compara contra este hash para que la
+# respuesta tarde lo mismo que con un usuario real (bcrypt domina el tiempo).
+_HASH_FICTICIO = hash_password("usuario-inexistente-9f3c")
+
+
+def _ip_cliente(request: Request) -> str | None:
+    """X1-e: IP de origen tomada de la conexión, nunca del cuerpo. Detrás de
+    nginx, `X-Real-IP` lo fija nginx con `$remote_addr` (sobrescribe lo que
+    mande el cliente); sin proxy, la IP del socket. En producción el backend
+    solo es alcanzable a través de nginx, así que el encabezado es fiable."""
+    ip = (request.headers.get("x-real-ip") or "").strip()
+    if ip:
+        return ip[:45]
+    return request.client.host if request.client else None
+
+
+async def _segundos_de_bloqueo_ip(db: AsyncSession, ip: str | None) -> int:
+    """X1-a: tope de fallos por IP (usuarios existentes o no) para frenar el
+    password spraying y la adivinación de nombres. 0 si no aplica."""
+    if not ip or settings.login_max_intentos_ip <= 0:
+        return 0
+    ventana = datetime.timedelta(minutes=settings.login_bloqueo_min)
+    desde = datetime.datetime.now(datetime.timezone.utc) - ventana
+    fallos = (
+        await db.execute(
+            select(AccessEvent.created_at)
+            .where(
+                AccessEvent.ip_address == ip,
+                AccessEvent.resultado == AccessEventResultado.DENEGADO,
+                AccessEvent.motivo == MOTIVO_CREDENCIALES,
+                AccessEvent.created_at > desde,
+            )
+            .order_by(AccessEvent.created_at.desc())
+            .limit(settings.login_max_intentos_ip)
+        )
+    ).scalars().all()
+    if len(fallos) < settings.login_max_intentos_ip:
+        return 0
+    restante = fallos[0] + ventana - datetime.datetime.now(datetime.timezone.utc)
+    return max(int(restante.total_seconds()), 1)
 
 
 @router.get("", response_model=list[WorkstationRead])
@@ -141,6 +182,8 @@ class LoginRequest(BaseModel):
     username: str
     password: str
     workstation_id: uuid.UUID
+    # Obsoleto (X1-e): se acepta por compatibilidad pero se ignora; la IP
+    # sale de la conexión (`_ip_cliente`).
     ip_address: str | None = None
     device_fingerprint: str | None = None
 
@@ -179,11 +222,20 @@ async def _segundos_de_bloqueo(db: AsyncSession, user_id: uuid.UUID) -> int:
 
 @router.post("/login", response_model=StationSessionRead)
 async def iniciar_sesion(
-    payload: LoginRequest, db: AsyncSession = Depends(get_db)
+    payload: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)
 ) -> StationSession:
     estacion = await db.get(Workstation, payload.workstation_id)
     if estacion is None:
         raise HTTPException(status_code=404, detail="Estación no encontrada")
+    ip = _ip_cliente(request)
+
+    espera_ip = await _segundos_de_bloqueo_ip(db, ip)
+    if espera_ip > 0:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Demasiados intentos fallidos desde este equipo. Intenta de nuevo en {-(-espera_ip // 60)} min.",
+            headers={"Retry-After": str(espera_ip)},
+        )
 
     usuario = (
         await db.execute(
@@ -205,11 +257,9 @@ async def iniciar_sesion(
 
     # Mismo mensaje genérico tanto si el usuario no existe como si la
     # contraseña es incorrecta — no revelar cuál de las dos falló.
-    credenciales_validas = (
-        usuario is not None
-        and usuario.is_active
-        and verify_password(payload.password, usuario.password_hash)
-    )
+    hash_a_comparar = usuario.password_hash if usuario is not None else _HASH_FICTICIO
+    password_ok = verify_password(payload.password, hash_a_comparar)
+    credenciales_validas = usuario is not None and usuario.is_active and password_ok
     if not credenciales_validas:
         db.add(
             AccessEvent(
@@ -220,7 +270,7 @@ async def iniciar_sesion(
                 line_id=estacion.line_id,
                 resultado=AccessEventResultado.DENEGADO,
                 motivo=MOTIVO_CREDENCIALES,
-                ip_address=payload.ip_address,
+                ip_address=ip,
             )
         )
         await db.commit()
@@ -255,7 +305,7 @@ async def iniciar_sesion(
                 line_id=estacion.line_id,
                 resultado=AccessEventResultado.DENEGADO,
                 motivo="Sin permiso para operar esta estación/línea",
-                ip_address=payload.ip_address,
+                ip_address=ip,
             )
         )
         # HU-007: la pantalla de acceso denegado muestra qué sí tiene asignado
@@ -292,7 +342,7 @@ async def iniciar_sesion(
         center_id=estacion.center_id,
         line_id=estacion.line_id,
         login_at=datetime.datetime.now(datetime.timezone.utc),
-        ip_address=payload.ip_address,
+        ip_address=ip,
         device_fingerprint=payload.device_fingerprint,
         status="activa",
     )
@@ -308,7 +358,7 @@ async def iniciar_sesion(
             line_id=estacion.line_id,
             resultado=AccessEventResultado.PERMITIDO,
             session_id=sesion.id,
-            ip_address=payload.ip_address,
+            ip_address=ip,
         )
     )
     await db.commit()

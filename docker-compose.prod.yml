@@ -49,6 +49,11 @@ services:
       LOGIN_MAX_INTENTOS: ${LOGIN_MAX_INTENTOS:-5}
       LOGIN_BLOQUEO_MIN: ${LOGIN_BLOQUEO_MIN:-15}
       SESION_INACTIVIDAD_MIN: ${SESION_INACTIVIDAD_MIN:-30}
+      # X1-a: tope de fallos por IP; X2-a: vida máxima de una sesión (horas).
+      LOGIN_MAX_INTENTOS_IP: ${LOGIN_MAX_INTENTOS_IP:-20}
+      SESION_DURACION_MAX_H: ${SESION_DURACION_MAX_H:-12}
+      # X4-d / X5-b: apaga /docs y bloquea los seeds de demostración.
+      APP_ENV: production
       TZ: America/Mexico_City
     depends_on:
       db:

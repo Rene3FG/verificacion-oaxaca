@@ -79,6 +79,18 @@ async def get_current_session(
         sesion.logout_at = ahora
         await db.commit()
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    # X2-a: vencimiento absoluto, aunque haya actividad continua (un
+    # identificador robado no dura indefinidamente).
+    inicio = sesion.login_at or sesion.created_at
+    if (
+        settings.sesion_duracion_max_h > 0
+        and inicio is not None
+        and ahora - inicio > datetime.timedelta(hours=settings.sesion_duracion_max_h)
+    ):
+        sesion.status = "expirada"
+        sesion.logout_at = ahora
+        await db.commit()
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
     if ahora - ultima > ACTIVIDAD_REFRESCO:
         sesion.updated_at = ahora
         await db.commit()

@@ -4,6 +4,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # X4-d / X5-b: "production" apaga /docs, /redoc y /openapi.json y hace
+    # que los seeds de desarrollo se nieguen a correr.
+    app_env: str = "development"
+
+    @property
+    def es_produccion(self) -> bool:
+        return self.app_env.strip().lower() == "production"
+
     database_url: str = "postgresql+asyncpg://verificacion:verificacion@localhost:5432/verificacion"
     database_url_sync: str = "postgresql+psycopg2://verificacion:verificacion@localhost:5432/verificacion"
     redis_url: str = "redis://localhost:6379/0"
@@ -32,6 +40,14 @@ class Settings(BaseSettings):
     login_max_intentos: int = 5
     login_bloqueo_min: int = 15
     sesion_inactividad_min: int = 30
+    # X1-a (password spraying): fallos de credenciales desde una misma IP
+    # dentro de `login_bloqueo_min`, con usuarios existentes o no. Más
+    # holgado que el de usuario porque en un verificentro varias estaciones
+    # pueden salir por la misma IP. 0 lo apaga.
+    login_max_intentos_ip: int = 20
+    # X2-a: vida máxima de una sesión aunque tenga actividad continua (un
+    # turno). 0 lo apaga.
+    sesion_duracion_max_h: int = 12
 
     # Equipment Integration Contract v1 (ver app/services/equipo_gateway.py):
     # "manual" = sin gateway, el operador captura las lecturas; "simulador" =

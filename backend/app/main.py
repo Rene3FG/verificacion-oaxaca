@@ -21,6 +21,7 @@ from app.api.routers import (
     usuarios,
 )
 
+from app.core.config import settings
 from app.services.sync_auto import bucle_sync_auto, sync_auto_habilitado
 
 
@@ -34,7 +35,9 @@ async def lifespan(_: FastAPI):
             tarea.cancel()
 
 
-app = FastAPI(title="Sistema de Verificación Vehicular de Oaxaca", lifespan=lifespan)
+# X4-d: en producción no se publica el mapa de la API.
+_docs = {} if not settings.es_produccion else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+app = FastAPI(title="Sistema de Verificación Vehicular de Oaxaca", lifespan=lifespan, **_docs)
 
 app.include_router(expedientes.router)
 app.include_router(siox.router)

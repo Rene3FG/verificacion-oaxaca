@@ -91,7 +91,7 @@ def main() -> None:
     try:
         if len(password) < 8:
             raise ValueError("Defina BOOTSTRAP_PASSWORD (mínimo 8 caracteres).")
-        validar_politica_password(password)
+        validar_politica_password(password, username=a.usuario)
     except ValueError as exc:
         sys.exit(str(exc))
     if a.lineas < 1:

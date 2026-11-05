@@ -203,4 +203,16 @@ async def seed() -> None:
 
 
 if __name__ == "__main__":
+    # X5-b: estos seeds crean usuarios con contraseña pública
+    # (operador1/operador1, supervisor1/supervisor1). Nunca en producción;
+    # para arrancar producción está `python -m app.bootstrap_prod`.
+    import sys
+
+    from app.core.config import settings as _settings
+
+    if _settings.es_produccion and "--forzar" not in sys.argv:
+        sys.exit(
+            "APP_ENV=production: este seed crea usuarios de demostración con "
+            "contraseñas públicas y no se ejecuta. Usa `python -m app.bootstrap_prod`."
+        )
     asyncio.run(seed())
