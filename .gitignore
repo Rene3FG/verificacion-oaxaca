@@ -11,3 +11,8 @@ MEMORY.md
 research_log.md
 .env.prod
 respaldos/
+# Respaldos de la base (contienen datos personales) y certificados TLS
+backups/
+*.dump
+*.sql.gz
+certs/
