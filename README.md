@@ -9,7 +9,7 @@ Una instalación atiende un verificentro con tres tipos de estación: **Captura*
 Requisitos: Docker con el plugin Compose y `openssl`. El TLS lo termina el nginx del propio compose: antes de levantar hay que generar los certificados (paso 1).
 
 ```bash
-scripts/generar_certificados.sh --host verificacion.reforma --ip 192.168.1.10   # 1. CA local y certificado
+scripts/generar_certificados.sh --hosts "verificentro.local,192.168.1.100"   # 1. CA local y certificado (cambiar la IP por la del servidor)
 cp .env.prod.example .env.prod        # 2. editar: contraseña de Postgres, WEB_PORT, CENTRAL_SYNC_*
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build   # 3. levantar
 ```

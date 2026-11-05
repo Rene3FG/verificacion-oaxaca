@@ -123,9 +123,16 @@ Todo el tráfico va cifrado: la contraseña del login y el identificador de sesi
 
 **1. Generar la CA local y el certificado del servidor** (requiere `openssl`; en Windows, desde Git Bash o WSL):
 ```bash
-scripts/generar_certificados.sh --host verificacion.reforma --ip 192.168.1.10
+scripts/generar_certificados.sh --hosts "verificentro.local,192.168.1.100"
 ```
-Usar como `--host` el nombre con el que las estaciones abrirán el sistema y como `--ip` la dirección del servidor en la red; se pueden repetir ambas opciones. **Las estaciones deben abrir el sistema con uno de esos nombres o direcciones**: si usan otro, el navegador avisará que el certificado no coincide. El script deja:
+`--hosts` recibe una lista separada por comas, con nombres e IPs mezclados; `localhost` y `127.0.0.1` se incluyen siempre. También se pueden repetir `--host NOMBRE` y `--ip DIRECCION`. **Las estaciones deben abrir el sistema con uno de esos nombres o direcciones**: si usan otro, el navegador avisará que el certificado no coincide.
+
+Valores recomendados:
+- **Red local del verificentro:** el nombre `verificentro.local` y la **IP fija del servidor** en la subred del centro. `192.168.1.100` es solo un ejemplo: **cambiarla por la que asigne el router de cada centro**.
+- **Nombres `.local`:** se resuelven solo si la red lo permite (mDNS o Bonjour, un registro en el DNS del router o una línea en el archivo `hosts` de cada estación). Si no se resuelve, las estaciones abren el sistema por la IP (`https://192.168.1.100`), que también está en el certificado.
+- **Nube (staging) `stg-analizador.verificacionoaxaca.com`:** conviene un certificado público (ver el punto 4), no esta CA. Si aun así se quisiera usar la CA local ahí, se agrega ese nombre (`--hosts "verificentro.local,192.168.1.100,stg-analizador.verificacionoaxaca.com"`) y cada equipo de prueba debe instalar la CA.
+
+El script deja:
 
 | Archivo | Para qué |
 |---|---|
@@ -148,7 +155,7 @@ Comprobar siempre que la huella que muestra el sistema coincida con la anotada.
 **3. Renovación.** El certificado del servidor dura 825 días. Anotar la fecha y renovarlo **antes** de que venza (con 60 días de margen):
 ```bash
 openssl x509 -in certs/server/server.crt -noout -enddate        # fecha de vencimiento
-scripts/generar_certificados.sh --host verificacion.reforma --ip 192.168.1.10   # mismas opciones
+scripts/generar_certificados.sh --hosts "verificentro.local,192.168.1.100"   # mismas opciones que la primera vez
 docker compose -f docker-compose.prod.yml --env-file .env.prod restart web
 ```
 Como la CA se reutiliza, las estaciones no cambian nada. Solo si se perdiera la CA o se sospechara de su llave se usa `--forzar-ca`, y entonces hay que reinstalar la CA en todas las estaciones. El mismo procedimiento sirve si cambia la IP o el nombre del servidor.

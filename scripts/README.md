@@ -143,13 +143,14 @@ COMPOSE_ARGS="-f docker-compose.yml" scripts/desbloquear_usuario.sh operador1
 Genera lo necesario para servir el sistema por HTTPS en la red local del verificentro (PENDIENTES X3): una **CA propia** y un **certificado de servidor** firmado por ella. Las estaciones instalan la CA una sola vez y desde entonces aceptan los certificados que ella firme, también al renovarlos. Requiere `openssl`. El procedimiento completo, con la instalación de la CA en las estaciones, está en el manual (sección 3.3).
 
 ```bash
-scripts/generar_certificados.sh --host verificacion.reforma --ip 192.168.1.10
+scripts/generar_certificados.sh --hosts "verificentro.local,192.168.1.100"
 ```
 
 | Opción | Por defecto | Uso |
 |---|---|---|
-| `--host NOMBRE` (repetible) | `localhost` siempre incluido | Nombre con el que las estaciones abren el sistema. |
-| `--ip DIRECCION` (repetible) | `127.0.0.1` siempre incluida | Dirección IPv4 del servidor en la red. |
+| `--hosts LISTA` | `localhost` y `127.0.0.1` siempre incluidos | Atajo: lista separada por comas con nombres e IPs mezclados (`"verificentro.local,192.168.1.100"`). |
+| `--host NOMBRE` (repetible) | | Nombre con el que las estaciones abren el sistema. |
+| `--ip DIRECCION` (repetible) | | Dirección IPv4 del servidor en la red. |
 | `--salida DIR` | `certs` | Carpeta de salida (Git la ignora). |
 | `--dias N` | 825 | Vigencia del certificado del servidor. |
 | `--forzar-ca` | apagado | Crea una CA nueva aunque ya exista; obliga a reinstalarla en todas las estaciones. |
@@ -158,4 +159,4 @@ scripts/generar_certificados.sh --host verificacion.reforma --ip 192.168.1.10
 
 **Renovar:** volver a ejecutarlo con las mismas opciones. Si la CA existe y no vence en 30 días, se reutiliza y las estaciones no cambian nada; solo se firma un certificado de servidor nuevo.
 
-**Cómo se probó:** en Windows (Git Bash, OpenSSL 3.2) y en Linux (WSL2, OpenSSL 3.0). Se comprobó la validación de argumentos, la cadena de confianza, los nombres, la reutilización de la CA y la renovación, y se hizo un **handshake TLS real** con un servidor y clientes de prueba: conecta con TLS 1.3 con la CA instalada, rechaza un nombre que no está en el certificado, desconfía si la estación no tiene la CA y rechaza TLS 1.1. **No se ha probado con el `nginx` del stack** (pendiente de encender Docker).
+**Cómo se probó:** en Windows (Git Bash, OpenSSL 3.2) y en Linux (WSL2, OpenSSL 3.0). Se comprobó la validación de argumentos (incluida la lista de `--hosts`: espacios internos, IPs mal escritas y nombres que parecen IP), la cadena de confianza, los nombres y la IP recomendados, la reutilización de la CA y la renovación, y se hizo un **handshake TLS real** con un servidor y clientes de prueba: conecta con TLS 1.3 con la CA instalada, rechaza un nombre que no está en el certificado, desconfía si la estación no tiene la CA y rechaza TLS 1.1. **No se ha probado con el `nginx` del stack** (pendiente de encender Docker).
