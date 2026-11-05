@@ -14,6 +14,7 @@ Este directorio contiene las herramientas ejecutables para cumplir con la polít
 | `restore_db.ps1` | Windows / PowerShell | Script equivalente de restauración para Windows / PowerShell. |
 | `respaldo.sh` / `restaurar.sh` | Linux | Variante de respaldo y restauración con `pg_dump` comprimido y confirmación explícita (ver `README.md` de la raíz). |
 | `smoke_e2e_flujo.mjs` | Node.js 18+ (cualquier SO) | Prueba de humo del ciclo vehicular completo contra la API local. Ver sección 4. |
+| `desbloquear_usuario.sh` / `.ps1` | Linux / Windows | Soporte: desbloquea a un usuario bloqueado por intentos fallidos de login (X1). Ver sección 5. |
 
 ---
 
@@ -97,3 +98,39 @@ node scripts\smoke_e2e_flujo.mjs
 | `SMOKE_TIPO_CERTIFICADO` / `SMOKE_TIPO_VERIFICACION` | `PARTICULAR` / `ORDINARIA` | Tipo de certificado y de verificación a usar. |
 
 > **Datos que deja:** cada corrida crea un expediente `PRU-…` en `IMPRESO` y consume un folio. Úsalo en desarrollo o en un ambiente de pruebas, no en producción. Tras 5 contraseñas incorrectas seguidas el backend bloquea al usuario 15 minutos (X1); el script no reintenta logins fallidos.
+
+---
+
+## 5. Desbloqueo de usuarios (`desbloquear_usuario.sh` y `.ps1`)
+
+Herramienta de **soporte** para destrabar a un usuario que el backend bloqueó por intentos fallidos de login (PENDIENTES X1: 5 fallos seguidos, 15 minutos). Sirve sobre todo para un **supervisor bloqueado**, que no tiene a quién pedirle el desbloqueo. Para un operador, lo habitual es esperar a que venza el bloqueo o que lo destrabe el supervisor del centro, pero esa vía todavía no existe en la API (falta `POST /api/usuarios/{id}/desbloquear`).
+
+**Qué hace y qué no.** No borra intentos ni inventa un login. A los intentos fallidos que hoy cuentan para el bloqueo les agrega al motivo `(desbloqueado por soporte)`. Se conservan su fecha, estación e IP, y el backend deja de contarlos. Antes de modificar muestra la lista y pide escribir `SI` (en mayúsculas); al terminar comprueba que ya no quede ningún intento vigente.
+
+```bash
+# Linux (producción). Primero con --simular para ver qué se liberaría
+scripts/desbloquear_usuario.sh supervisor1 --simular
+scripts/desbloquear_usuario.sh supervisor1
+# Desarrollo: otro compose
+COMPOSE_ARGS="-f docker-compose.yml" scripts/desbloquear_usuario.sh operador1
+```
+
+```powershell
+# Windows / PowerShell
+.\scripts\desbloquear_usuario.ps1 supervisor1 -Simular
+.\scripts\desbloquear_usuario.ps1 supervisor1
+.\scripts\desbloquear_usuario.ps1 operador1 -ComposeFile docker-compose.yml
+```
+
+| Opción | Por defecto | Uso |
+|---|---|---|
+| Usuario (primer argumento) | obligatorio | De 3 a 60 caracteres entre letras, números y `. _ @ -`. El valor viaja como argumento de `psql`, nunca dentro del texto SQL. |
+| `--simular` / `-Simular` | apagado | Solo muestra qué se liberaría. |
+| `--ventana-min` / `-VentanaMin` | 15 | **Debe coincidir con `LOGIN_BLOQUEO_MIN`** del backend; si es menor, el script avisa que quedan intentos vigentes y falla. |
+| `COMPOSE_ARGS` / `-ComposeFile` y `-EnvFile` | `docker-compose.prod.yml` y `.env.prod` | Qué compose usar. |
+
+**Límites a tener presentes**
+- Requiere que el contenedor `db` esté en ejecución y modifica la base directamente: hacer un respaldo antes si hay dudas.
+- Solo levanta el bloqueo **por intentos**. No reactiva a un usuario desactivado (`is_active = false`); eso se hace desde Administración.
+- Tras el desbloqueo, la contraseña sigue siendo la misma: si el usuario no la recuerda, un supervisor debe restablecerla.
+- Los scripts se probaron con un `docker` simulado (validación de argumentos, confirmación, simulación, error si quedan intentos y que el SQL sea ASCII y no contenga el usuario). **No se han ejecutado contra un Postgres real**: la primera corrida debería hacerse con `--simular` en un ambiente de pruebas.
