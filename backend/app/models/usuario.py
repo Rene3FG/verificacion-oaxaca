@@ -17,3 +17,7 @@ class CatUsuario(Base, UUIDPKMixin, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
     nombre_completo: Mapped[str] = mapped_column(String(200), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # NOM-047 punto 5 (B10-b, 2026-10-30): el campo 001 del certificado es
+    # el ID del técnico. Opcional porque Supervisores/Administradores no
+    # firman pruebas; única entre quienes la tienen (UNIQUE admite varios NULL).
+    clave_tecnico: Mapped[str | None] = mapped_column(String(20), unique=True)

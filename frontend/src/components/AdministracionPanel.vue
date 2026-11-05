@@ -30,7 +30,9 @@ const usuarios = ref([]);
 const cargandoUsuarios = ref(false);
 const usuarioAbierto = ref(false);
 const usuarioEditandoId = ref(null);
-const usuarioForm = reactive({ username: "", nombre_completo: "", password: "" });
+const usuarioForm = reactive({ username: "", nombre_completo: "", password: "", clave_tecnico: "" });
+// Clave con la que se abrió el diálogo de edición: solo se envía si cambió.
+const claveTecnicoOriginal = ref("");
 const guardandoUsuario = ref(false);
 
 async function cargarUsuarios() {
@@ -50,6 +52,8 @@ function abrirUsuario(u = null) {
   usuarioForm.username = u?.username ?? "";
   usuarioForm.nombre_completo = u?.nombre_completo ?? "";
   usuarioForm.password = "";
+  usuarioForm.clave_tecnico = u?.clave_tecnico ?? "";
+  claveTecnicoOriginal.value = u?.clave_tecnico ?? "";
   usuarioAbierto.value = true;
 }
 
@@ -60,10 +64,15 @@ async function guardarUsuario() {
     if (usuarioEditandoId.value) {
       const cambios = { nombre_completo: usuarioForm.nombre_completo };
       if (usuarioForm.password) cambios.password = usuarioForm.password;
+      const clave = usuarioForm.clave_tecnico.trim();
+      // Vacío = quitar la clave (el backend recibe null).
+      if (clave !== claveTecnicoOriginal.value) cambios.clave_tecnico = clave || null;
       await api.patch(`/usuarios/${usuarioEditandoId.value}`, cambios);
       aviso.value = "Usuario actualizado.";
     } else {
-      await api.post("/usuarios", { ...usuarioForm });
+      const { clave_tecnico, ...alta } = usuarioForm;
+      if (clave_tecnico.trim()) alta.clave_tecnico = clave_tecnico.trim();
+      await api.post("/usuarios", alta);
       aviso.value = `Usuario ${usuarioForm.username} creado. Asígnale permisos en la pestaña Permisos.`;
     }
     usuarioAbierto.value = false;
@@ -243,12 +252,13 @@ onMounted(() => {
         <v-progress-linear v-if="cargandoUsuarios" indeterminate class="mb-4" />
         <v-table v-else density="compact">
           <thead>
-            <tr><th>Usuario</th><th>Nombre</th><th>Estado</th><th></th></tr>
+            <tr><th>Usuario</th><th>Nombre</th><th>Clave técnico</th><th>Estado</th><th></th></tr>
           </thead>
           <tbody>
             <tr v-for="u in usuarios" :key="u.id">
               <td>{{ u.username }}</td>
               <td>{{ u.nombre_completo }}</td>
+              <td>{{ u.clave_tecnico || "—" }}</td>
               <td>
                 <v-chip size="small" :color="u.is_active ? 'success' : 'grey'" variant="tonal">
                   {{ u.is_active ? "Activo" : "Inactivo" }}
@@ -337,6 +347,14 @@ onMounted(() => {
         <v-card-text>
           <v-text-field v-model="usuarioForm.username" label="Usuario" :disabled="!!usuarioEditandoId" />
           <v-text-field v-model="usuarioForm.nombre_completo" label="Nombre completo" />
+          <v-text-field
+            v-model="usuarioForm.clave_tecnico"
+            label="Clave de técnico (opcional)"
+            hint="Se imprime en el campo 001 del certificado. Letras, números y guiones."
+            persistent-hint
+            maxlength="20"
+            class="mb-2"
+          />
           <v-text-field
             v-model="usuarioForm.password"
             type="password"

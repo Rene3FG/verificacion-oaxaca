@@ -343,7 +343,7 @@ describe("AdministracionPanel - Usuarios (alta y edición)", () => {
     await boton(w, "Nuevo usuario").trigger("click");
     expect(w.vm.usuarioAbierto).toBe(true);
     expect(w.vm.usuarioEditandoId).toBeNull();
-    expect(w.vm.usuarioForm).toEqual({ username: "", nombre_completo: "", password: "" });
+    expect(w.vm.usuarioForm).toEqual({ username: "", nombre_completo: "", password: "", clave_tecnico: "" });
   });
 
   it("'Editar' precarga el usuario y deja la contraseña vacía", async () => {
@@ -357,7 +357,43 @@ describe("AdministracionPanel - Usuarios (alta y edición)", () => {
       username: "operador1",
       nombre_completo: "Ana Pérez",
       password: "",
+      clave_tecnico: "",
     });
+  });
+
+  // NOM-047 punto 5: clave de técnico (campo 001 del certificado)
+  it("clave de técnico: el alta la envía recortada solo si se capturó", async () => {
+    const w = await montar();
+    w.vm.abrirUsuario();
+    Object.assign(w.vm.usuarioForm, {
+      username: "tec1", nombre_completo: "Técnico", password: "Segura123", clave_tecnico: "  T-07 ",
+    });
+    await w.vm.guardarUsuario();
+    expect(api.post).toHaveBeenCalledWith("/usuarios", {
+      username: "tec1", nombre_completo: "Técnico", password: "Segura123", clave_tecnico: "T-07",
+    });
+  });
+
+  it("clave de técnico: la edición la precarga, la envía al cambiarla y manda null al vaciarla", async () => {
+    const w = await montar();
+    w.vm.abrirUsuario({ ...USUARIOS[0], clave_tecnico: "A12" });
+    expect(w.vm.usuarioForm.clave_tecnico).toBe("A12");
+
+    w.vm.usuarioForm.clave_tecnico = "B34";
+    await w.vm.guardarUsuario();
+    expect(api.patch).toHaveBeenLastCalledWith("/usuarios/u1", { nombre_completo: "Ana Pérez", clave_tecnico: "B34" });
+
+    w.vm.abrirUsuario({ ...USUARIOS[0], clave_tecnico: "A12" });
+    w.vm.usuarioForm.clave_tecnico = "  ";
+    await w.vm.guardarUsuario();
+    expect(api.patch).toHaveBeenLastCalledWith("/usuarios/u1", { nombre_completo: "Ana Pérez", clave_tecnico: null });
+  });
+
+  it("clave de técnico: sin cambios no se reenvía", async () => {
+    const w = await montar();
+    w.vm.abrirUsuario({ ...USUARIOS[0], clave_tecnico: "A12" });
+    await w.vm.guardarUsuario();
+    expect(api.patch).toHaveBeenLastCalledWith("/usuarios/u1", { nombre_completo: "Ana Pérez" });
   });
 
   it("alta: crea el usuario con el formulario completo, avisa, cierra y recarga la lista", async () => {
