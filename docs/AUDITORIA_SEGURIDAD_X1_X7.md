@@ -15,7 +15,7 @@ La sección 3.3 de `PENDIENTES` se escribió el 2026-10-20, antes de que se impl
 |---|---|---|---|
 | X1 Intentos de login | Sin límite ni bloqueo | **Implementado** (429 tras 5 fallos, 15 min, `Retry-After`, reinicio tras éxito) | 5 |
 | X2 Caducidad de sesión | No caduca | **Implementado** (30 min de inactividad) | 6 |
-| X3 TLS | Sin TLS | **Sin resolver**: nginx escucha solo HTTP | 2 (1 **alta**) |
+| X3 TLS | Sin TLS | **Implementado el 2026-11-04**; falta validarlo con Docker, un navegador y la CA en las estaciones | 2 (resueltas en configuración) |
 | X4 CORS | Sin CORS | **Correcto por diseño** (mismo origen vía nginx) | 4 (endurecimiento) |
 | X5 Credenciales y puertos | Credenciales por defecto y puertos abiertos | **Producción bien** (BD y Redis no se publican); desarrollo y ejemplos con huecos | 6 |
 | X6 Política de contraseñas | Sin política | **Implementada** (bcrypt, composición, lista de comunes) | 4 (la lista de comunes es muy corta) |
@@ -23,7 +23,7 @@ La sección 3.3 de `PENDIENTES` se escribió el 2026-10-20, antes de que se impl
 
 ### Las cinco prioridades
 
-1. **X3: terminar TLS en el propio compose.** Hoy las contraseñas (cuerpo del login) y el identificador de sesión viajan en claro por la red del verificentro. Es el único hallazgo que clasifico como alto.
+1. **X3: TLS en el propio compose. Implementado el 2026-11-04** (ver X3), pendiente de validar con Docker. Antes de eso, las contraseñas (cuerpo del login) y el identificador de sesión viajaban en claro por la red del verificentro; era el único hallazgo que clasifiqué como alto.
 2. **Rastro de auditoría de las acciones administrativas.** Crear usuarios, restablecer contraseñas, otorgar permisos, cambiar parámetros, registrar folios y editar equipos **no dejan ningún registro** (0 escrituras de bitácora en esos cinco routers).
 3. **X1 + X6 juntos:** el bloqueo solo cuenta usuarios que existen y no hay límite por origen; y la política acepta `Password123`, `Oaxaca2026` o `Admin2026`. Combinados, favorecen el *password spraying*.
 4. **X5: contraseña de relleno pública y `seed` sin guarda.** `.env.prod.example` trae una contraseña conocida que el compose no obliga a cambiar, y `python -m app.seed` crea un supervisor con contraseña pública sin comprobar el entorno.
@@ -142,6 +142,18 @@ En el compose: publicar `443` además de `80`, montar los certificados como volu
 
 **Pruebas a agregar:** verificación manual con `curl -k` y `openssl s_client`; un chequeo en el script de humo de que `http://` redirige a `https://`.
 **Esfuerzo:** medio (1 a 2 días, más la decisión de qué certificado usar). **Dueño:** Sebas (nginx, compose y manual), con visto bueno de René.
+
+**Estado de aplicación (2026-11-04):** implementado según lo propuesto para la red local, con las decisiones tomadas:
+- `scripts/generar_certificados.sh`: CA local propia y certificado de servidor firmado por ella (ECDSA P-256, nombres alternativos obligatorios, 825 días). La llave de la CA queda en una carpeta aparte (`certs/ca/`) para que **nunca se monte en el contenedor**; solo `certs/server/` llega a nginx.
+- `frontend/nginx.conf`: puerto 443 con TLS 1.2 y 1.3, y puerto 80 que solo redirige (y deja pasar el desafío ACME para el VPS). HSTS queda **comentado a propósito** hasta que la renovación de certificados sea rutina, porque con una CA propia un certificado vencido dejaría a las estaciones sin poder saltar el aviso.
+- `docker-compose.prod.yml`: publica 443 y monta los certificados en solo lectura con `create_host_path: false`, de modo que `up` falla con un error claro si faltan en lugar de dejar a nginx reiniciándose.
+- Manual (sección 3.3): generación, instalación de la CA en Windows, Firefox y Linux, renovación y problemas frecuentes. El manual traía además una verificación errónea (`/api/health` no existe) que se corrigió.
+
+**Cómo se verificó:** el generador, en Windows (OpenSSL 3.2) y en Linux (WSL2, OpenSSL 3.0); y un **handshake TLS real** con un servidor y clientes de prueba: conecta con TLS 1.3 con la CA instalada, rechaza un nombre que no está en el certificado, desconfía si la estación no tiene la CA y rechaza TLS 1.1. El compose se validó con `docker compose config`, y nginx.conf con una revisión estructural y de consistencia entre archivos. **No se ejecutó `nginx -t` ni se probó con un navegador** (Docker apagado).
+
+**Cambio de comportamiento a tener presente:** `docker compose up` ya no arranca sin certificados. Quien despliegue debe ejecutar antes `scripts/generar_certificados.sh`.
+
+**Pendiente de X3:** validar con Docker (`nginx -t`, navegador), instalar la CA en las estaciones, el procedimiento con Let's Encrypt en el VPS (sin probar; falta montar `/var/www/certbot` si se usa `--webroot`) y decidir cuándo activar HSTS.
 
 ---
 
@@ -285,7 +297,7 @@ async def test_toda_ruta_exige_sesion(client, metodo, ruta):
 | Fase | Contenido | Dueño | Esfuerzo |
 |---|---|---|---|
 | **A. Inmediata** (1 a 2 días, bajo riesgo). **Ops aplicado el 2026-11-04, ver sección 7** | `.gitignore` (`backups/`, `*.dump`, `*.sql.gz`, `certs/`); `${POSTGRES_PASSWORD:?}` y marcador en el ejemplo; nginx con cabeceras, `server_tokens off`, `limit_req` al login y `X-Real-IP`; desarrollo con puertos en `127.0.0.1`; ampliar la lista de contraseñas comunes; guarda de entorno en `seed.py`; apagar `/docs` en producción | Sebas (gitignore, compose, nginx, manual); René (backend) | Bajo |
-| **B. Corta** (3 a 5 días) | TLS en nginx y documentarlo; IP real y bloqueo por (usuario, IP); vencimiento absoluto; cerrar sesiones al cambiar permisos o restablecer contraseña; auditoría administrativa; pruebas de recorrido de rutas y de 403 de las rutas que modifican datos; reducir `WorkstationRead` público | René (backend) y Sebas (pruebas, nginx y documentación) | Medio |
+| **B. Corta** (3 a 5 días). **TLS en nginx: aplicado el 2026-11-04 (ver X3)** | IP real y bloqueo por (usuario, IP); vencimiento absoluto; cerrar sesiones al cambiar permisos o restablecer contraseña; auditoría administrativa; pruebas de recorrido de rutas y de 403 de las rutas que modifican datos; reducir `WorkstationRead` público | René (backend) y Sebas (pruebas, nginx y documentación) | Medio |
 | **C. Con decisión previa** | Cambio de contraseña por el propio usuario y `must_change_password`; alcance por centro; rol de BD de mínimo privilegio; barrido de sesiones vencidas; normalizar usuarios a minúsculas | René, tras decidir el modelo de despliegue | Medio |
 
 Archivos que son de René (`backend/**`) los listo como propuesta para que él decida y los implemente. De mi lado (Sebas) quedan `.gitignore`, `docker-compose*.yml`, `frontend/nginx.conf`, `scripts/`, `docs/` y las pruebas de `frontend/tests/`.
@@ -310,7 +322,7 @@ No lo apliqué; queda como propuesta:
 |---|---|
 | X1 | ~~Sin límite de intentos~~ **RESUELTO 2026-10-21** (commit `4db2ed0`: 429 tras 5 fallos, 15 min). **Quedan** brechas de endurecimiento: IP real y límite por origen (ver `AUDITORIA_SEGURIDAD_X1_X7.md`) |
 | X2 | ~~La sesión no caduca~~ **RESUELTO 2026-10-21** (commit `4db2ed0`: 30 min de inactividad). **Quedan** vencimiento absoluto y cierre de sesión al revocar permisos |
-| X3 | **Abierto (alta):** el compose publica solo HTTP; falta TLS en nginx |
+| X3 | **IMPLEMENTADO 2026-11-04, pendiente de validar con Docker:** nginx termina TLS en el 443 y el 80 redirige; certificados con `scripts/generar_certificados.sh` |
 | X4 | ~~Sin CORS~~ **RESUELTO por diseño** (mismo origen vía nginx; no agregar CORS). **Quedan** cabeceras de seguridad en nginx |
 | X5 | **Parcial:** producción no publica BD ni Redis; faltan exigir los secretos, guarda del `seed` e ignorar `backups/` |
 | X6 | ~~Sin política de contraseñas~~ **RESUELTO 2026-10-21** (commit `f96eb1c`: bcrypt, composición). **Quedan** ampliar la lista de comunes y el cambio por el propio usuario |

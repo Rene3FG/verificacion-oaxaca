@@ -64,6 +64,11 @@
    - **`scripts/desbloquear_usuario.sh` y `.ps1`:** desbloquean a un usuario bloqueado por intentos fallidos (sobre todo supervisores). No borran intentos ni inventan logins: anotan "(desbloqueado por soporte)" en el motivo. Probados con un `docker` simulado (validación, confirmación con `SI` exacto, simulación, SQL ASCII y sin el usuario dentro del texto); **no se han ejecutado contra un Postgres real**. Uso en `scripts/README.md`, sección 5.
    - **Matriz 2026-11-04:** 101 HUs en HECHO (363 SP, 89,4%), 5 en PARCIAL (HU-041, 043, 044, 046 y 083, todas de equipos físicos, Fase 2) y 4 en DESFASADA_SHEET. HU-024 se cerró por decisión del equipo (el rechazo entra a `PENDIENTE_DE_IMPRESION_RECHAZO`).
 
+8. **TLS en nginx, X3 (2026-11-04):**
+   - **Implementado:** `scripts/generar_certificados.sh` (CA local y certificado de servidor, ECDSA P-256, 825 días; la llave de la CA queda en `certs/ca/` y nunca se monta); `frontend/nginx.conf` con HTTPS en el 443 (TLS 1.2 y 1.3) y el 80 solo redirigiendo; `docker-compose.prod.yml` publica `WEB_TLS_PORT` y monta `certs/server` en solo lectura (si faltan los certificados, `up` falla con un error claro). Manual: sección 3.3 (instalación de la CA en Windows, Firefox y Linux, renovación y problemas). HSTS queda comentado a propósito.
+   - **Verificado:** el generador en Windows (OpenSSL 3.2) y Linux (WSL2, OpenSSL 3.0) y un handshake TLS real (TLS 1.3 con la CA instalada; rechaza nombre ajeno al certificado, estación sin la CA y TLS 1.1); el compose con `docker compose config`. **No se ejecutó `nginx -t` ni se probó con navegador** (Docker apagado).
+   - **Cambio de comportamiento:** `docker compose up` ya no arranca sin certificados; hay que ejecutar antes el generador. El manual traía además una verificación errónea (`/api/health` no existe) que se corrigió.
+
 ---
 
 ## 2. Estado Actual de la Arquitectura y Árbol de Archivos
@@ -161,8 +166,8 @@ verificacion-oaxaca/
    - **Auditoría administrativa (X7-c):** `verificacion_id` nullable (o `admin_event_logs`), serializador de sincronización y auditoría de supervisión con `LEFT JOIN`.
    - **Otros:** guarda de entorno en `seed.py`, apagar `/docs` en producción, reducir `WorkstationRead` público, validar `user_id` al otorgar permisos.
    - **Pruebas:** una que recorra todas las rutas y exija 401 sin sesión, y 403 para las rutas que modifican datos (13 de supervisor y varias de estación sin prueba).
-2. **TLS en nginx (X3, hallazgo alto):** preparar certificados (CA local o autofirmado en la LAN; Let's Encrypt en el VPS), ampliar el nginx y el compose, y documentar en el manual cómo generar e instalar la CA en las estaciones.
-3. **Validar la Fase A con Docker encendido:** `nginx -t`; abrir el sistema en un navegador y revisar la consola (login, las cinco vistas y la vista previa del certificado) para pasar la CSP de `Report-Only` a enforcing; comprobar que el 429 del login se lee bien; y correr `scripts/desbloquear_usuario.* --simular` en un ambiente de pruebas.
+2. **Validar y operar TLS (X3):** instalar la CA en las estaciones y anotar la fecha de vencimiento del certificado (825 días; renovar con 60 días de margen); decidir cuándo activar HSTS; y el procedimiento con Let's Encrypt en el VPS (sin probar; falta montar `/var/www/certbot` si se usa `--webroot`).
+3. **Validar con Docker encendido:** `nginx -t` (ahora con TLS: usar certificados de `certs/server` generados con el script); abrir el sistema por `https://` en un navegador con la CA instalada y revisar la consola (login, las cinco vistas y la vista previa del certificado) para pasar la CSP de `Report-Only` a enforcing; comprobar que el 429 del login se lee bien y que `http://` redirige a `https://`; y correr `scripts/desbloquear_usuario.* --simular` en un ambiente de pruebas.
 4. **Esperar la respuesta de René a la propuesta NOM-047** (`docs/PROPUESTA_FLUJO_INSPECCION_VISUAL_NOM047.md`): Opción A (mover la estación de la inspección visual a Captura) u Opción B (reordenar estados). Hasta entonces no se modifica código de René.
 5. **Confirmación del cliente sobre la plantilla física de rechazo:** qué plantilla imprime un rechazo visual y uno por emisiones (choca con `_LAYOUT_RECHAZO`, ver B1, B9 y S5), qué significa "terminar la captura" y a qué técnico corresponde el campo 001.
 6. **Sesión E2E con Docker** para correr `scripts/smoke_e2e_flujo.mjs` contra el backend real (hasta ahora solo contra un servidor simulado).
