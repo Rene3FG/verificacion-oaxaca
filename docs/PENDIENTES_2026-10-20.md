@@ -67,7 +67,7 @@ El código funciona con estas decisiones tomadas "por defecto"; cada una vive en
 | F5 | **Calibración periódica como bloqueo** | El contrato no la detalla; preguntar a Luis o al proveedor antes de construir | HU-041/044 |
 | F6 | ~~Fila "Rol asignado" en acceso denegado~~ **HECHO 2026-10-22**: el 403 devuelve `permisos_asignados` y la pantalla lista las estaciones asignadas | HU-007 |
 | F7 | **Pausar prueba** | No se hizo "porque sin equipo no hay nada que pausar"; se reevalúa con el adaptador real | HU-045 |
-| F8 | **HU-024: crear el `PrintJob` de rechazo al rechazar** | El texto del Sheet lo pide al rechazar; hoy se crea al imprimir. Decidir si se cambia el código o el texto | HU-024 |
+| F8 | ~~**HU-024: crear el `PrintJob` de rechazo al rechazar**~~ **RESUELTO 2026-11-04**: aclarado y cerrado en trazabilidad. Al rechazar en inspección visual el expediente transiciona a `PENDIENTE_DE_IMPRESION_RECHAZO`, ingresando a la cola de rechazo de Impresión Central; el `PrintJob` y su snapshot inmutable se generan al imprimir con folio asignado (contrato de proyección) | HU-024 |
 | F9 | ~~Contador "sincronizando" siempre en 0~~ **HECHO 2026-10-30**: el lote se marca `SYNCING` y se confirma antes de enviar; cada fila confirma al terminar; las omitidas por corte vuelven a su estado; una `SYNCING` huérfana (>`SYNC_SYNCING_CADUCIDAD_S`, 900 s) vuelve a ser candidata | HU-104 |
 | F10 | ~~Rango de lotes sin tope~~ **YA ESTABA HECHO** (`MAX_FOLIOS_POR_LOTE` = 10 000, desde 2026-09-22, con prueba en `test_folios.py`); esta lista estaba desactualizada | Folios |
 | F11 | ~~**Catálogo de municipios fuera de Oaxaca**~~ **HECHO 2026-10-28**: catálogo INEGI nacional de las 32 entidades federativas (`backend/app/data/municipios_mexico.json`, 2 478 municipios) integrado en `catalogos.py`, `CapturaView.vue` y `PruebaView.vue` (commit `d276d5e`) | HU-016 |
@@ -120,7 +120,7 @@ Verificado con `grep` en `main.py`, `deps.py`, `estaciones.py` y `services/auth.
 | Q4 | Pruebas de carga y concurrencia realistas (varias estaciones simultáneas, folios atómicos bajo carga) |
 | Q5 | **UAT de las 41 pantallas contra el Figma**, con lista de diferencias (Fase 4). El Figma no se relee desde el 09-28 |
 | Q6 | ~~HU en SOLO_FRONTEND sin prueba: HU-005, 006, 050, 058, 059, 060~~ **RESUELTO 2026-10-27** (categoría `SOLO_FRONTEND` erradicada, 0 HUs; HU-005 y HU-006 con las pruebas de `27f2a5a`) |
-| Q7 | HU PARCIAL por criterio ambiguo o sin prueba: ~~HU-007 (texto en pantalla)~~ **RESUELTO 2026-10-22** (el 403 responde `permisos_asignados` y `LoginView.vue` muestra las estaciones asignadas; pruebas el 10-23), ~~037 (OBD/visual en el header)~~ **RESUELTO 2026-10-27** (HECHO en la matriz). **Sigue abierta HU-024**: el `PrintJob` se crea al imprimir, no al rechazar |
+| Q7 | ~~HU PARCIAL por criterio ambiguo o sin prueba: HU-007, 037, HU-024~~ **RESUELTO 2026-11-04** (HU-007 resuelto 10-22, HU-037 resuelto 10-27, HU-024 cerrado 11-04: el rechazo ingresa a la cola de rechazo y el PrintJob se genera con folio asignado). 0 HUs ambiguas pendientes en software |
 | Q8 | Linter / formateador (ni `ruff` ni `eslint` configurados) |
 | Q9 | Ejecutar el plan de impresión **en papel real** con la impresora del cliente (B9) |
 
