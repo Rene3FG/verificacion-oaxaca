@@ -2,8 +2,8 @@
 
 **De:** Antigravity (AI Pair Programmer)  
 **Para:** Claude (AI Assistant) & Sebas  
-**Fecha de corte:** 30 de octubre de 2026 (Semana 7 — Viernes)  
-**Rama activa:** `frontend-impresion-central` (merge de upstream `7d36cdc` integrado)  
+**Fecha de corte:** 4 de noviembre de 2026 (Semana 8 — Miércoles)  
+**Rama activa:** `frontend-impresion-central` (merge de upstream `7d36cdc`; auditoría de seguridad y Fase A de ops integradas)  
 **Estado upstream:** Upstream de René (`origin/etapa1-y-siox` en `8632769`) integrado vía merge `7d36cdc`: F9 (contador `sincronizando`, `14469e3`) y F4 (catálogo de equipos, `8632769`).
 
 ---
@@ -56,6 +56,13 @@
    - **Merge `7d36cdc`:** F9 hace visible el contador `sincronizando` durante el envío por lotes (HU-104); F4 agrega el catálogo `cat_equipos` y el equipo resuelto por el servidor al guardar el resultado (HU-042, HU-102), con administración en `SupervisorView.vue`. `SupervisorView.test.js` pasó de 103 a 110 pruebas. **Suite Frontend: 397 pruebas en 11 suites al 100%.**
    - **Matriz de trazabilidad 2026-10-30:** HU-042, HU-101, HU-102 y HU-103 pasan a HECHO. HECHO sube a 100 HUs (358 SP, 88,2%); PARCIAL baja a 6 HUs (30 SP, 7,4%); DESFASADA_SHEET se mantiene en 4. HU-101 y HU-103 se promovieron porque `PENDIENTES` las une con HU-102 en el bloqueo B4, que el cliente respondió; esa promoción depende de la respuesta reportada y `PENDIENTES` todavía lista B4 como abierto. Matiz de HU-042: el equipo se fija al guardar el resultado, no al configurar la prueba. Las 24 citas nuevas de archivos y pruebas se verificaron contra el disco.
    - **Propuesta `docs/PROPUESTA_FLUJO_INSPECCION_VISUAL_NOM047.md`:** el rechazo directo por inspección visual y el OBD antes de la prueba **ya existen** en la máquina de estados; lo que cambia es la estación que registra la inspección visual (hoy Prueba, el cliente indica Captura) y el campo 001 del certificado (hoy parámetro fijo, el cliente indica ID del técnico, lo que requiere una clave por usuario). Recomienda mover la estación sin tocar los estados (Opción A). Sin código modificado y pendiente de coordinar con René.
+
+7. **Auditoría de seguridad X1–X7, Fase A y script de desbloqueo (2026-11-04):**
+   - **Auditoría:** `docs/AUDITORIA_SEGURIDAD_X1_X7.md` (evidencia por archivo y línea, brechas con severidad, mitigaciones y plan). La sección 3.3 de `PENDIENTES` se actualizó: X1, X2 y X6 ya estaban implementados (2026-10-21), X4 es correcto por diseño, **X3 (sin TLS) es el único hallazgo alto**, y X5 y X7 quedan parciales. Hallazgos que conviene recordar: 71 de 74 rutas con guarda (3 públicas a propósito), pero solo 19 de 32 rutas de supervisor con prueba de 403; la política de contraseñas acepta `Password123`; las acciones administrativas no dejan rastro.
+   - **Fase A aplicada en ops:** `.gitignore` (`backups/`, `*.dump`, `*.sql.gz`, `certs/`); `POSTGRES_PASSWORD` obligatoria en `docker-compose.prod.yml` (validado con `docker compose config`) y sin contraseña de relleno en `.env.prod.example`, manual y `README.md`; nginx con límite de login de 30 peticiones por minuto por IP (el 429 devuelve JSON con `detail`), cabeceras de seguridad, `server_tokens off` y `X-Real-IP`. **La CSP está en modo solo reporte.** **No se ejecutó `nginx -t`** (Docker apagado): solo hubo revisión estructural.
+   - **Decisiones de arquitectura:** un servidor local autónomo por verificentro; TLS con certificado interno, autofirmado o CA local en la LAN y público (Let's Encrypt) en el VPS; auditoría administrativa en `EventLog`, lo cual **exige** que René haga nullable `verificacion_id` (o cree una tabla `admin_event_logs`) y ajuste el serializador de sincronización y la auditoría de supervisión.
+   - **`scripts/desbloquear_usuario.sh` y `.ps1`:** desbloquean a un usuario bloqueado por intentos fallidos (sobre todo supervisores). No borran intentos ni inventan logins: anotan "(desbloqueado por soporte)" en el motivo. Probados con un `docker` simulado (validación, confirmación con `SI` exacto, simulación, SQL ASCII y sin el usuario dentro del texto); **no se han ejecutado contra un Postgres real**. Uso en `scripts/README.md`, sección 5.
+   - **Matriz 2026-11-04:** 101 HUs en HECHO (363 SP, 89,4%), 5 en PARCIAL (HU-041, 043, 044, 046 y 083, todas de equipos físicos, Fase 2) y 4 en DESFASADA_SHEET. HU-024 se cerró por decisión del equipo (el rechazo entra a `PENDIENTE_DE_IMPRESION_RECHAZO`).
 
 ---
 
@@ -110,6 +117,7 @@ verificacion-oaxaca/
 │   ├── backup_db.sh / restore_db.sh       # Scripts Bash de respaldo D4 (Linux)
 │   ├── respaldo.sh / restaurar.sh         # Variante de respaldo y restauración (René)
 │   ├── smoke_e2e_flujo.mjs                # Prueba de humo del ciclo vehicular (Node 18+)
+│   ├── desbloquear_usuario.sh / .ps1      # Soporte: desbloquea usuarios bloqueados por intentos fallidos
 │   ├── backup_db.ps1 / restore_db.ps1     # Scripts PowerShell de respaldo D4 (Windows)
 │   └── README.md                          # Guía de respaldos y de la prueba de humo
 ├── docker-compose.yml                     # Compose de desarrollo local (db 5433, redis 6379)
@@ -146,12 +154,18 @@ verificacion-oaxaca/
 
 ### 4.2 Siguientes Tareas Inmediatas
 
-1. **Esperar la respuesta de René a la propuesta NOM-047** (`docs/PROPUESTA_FLUJO_INSPECCION_VISUAL_NOM047.md`): Opción A (mover la estación de la inspección visual a Captura) u Opción B (reordenar estados). Hasta entonces no se modifica código de René. Al implementarse hay que mover las pruebas de la inspección visual de `PruebaView.test.js` a `CapturaView.test.js`.
-2. **Confirmación del cliente sobre la plantilla física de rechazo:** qué plantilla imprime un rechazo visual y uno por emisiones (choca con `_LAYOUT_RECHAZO`, ver B1, B9 y S5 de `PENDIENTES`), qué significa "terminar la captura" y a qué técnico corresponde el campo 001.
-3. **Sesión E2E con Docker** (Postgres y Redis arriba, backend y `python -m app.seed`) para correr `scripts/smoke_e2e_flujo.mjs` contra el backend real, que hasta ahora solo se validó contra un servidor simulado.
-4. **Avisar a René** del defecto de `?estacion=` con `localStorage` bloqueado (hay 1 `it.fails` en `session.test.js`; quitar el `.fails` cuando lo corrija).
-5. **Acordar con René qué juego de scripts de respaldo queda** y si `README.md` de la raíz y `docs/MANUAL_INSTALACION_Y_OPERACION.md` se unifican.
-6. **Bloqueos que siguen abiertos** en `PENDIENTES`: B10(a) (potencia en fase 5024), B2, B3, B5, B9 (papel real) y los demás de terceros. HU-024 sigue en PARCIAL. Las 6 HUs en PARCIAL se cierran con esos bloqueos, no con más código de interfaz.
-7. **`git push`** de commits locales solo con confirmación explícita.
-
-**Hecho:** `docs/PENDIENTES_2026-10-20.md` quedó al día con las respuestas del cliente (B1, B4, B7, B9, B10(b), S5) y con los puntos de pruebas y calidad ya resueltos (D9, Q1, Q6, Q7 parcial).
+1. **Para René (backend), según `docs/AUDITORIA_SEGURIDAD_X1_X7.md`:**
+   - **Login (X1):** IP real tomada de `X-Real-IP` (nginx ya la envía) y guardada en `access_events`; bloqueo por (usuario, IP) y contador por IP; igualar tiempos de respuesta con usuarios inexistentes; `POST /api/usuarios/{id}/desbloquear` para supervisores.
+   - **Sesiones (X2):** vencimiento absoluto; cerrar sesiones al revocar o cambiar permisos y al restablecer una contraseña.
+   - **Contraseñas (X6):** lista de comunes ampliada, cambio por el propio usuario y `must_change_password`.
+   - **Auditoría administrativa (X7-c):** `verificacion_id` nullable (o `admin_event_logs`), serializador de sincronización y auditoría de supervisión con `LEFT JOIN`.
+   - **Otros:** guarda de entorno en `seed.py`, apagar `/docs` en producción, reducir `WorkstationRead` público, validar `user_id` al otorgar permisos.
+   - **Pruebas:** una que recorra todas las rutas y exija 401 sin sesión, y 403 para las rutas que modifican datos (13 de supervisor y varias de estación sin prueba).
+2. **TLS en nginx (X3, hallazgo alto):** preparar certificados (CA local o autofirmado en la LAN; Let's Encrypt en el VPS), ampliar el nginx y el compose, y documentar en el manual cómo generar e instalar la CA en las estaciones.
+3. **Validar la Fase A con Docker encendido:** `nginx -t`; abrir el sistema en un navegador y revisar la consola (login, las cinco vistas y la vista previa del certificado) para pasar la CSP de `Report-Only` a enforcing; comprobar que el 429 del login se lee bien; y correr `scripts/desbloquear_usuario.* --simular` en un ambiente de pruebas.
+4. **Esperar la respuesta de René a la propuesta NOM-047** (`docs/PROPUESTA_FLUJO_INSPECCION_VISUAL_NOM047.md`): Opción A (mover la estación de la inspección visual a Captura) u Opción B (reordenar estados). Hasta entonces no se modifica código de René.
+5. **Confirmación del cliente sobre la plantilla física de rechazo:** qué plantilla imprime un rechazo visual y uno por emisiones (choca con `_LAYOUT_RECHAZO`, ver B1, B9 y S5), qué significa "terminar la captura" y a qué técnico corresponde el campo 001.
+6. **Sesión E2E con Docker** para correr `scripts/smoke_e2e_flujo.mjs` contra el backend real (hasta ahora solo contra un servidor simulado).
+7. **Avisar a René** del defecto de `?estacion=` con `localStorage` bloqueado (hay 1 `it.fails` en `session.test.js`; quitar el `.fails` cuando lo corrija) y acordar qué juego de scripts de respaldo queda.
+8. **Bloqueos que siguen abiertos** en `PENDIENTES`: B10(a), B2, B3, B5 (hosting: el cliente entregó una ficha de hosting compartido incompatible; se requiere un VPS Linux), B9 (papel real) y los demás de terceros. Las 5 HUs en PARCIAL se cierran con el hardware del proveedor, no con más código de interfaz.
+9. **`git push`** de commits locales solo con confirmación explícita.
