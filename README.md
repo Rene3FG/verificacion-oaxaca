@@ -20,7 +20,7 @@ El estado se revisa con `docker compose ... ps` (el contenedor del backend tiene
 
 | Variable | Qué hace | Default |
 |---|---|---|
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Base de datos | cambiar la contraseña |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Base de datos | `POSTGRES_PASSWORD` es obligatoria: el compose no arranca sin ella |
 | `WEB_PORT` | Puerto HTTP publicado | 80 |
 | `EQUIPO_GATEWAY_MODO` | `manual` (el operador captura lecturas). **Nunca `simulador` en producción** | manual |
 | `CENTRAL_SYNC_URL` / `CENTRAL_SYNC_TOKEN` | Central de sincronización; vacío = cola local sin envío | vacío |

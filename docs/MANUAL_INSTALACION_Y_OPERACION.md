@@ -90,7 +90,9 @@ Editar el archivo `.env.prod` con los parámetros correspondientes al centro:
 ```env
 # --- Base de Datos PostgreSQL ---
 POSTGRES_USER=verificacion
-POSTGRES_PASSWORD=DefinirUnaContraseñaFuerteYUnica2026!
+# OBLIGATORIO: sin esta contraseña `docker compose` no arranca. Definir una larga y única
+# (no usar la de ningún ejemplo). Se genera una con:  openssl rand -base64 24
+POSTGRES_PASSWORD=
 POSTGRES_DB=verificacion
 
 # --- Puerto de Exposición Web en LAN ---
