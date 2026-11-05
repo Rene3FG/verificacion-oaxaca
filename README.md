@@ -6,11 +6,12 @@ Una instalación atiende un verificentro con tres tipos de estación: **Captura*
 
 ## Instalación en producción
 
-Requisitos: Docker con el plugin Compose. El TLS lo termina un proxy inverso delante (este compose publica HTTP).
+Requisitos: Docker con el plugin Compose y `openssl`. El TLS lo termina el nginx del propio compose: antes de levantar hay que generar los certificados (paso 1).
 
 ```bash
-cp .env.prod.example .env.prod        # editar: contraseña de Postgres, WEB_PORT, CENTRAL_SYNC_*
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+scripts/generar_certificados.sh --host verificacion.reforma --ip 192.168.1.10   # 1. CA local y certificado
+cp .env.prod.example .env.prod        # 2. editar: contraseña de Postgres, WEB_PORT, CENTRAL_SYNC_*
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build   # 3. levantar
 ```
 
 El backend aplica `alembic upgrade head` al arrancar. Usar **un solo worker** (el bucle de sincronización es por proceso).
@@ -21,7 +22,9 @@ El estado se revisa con `docker compose ... ps` (el contenedor del backend tiene
 | Variable | Qué hace | Default |
 |---|---|---|
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Base de datos | `POSTGRES_PASSWORD` es obligatoria: el compose no arranca sin ella |
-| `WEB_PORT` | Puerto HTTP publicado | 80 |
+| `WEB_PORT` | Puerto HTTP publicado (solo redirige a HTTPS) | 80 |
+| `WEB_TLS_PORT` | Puerto HTTPS publicado (la redirección asume 443) | 443 |
+| `CERTS_DIR` | Carpeta con `server.crt` y `server.key` | `./certs/server` |
 | `EQUIPO_GATEWAY_MODO` | `manual` (el operador captura lecturas). **Nunca `simulador` en producción** | manual |
 | `CENTRAL_SYNC_URL` / `CENTRAL_SYNC_TOKEN` | Central de sincronización; vacío = cola local sin envío | vacío |
 | `LOGIN_MAX_INTENTOS` / `LOGIN_BLOQUEO_MIN` | Bloqueo de login tras intentos fallidos (0 apaga) | 5 / 15 |

@@ -1,8 +1,9 @@
 # Producción: sin código montado, sin --reload, Postgres y Redis solo en la red
 # interna. Uso:  cp .env.prod.example .env.prod  (editar)  y
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
-# El TLS se termina delante (proxy inverso del verificentro o balanceador):
-# este compose publica HTTP en WEB_PORT (PENDIENTES X3).
+# El TLS se termina en el nginx del servicio web (PENDIENTES X3): antes de
+# levantar, generar los certificados con scripts/generar_certificados.sh (quedan
+# en ./certs/server). El puerto 80 solo redirige a HTTPS.
 # Rotación de logs de Docker (D7): sin esto crecen sin límite en el disco.
 x-logging: &logging
   driver: json-file
@@ -68,6 +69,17 @@ services:
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-80}:80"
+      - "${WEB_TLS_PORT:-443}:443"
+    volumes:
+      # Solo server.crt y server.key: la llave de la CA nunca se monta aquí.
+      # create_host_path: false hace que `up` falle con un error claro si falta
+      # la carpeta, en vez de crear una vacía y dejar a nginx reiniciándose.
+      - type: bind
+        source: ${CERTS_DIR:-./certs/server}
+        target: /etc/nginx/certs
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       - backend
 

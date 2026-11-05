@@ -95,8 +95,12 @@ POSTGRES_USER=verificacion
 POSTGRES_PASSWORD=
 POSTGRES_DB=verificacion
 
-# --- Puerto de Exposición Web en LAN ---
+# --- Puertos de Exposición Web en LAN ---
+# WEB_PORT solo redirige a HTTPS; WEB_TLS_PORT (443) es el puerto real de la aplicación.
 WEB_PORT=80
+WEB_TLS_PORT=443
+# Carpeta con server.crt y server.key (por defecto ./certs/server, ver 3.3).
+# CERTS_DIR=./certs/server
 
 # --- Modo de Integración con Equipos de Medición ---
 # manual = Captura manual de lecturas reportadas por el equipo
@@ -114,7 +118,52 @@ LOGIN_BLOQUEO_MIN=15
 SESION_INACTIVIDAD_MIN=30
 ```
 
-### 3.3 Puesta en Marcha del Stack
+### 3.3 Certificados TLS (obligatorio antes de arrancar)
+Todo el tráfico va cifrado: la contraseña del login y el identificador de sesión ya no viajan en claro por la red del verificentro. El `nginx` del stack termina el HTTPS y el puerto 80 solo redirige. Sin certificados, `docker compose up` falla con un error de ruta inexistente (a propósito: es preferible a un nginx reiniciándose sin parar).
+
+**1. Generar la CA local y el certificado del servidor** (requiere `openssl`; en Windows, desde Git Bash o WSL):
+```bash
+scripts/generar_certificados.sh --host verificacion.reforma --ip 192.168.1.10
+```
+Usar como `--host` el nombre con el que las estaciones abrirán el sistema y como `--ip` la dirección del servidor en la red; se pueden repetir ambas opciones. **Las estaciones deben abrir el sistema con uno de esos nombres o direcciones**: si usan otro, el navegador avisará que el certificado no coincide. El script deja:
+
+| Archivo | Para qué |
+|---|---|
+| `certs/server/server.crt` y `server.key` | Lo único que monta `nginx` |
+| `certs/ca/ca.crt` | CA pública: se instala en cada estación |
+| `certs/ca/ca.key` | CA **privada**: guardarla **fuera del servidor** (USB cifrada o gestor de secretos) |
+
+La carpeta `certs/` no se versiona. Al terminar, el script muestra la **huella SHA-256 de la CA**; anótela para comprobarla al instalar la CA en cada estación.
+
+**2. Instalar la CA en cada estación** (una sola vez; después los certificados renovados se aceptan solos):
+
+| Sistema / navegador | Procedimiento |
+|---|---|
+| Windows con Chrome o Edge | PowerShell como administrador: `Import-Certificate -FilePath .\ca.crt -CertStoreLocation Cert:\LocalMachine\Root` (o `certutil -addstore -f "ROOT" ca.crt`) |
+| Firefox | Ajustes → Privacidad y seguridad → Ver certificados → Autoridades → Importar → marcar "Confiar en esta CA para identificar sitios web". O bien, en `about:config`, `security.enterprise_roots.enabled = true` para que use el almacén de Windows |
+| Linux | `sudo cp ca.crt /usr/local/share/ca-certificates/verificacion-oaxaca-ca.crt && sudo update-ca-certificates` |
+
+Comprobar siempre que la huella que muestra el sistema coincida con la anotada.
+
+**3. Renovación.** El certificado del servidor dura 825 días. Anotar la fecha y renovarlo **antes** de que venza (con 60 días de margen):
+```bash
+openssl x509 -in certs/server/server.crt -noout -enddate        # fecha de vencimiento
+scripts/generar_certificados.sh --host verificacion.reforma --ip 192.168.1.10   # mismas opciones
+docker compose -f docker-compose.prod.yml --env-file .env.prod restart web
+```
+Como la CA se reutiliza, las estaciones no cambian nada. Solo si se perdiera la CA o se sospechara de su llave se usa `--forzar-ca`, y entonces hay que reinstalar la CA en todas las estaciones. El mismo procedimiento sirve si cambia la IP o el nombre del servidor.
+
+**4. Servidor en la nube (VPS con dominio).** Con un dominio público conviene un certificado público (por ejemplo, Let's Encrypt) en lugar de la CA local. Se obtienen `fullchain.pem` y `privkey.pem` con `certbot`, se dejan copias llamadas `server.crt` (cadena completa) y `server.key` en una carpeta, y se apunta `CERTS_DIR` a ella. Al renovar hay que reemplazar las copias y reiniciar `web`. *Este camino no se ha probado todavía;* si se usara `certbot --webroot`, falta montar en el servicio `web` la carpeta `/var/www/certbot` que el puerto 80 ya expone para el desafío.
+
+**Problemas frecuentes**
+
+| Síntoma | Causa y solución |
+|---|---|
+| `docker compose up` falla con "bind source path does not exist" | No existen los certificados: ejecutar el paso 1 o revisar `CERTS_DIR` |
+| El navegador dice "la conexión no es privada" | La CA no está instalada en esa estación, o se abrió con un nombre o IP que no está en el certificado |
+| `web` se reinicia en bucle | `docker compose ... logs web`; suele ser un `server.crt` y `server.key` que no corresponden (volver a generar) |
+
+### 3.4 Puesta en Marcha del Stack
 Ejecutar el comando de arranque de Docker Compose:
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
@@ -124,18 +173,20 @@ El despliegue automático realiza las siguientes acciones:
 1. Inicia el contenedor de PostgreSQL 16 con verificación de salud (`healthcheck`).
 2. Inicia Redis 7 para colas de trabajo.
 3. Compila el contenedor backend FastAPI e invoca automáticamente las migraciones pendientes con `alembic upgrade head`.
-4. Compila el frontend Vue 3 en Nginx y expone la aplicación en el puerto configurado (`WEB_PORT=80`).
+4. Compila el frontend Vue 3 en Nginx, que sirve la aplicación por HTTPS en el puerto `WEB_TLS_PORT` (443) y redirige el puerto `WEB_PORT` (80) a HTTPS.
 
-### 3.4 Verificación del Despliegue
+### 3.5 Verificación del Despliegue
 Verificar que todos los servicios se encuentren en estado `Up (healthy)`:
 ```bash
 docker compose -f docker-compose.prod.yml ps
 ```
-Comprobar el endpoint de diagnóstico del sistema:
+Comprobar que nginx responde por HTTPS con la CA local:
 ```bash
-curl -I http://localhost/api/health
+curl --cacert certs/ca/ca.crt -I https://localhost/
 ```
-Respuesta esperada: `HTTP/1.1 200 OK` con JSON `{"status": "ok"}`.
+Respuesta esperada: `HTTP/2 200` (la pantalla de la aplicación) y, con `curl -I http://localhost/`, un `301` hacia `https://`.
+
+El estado de salud del backend lo informa `docker compose ... ps` (el contenedor `backend` tiene un `healthcheck` sobre `/health`, ruta interna que nginx no expone).
 
 ---
 
