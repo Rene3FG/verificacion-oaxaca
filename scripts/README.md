@@ -15,6 +15,7 @@ Este directorio contiene las herramientas ejecutables para cumplir con la polít
 | `respaldo.sh` / `restaurar.sh` | Linux | Variante de respaldo y restauración con `pg_dump` comprimido y confirmación explícita (ver `README.md` de la raíz). |
 | `smoke_e2e_flujo.mjs` | Node.js 18+ (cualquier SO) | Prueba de humo del ciclo vehicular completo contra la API local. Ver sección 4. |
 | `desbloquear_usuario.sh` / `.ps1` | Linux / Windows | Soporte: desbloquea a un usuario bloqueado por intentos fallidos de login (X1). Ver sección 5. |
+| `generar_certificados.sh` | Linux, o Windows con Git Bash o WSL | Genera la CA local y el certificado TLS del servidor (X3). Ver sección 6. |
 
 ---
 
@@ -134,3 +135,27 @@ COMPOSE_ARGS="-f docker-compose.yml" scripts/desbloquear_usuario.sh operador1
 - Solo levanta el bloqueo **por intentos**. No reactiva a un usuario desactivado (`is_active = false`); eso se hace desde Administración.
 - Tras el desbloqueo, la contraseña sigue siendo la misma: si el usuario no la recuerda, un supervisor debe restablecerla.
 - Los scripts se probaron con un `docker` simulado (validación de argumentos, confirmación, simulación, error si quedan intentos y que el SQL sea ASCII y no contenga el usuario). **No se han ejecutado contra un Postgres real**: la primera corrida debería hacerse con `--simular` en un ambiente de pruebas.
+
+---
+
+## 6. Certificados TLS (`generar_certificados.sh`)
+
+Genera lo necesario para servir el sistema por HTTPS en la red local del verificentro (PENDIENTES X3): una **CA propia** y un **certificado de servidor** firmado por ella. Las estaciones instalan la CA una sola vez y desde entonces aceptan los certificados que ella firme, también al renovarlos. Requiere `openssl`. El procedimiento completo, con la instalación de la CA en las estaciones, está en el manual (sección 3.3).
+
+```bash
+scripts/generar_certificados.sh --host verificacion.reforma --ip 192.168.1.10
+```
+
+| Opción | Por defecto | Uso |
+|---|---|---|
+| `--host NOMBRE` (repetible) | `localhost` siempre incluido | Nombre con el que las estaciones abren el sistema. |
+| `--ip DIRECCION` (repetible) | `127.0.0.1` siempre incluida | Dirección IPv4 del servidor en la red. |
+| `--salida DIR` | `certs` | Carpeta de salida (Git la ignora). |
+| `--dias N` | 825 | Vigencia del certificado del servidor. |
+| `--forzar-ca` | apagado | Crea una CA nueva aunque ya exista; obliga a reinstalarla en todas las estaciones. |
+
+**Qué deja:** `certs/ca/ca.crt` (CA pública, se instala en las estaciones), `certs/ca/ca.key` (CA privada: **guardarla fuera del servidor**) y `certs/server/server.crt` y `server.key` (lo único que monta `nginx`). Claves ECDSA P-256 y nombres alternativos (SAN) obligatorios, que son los que validan los navegadores.
+
+**Renovar:** volver a ejecutarlo con las mismas opciones. Si la CA existe y no vence en 30 días, se reutiliza y las estaciones no cambian nada; solo se firma un certificado de servidor nuevo.
+
+**Cómo se probó:** en Windows (Git Bash, OpenSSL 3.2) y en Linux (WSL2, OpenSSL 3.0). Se comprobó la validación de argumentos, la cadena de confianza, los nombres, la reutilización de la CA y la renovación, y se hizo un **handshake TLS real** con un servidor y clientes de prueba: conecta con TLS 1.3 con la CA instalada, rechaza un nombre que no está en el certificado, desconfía si la estación no tiene la CA y rechaza TLS 1.1. **No se ha probado con el `nginx` del stack** (pendiente de encender Docker).
