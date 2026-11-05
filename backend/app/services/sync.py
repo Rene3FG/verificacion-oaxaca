@@ -78,7 +78,9 @@ async def encolar_sync(
 def _serializar_event_log(event: EventLog) -> dict:
     return {
         "id": str(event.id),
-        "verificacion_id": str(event.verificacion_id),
+        # None (no "None") en eventos administrativos sin expediente (X7-c).
+        "verificacion_id": str(event.verificacion_id) if event.verificacion_id else None,
+        "centro_id": event.centro_id,
         "evento": event.evento,
         "estado_anterior": event.estado_anterior.value if event.estado_anterior else None,
         "estado_nuevo": event.estado_nuevo.value if event.estado_nuevo else None,

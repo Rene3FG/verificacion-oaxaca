@@ -142,7 +142,12 @@ async def auditoria_centro(
     if desde and hasta and desde > hasta:
         raise HTTPException(status_code=422, detail="'desde' no puede ser posterior a 'hasta'.")
 
-    filtros = [Verificacion.centro_id == session.center_id]
+    # X7-c: LEFT JOIN al expediente, porque los eventos administrativos no
+    # tienen uno. El centro sale del expediente si lo hay y, si no, del
+    # propio evento (las filas viejas tienen centro_id lleno por la
+    # migración; las nuevas operativas lo heredan del expediente).
+    centro_evento = func.coalesce(Verificacion.centro_id, EventLog.centro_id)
+    filtros = [centro_evento == session.center_id]
     if desde:
         filtros.append(
             EventLog.created_at
@@ -164,14 +169,14 @@ async def auditoria_centro(
 
     base = (
         select(EventLog, Verificacion.placa, CatUsuario.nombre_completo)
-        .join(Verificacion, Verificacion.id == EventLog.verificacion_id)
+        .outerjoin(Verificacion, Verificacion.id == EventLog.verificacion_id)
         .outerjoin(CatUsuario, CatUsuario.id == EventLog.usuario_id)
         .where(*filtros)
     )
     total = await db.scalar(
         select(func.count())
         .select_from(EventLog)
-        .join(Verificacion, Verificacion.id == EventLog.verificacion_id)
+        .outerjoin(Verificacion, Verificacion.id == EventLog.verificacion_id)
         .where(*filtros)
     )
     filas = await db.execute(

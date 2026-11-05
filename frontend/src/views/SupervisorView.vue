@@ -678,7 +678,7 @@ async function corregirTipoPostImpresion() {
 
 // --- Auditoría (N4) ---
 const MODULOS_AUDITORIA = [
-  "captura", "visual", "obd", "prueba", "folios", "impresion", "supervision",
+  "captura", "visual", "obd", "prueba", "folios", "impresion", "supervision", "administracion",
 ];
 const POR_PAGINA = 50;
 const auditoria = ref({ total: 0, items: [] });
@@ -1124,7 +1124,7 @@ onMounted(() => {
               <tbody>
                 <tr v-for="ev in auditoria.items" :key="ev.id">
                   <td>{{ new Date(ev.created_at).toLocaleString() }}</td>
-                  <td>{{ ev.placa }}</td>
+                  <td>{{ ev.placa || "—" }}</td>
                   <td>{{ ev.modulo }}</td>
                   <td>{{ ev.evento }}</td>
                   <td>

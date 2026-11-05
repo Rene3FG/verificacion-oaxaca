@@ -10,6 +10,7 @@ from app.models.folio import Folio
 from app.models.verificacion import Verificacion
 from app.services import state_machine
 from app.services.folio_inventario import RangoDeFolioInvalido, SinFolioDisponible, asignar_siguiente_folio, registrar_lote
+from app.services.auditoria_admin import registrar_evento_admin
 
 router = APIRouter(prefix="/api/folios", tags=["folios"])
 
@@ -48,6 +49,16 @@ async def registrar_lote_folios(
     except RangoDeFolioInvalido as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    registrar_evento_admin(
+        db, session, "lote_folios_registrado",
+        {
+            "lote_id": lote.id,
+            "tipo_certificado": tipo_certificado,
+            "folio_inicio": folio_inicio,
+            "folio_fin": folio_fin,
+            "cantidad": len(folios_str),
+        },
+    )
     await db.commit()
     return {"lote_id": str(lote.id), "tipo_certificado": tipo_certificado.value, "cantidad": len(folios_str)}
 

@@ -10,8 +10,10 @@ from app.models.enums import AccessEventResultado, StationType
 
 class AccessEvent(Base, UUIDPKMixin, TimestampMixin):
     """Bitácora de intentos de acceso (HU-007), separada de `event_log`
-    porque `event_log.verificacion_id` es NOT NULL con FK a `verificaciones`
-    y un login denegado no tiene expediente asociado."""
+    porque cuando se creó `event_log.verificacion_id` era NOT NULL y un
+    login denegado no tiene expediente asociado. Desde X7-c (2026-11-04)
+    event_log admite filas sin expediente, pero solo para
+    `modulo="administracion"`; los accesos siguen aquí."""
 
     __tablename__ = "access_events"
 

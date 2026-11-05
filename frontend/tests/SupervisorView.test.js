@@ -1283,6 +1283,17 @@ describe("SupervisorView - Auditoría (N4)", () => {
     expect(w.vm.cargandoAuditoria).toBe(false);
   });
 
+  it("X7-c: se puede filtrar por el módulo 'administracion'", async () => {
+    const { w } = await montar();
+    expect(w.vm.MODULOS_AUDITORIA).toContain("administracion");
+    api.get.mockClear();
+    w.vm.filtrosAuditoria.modulo = "administracion";
+    await w.vm.cargarAuditoria();
+    expect(api.get).toHaveBeenCalledWith("/supervision/auditoria", {
+      params: { limite: 50, desplazamiento: 0, modulo: "administracion" },
+    });
+  });
+
   it("una consulta vieja que falla tarde tampoco pisa el estado de error", async () => {
     const { w } = await montar();
     let rechazarLenta;

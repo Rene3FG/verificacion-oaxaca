@@ -14,6 +14,7 @@ from app.models.enums import StationType
 from app.models.equipo import Equipo
 from app.models.workstation import Workstation
 from app.services.equipos import TIPOS_EQUIPO
+from app.services.auditoria_admin import registrar_evento_admin
 
 router = APIRouter(prefix="/api/equipos", tags=["equipos"])
 
@@ -125,6 +126,11 @@ async def crear_equipo(
     await _validar_serie_unica(db, payload.numero_serie, excluir=None)
     equipo = Equipo(**payload.model_dump(), is_active=True)
     db.add(equipo)
+    await db.flush()
+    registrar_evento_admin(
+        db, session, "equipo_registrado",
+        {"equipo_id": equipo.id, **payload.model_dump()},
+    )
     await db.commit()
     await db.refresh(equipo)
     return equipo
@@ -144,10 +150,19 @@ async def actualizar_equipo(
 
     cambios = payload.model_dump(exclude_unset=True)
     await _validar_serie_unica(db, cambios.get("numero_serie"), excluir=equipo.id)
+    diferencias = {}
     for campo, valor in cambios.items():
         if valor is None and campo in ("tipo", "numero_serie", "is_active"):
             continue
+        anterior = getattr(equipo, campo)
+        if anterior != valor:
+            diferencias[campo] = {"antes": anterior, "despues": valor}
         setattr(equipo, campo, valor)
+    if diferencias:
+        registrar_evento_admin(
+            db, session, "equipo_modificado",
+            {"equipo_id": equipo.id, "numero_serie": equipo.numero_serie, "cambios": diferencias},
+        )
     await db.commit()
     await db.refresh(equipo)
     return equipo

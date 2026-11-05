@@ -6,6 +6,7 @@ from app.api.deps import SessionContext, get_db, requiere_supervisor
 from app.models.catalogos import CatParametroSistema
 from app.schemas.parametro import ParametroRead, ParametroUpdate
 from app.services.parametros import DEFAULTS, DESCRIPCIONES, validar_valor
+from app.services.auditoria_admin import registrar_evento_admin
 
 router = APIRouter(prefix="/api/parametros", tags=["parametros"])
 
@@ -58,6 +59,11 @@ async def actualizar_parametro(
         select(CatParametroSistema).where(CatParametroSistema.clave == clave)
     )
     fila = result.scalar_one_or_none()
+    valor_anterior = fila.valor if fila is not None else DEFAULTS.get(clave)
+    registrar_evento_admin(
+        db, session, "parametro_modificado",
+        {"clave": clave, "antes": valor_anterior, "despues": payload.valor},
+    )
     if fila is not None:
         fila.valor = payload.valor
     else:

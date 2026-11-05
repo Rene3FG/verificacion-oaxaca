@@ -21,10 +21,12 @@ class EventLogRead(BaseModel):
 
 class AuditoriaRead(EventLogRead):
     """N4: fila de la bitácora global — EventLog + placa del expediente y
-    nombre de quien actuó, para no obligar al frontend a resolverlos."""
+    nombre de quien actuó, para no obligar al frontend a resolverlos.
+    X7-c: en eventos administrativos (`modulo="administracion"`) no hay
+    expediente, así que `verificacion_id` y `placa` vienen en null."""
 
-    verificacion_id: uuid.UUID
-    placa: str
+    verificacion_id: uuid.UUID | None
+    placa: str | None
     usuario_nombre: str | None
 
 
