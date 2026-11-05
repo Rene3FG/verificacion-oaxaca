@@ -83,17 +83,17 @@ El código funciona con estas decisiones tomadas "por defecto"; cada una vive en
 
 ### 3.3 Seguridad (cosas que **no encontré** en el código)
 
-Verificado con `grep` en `main.py`, `deps.py`, `estaciones.py` y `services/auth.py`.
+Auditoría completa del 2026-11-04 en `docs/AUDITORIA_SEGURIDAD_X1_X7.md` (evidencia por archivo y línea, brechas, mitigaciones y plan). El texto original de estos puntos se escribió el 2026-10-20, antes de implementar X1, X2 y X6; abajo el estado actual.
 
 | # | Hallazgo | Por qué importa |
 |---|---|---|
-| X1 | **Sin límite de intentos de login ni bloqueo de cuenta** | Fuerza bruta de contraseñas contra `POST /estaciones/login` |
-| X2 | **La sesión no caduca por inactividad**: sigue "activa" hasta cerrar sesión explícita o desactivar al usuario | Una estación abandonada queda abierta indefinidamente |
-| X3 | **El identificador de sesión (UUID) viaja en un encabezado sin TLS configurado** | Sin HTTPS, cualquier equipo en la red lo puede capturar |
-| X4 | **No hay configuración de CORS** | Hoy funciona porque Vite hace proxy en desarrollo; en producción exige que el frontend y la API compartan origen (proxy inverso) |
-| X5 | **Credenciales por defecto** en `docker-compose.yml` (`verificacion` / `verificacion`) y Redis y Postgres expuestos a la red local | Deben cambiarse y cerrarse antes de producción |
-| X6 | **Sin política de contraseñas ni rotación** (no encontré validación de complejidad) | Cuentas con contraseñas triviales |
-| X7 | Revisión de seguridad completa prevista para la Fase 4 y aún no hecha; la auditoría de Sebas solo cubrió `impresion.py` (10 endpoints) | Los otros routers (obd, pruebas, folios, supervisión, usuarios, parámetros) tienen la auditoría de rutas del 10-13 pero no pruebas 403 exhaustivas |
+| X1 | ~~**Sin límite de intentos de login ni bloqueo de cuenta**~~ **RESUELTO 2026-10-21** (commit `4db2ed0`: 429 tras 5 fallos, bloqueo de 15 min). **Aplicado 2026-11-04** en nginx un límite de 30 peticiones por minuto por IP al login. **Quedan (backend):** IP real en la bitácora de accesos, bloqueo por (usuario, IP), igualar tiempos de respuesta y la vía de desbloqueo (hoy no existe endpoint ni script) | Fuerza bruta de contraseñas contra `POST /estaciones/login` |
+| X2 | ~~**La sesión no caduca por inactividad**~~ **RESUELTO 2026-10-21** (commit `4db2ed0`: 30 min de inactividad). **Quedan (backend):** vencimiento absoluto de la sesión y cerrar sesiones al revocar permisos o restablecer la contraseña | Una estación abandonada queda abierta indefinidamente |
+| X3 | **ABIERTO (alta):** el compose publica solo HTTP y la contraseña del login y el identificador de sesión viajan en claro. Falta TLS en nginx. Decisión 2026-11-04: certificado interno, autofirmado o CA local en la red del verificentro; certificado público (Let's Encrypt) cuando corra en el VPS | Sin HTTPS, cualquier equipo en la red lo puede capturar |
+| X4 | ~~**No hay configuración de CORS**~~ **RESUELTO por diseño** (frontend y API comparten origen vía nginx; no agregar CORS). **Aplicado 2026-11-04:** cabeceras de seguridad y `server_tokens off` en nginx; la CSP queda en modo solo reporte hasta probarla en un navegador. Falta apagar `/docs` en producción (backend) | Hoy funciona porque Vite hace proxy en desarrollo; en producción exige que el frontend y la API compartan origen (proxy inverso) |
+| X5 | **PARCIAL.** Producción no publica Postgres ni Redis. **Aplicado 2026-11-04:** `POSTGRES_PASSWORD` obligatoria en el compose, ejemplo sin contraseña de relleno, y `backups/`, `*.dump`, `*.sql.gz` y `certs/` ignorados por Git. **Quedan:** guarda de entorno del `seed` (crea `supervisor1` con contraseña pública), puertos de desarrollo en `127.0.0.1` y rol de BD de mínimo privilegio | Deben cambiarse y cerrarse antes de producción |
+| X6 | ~~**Sin política de contraseñas ni rotación**~~ **RESUELTO 2026-10-21** (commit `f96eb1c`: bcrypt, letra y número, no igual al usuario, lista de comunes). **Quedan (backend):** ampliar la lista de comunes (hoy acepta `Password123` y `Oaxaca2026`), cambio de contraseña por el propio usuario y `must_change_password` | Cuentas con contraseñas triviales |
+| X7 | **PARCIAL.** Las 74 rutas tienen autenticación (3 públicas a propósito) y los listados acotan por centro y línea de la sesión. **Quedan:** pruebas de 403 en 13 rutas de supervisor y varias de estación, y auditoría de acciones administrativas en `EventLog` (requiere migración de `verificacion_id` a nullable). Alcance por centro: baja prioridad (un servidor por verificentro) | Los otros routers (obd, pruebas, folios, supervisión, usuarios, parámetros) tienen la auditoría de rutas del 10-13 pero no pruebas 403 exhaustivas |
 
 ### 3.4 Despliegue y operación
 
