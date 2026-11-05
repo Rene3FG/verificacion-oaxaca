@@ -3,7 +3,7 @@
 # Genera la CA local y el certificado TLS del servidor del verificentro (PENDIENTES X3)
 # Sistema de Verificación Vehicular Oaxaca
 #
-#   scripts/generar_certificados.sh [--host NOMBRE]... [--ip DIRECCION]...
+#   scripts/generar_certificados.sh [--host NOMBRE]... [--ip DIRECCION]... [--hosts LISTA]
 #                                   [--salida DIR] [--dias N] [--forzar-ca]
 #
 # Para la red local del verificentro (sin internet ni dominio público): crea una
@@ -21,6 +21,8 @@
 #   --host NOMBRE    nombre DNS con el que las estaciones abren el sistema
 #                    (repetible). "localhost" y 127.0.0.1 siempre se incluyen.
 #   --ip DIRECCION   dirección IPv4 del servidor en la red (repetible).
+#   --hosts LISTA    atajo: lista separada por comas con nombres e IPs mezclados, p. ej.
+#                    "verificentro.local,192.168.1.100". Equivale a repetir --host y --ip.
 #   --salida DIR     carpeta de salida (por defecto: certs).
 #   --dias N         vigencia del certificado del servidor (por defecto 825).
 #   --forzar-ca      crea una CA nueva aunque ya exista una (obliga a reinstalarla
@@ -40,16 +42,34 @@ FORZAR_CA=0
 
 error() { echo "[ERROR] $*" >&2; exit 2; }
 
+# Validan y agregan sin repetir ("localhost" y 127.0.0.1 ya están incluidos).
+agregar_host() {
+    local h="$1" x
+    [[ "$h" =~ ^[0-9.]+$ ]] && error "'$h' parece una dirección IP: use --ip"
+    [[ "$h" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]] || error "Nombre DNS inválido: $h"
+    for x in "${HOSTS[@]}"; do [ "$x" = "$h" ] && return 0; done
+    HOSTS+=("$h")
+}
+agregar_ip() {
+    local i="$1" x a b c d o
+    [[ "$i" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || error "Dirección IPv4 inválida: $i"
+    IFS=. read -r a b c d <<< "$i"
+    for o in "$a" "$b" "$c" "$d"; do [ "$o" -le 255 ] || error "Dirección IPv4 inválida: $i"; done
+    for x in "${IPS[@]}"; do [ "$x" = "$i" ] && return 0; done
+    IPS+=("$i")
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
-        --host) shift; H="${1:?Falta el valor de --host}"
-                [[ "$H" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]] || error "Nombre DNS inválido: $H"
-                HOSTS+=("$H") ;;
-        --ip) shift; I="${1:?Falta el valor de --ip}"
-              [[ "$I" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || error "Dirección IPv4 inválida: $I"
-              IFS=. read -r a b c d <<< "$I"
-              for o in "$a" "$b" "$c" "$d"; do [ "$o" -le 255 ] || error "Dirección IPv4 inválida: $I"; done
-              IPS+=("$I") ;;
+        --host) shift; agregar_host "${1:?Falta el valor de --host}" ;;
+        --ip) shift; agregar_ip "${1:?Falta el valor de --ip}" ;;
+        --hosts) shift; LISTA="${1:?Falta el valor de --hosts}"
+                 IFS=',' read -r -a ITEMS <<< "$LISTA"
+                 for X in "${ITEMS[@]}"; do
+                     X="${X#"${X%%[![:space:]]*}"}"; X="${X%"${X##*[![:space:]]}"}"   # solo los extremos
+                     [ -n "$X" ] || continue
+                     if [[ "$X" =~ ^[0-9.]+$ ]]; then agregar_ip "$X"; else agregar_host "$X"; fi
+                 done ;;
         --salida) shift; SALIDA="${1:?Falta el valor de --salida}" ;;
         --dias) shift; DIAS="${1:?Falta el valor de --dias}"
                 [[ "$DIAS" =~ ^[0-9]{1,4}$ ]] && [ "$DIAS" -ge 1 ] && [ "$DIAS" -le 3650 ] || error "--dias debe estar entre 1 y 3650." ;;
@@ -59,6 +79,8 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+# Nombre que se muestra en el certificado: el primer nombre propio, si lo hay.
+CN_SRV="${HOSTS[1]:-${HOSTS[0]}}"
 
 command -v openssl >/dev/null 2>&1 || { echo "[ERROR] No se encontró openssl." >&2; exit 1; }
 
@@ -111,7 +133,7 @@ distinguished_name = dn
 prompt = no
 [dn]
 O = Verificacion Vehicular Oaxaca
-CN = ${HOSTS[0]}
+CN = ${CN_SRV}
 EOF
 openssl req -new -key "$SRV_DIR/server.key" -config "$TMP/srv.cnf" -out "$TMP/server.csr"
 if ! SALIDA_FIRMA="$(openssl x509 -req -sha256 -days "$DIAS" -in "$TMP/server.csr" \
