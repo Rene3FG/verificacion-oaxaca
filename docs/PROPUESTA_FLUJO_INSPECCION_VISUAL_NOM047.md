@@ -134,20 +134,32 @@ Un rechazo visual no tiene lecturas ni potencia que imprimir; por eso la lectura
 
 ---
 
-## 7. Preguntas abiertas
+## 7. Preguntas abiertas y Resoluciones Oficiales
+
+### Resoluciones oficiales del cliente (Don Rubén, 2026-11-06)
+
+* **Campo 001 (Preguntas 3 y 4 RESUELTAS):**
+  - El campo 001 hace referencia al **Identificador del usuario del sistema**.
+  - **Certificado aprobatorio:** Se imprime el ID del usuario/técnico que realizó la prueba de emisiones.
+  - **Certificado de rechazo:** Se imprime el ID del técnico que haya provocado o emitido el rechazo (sea en inspección visual o al término de la prueba de emisiones).
+  - *Consecuencia técnica:* No se requiere inventar una clave externa; basta con tomar el `operador_id` correspondiente en la proyección del certificado.
+* **Inspección visual en el sistema real (Pregunta 1):**
+  - Don Rubén confirmó que en el sistema actual que opera en campo, dentro del módulo de captura de datos como último paso, se integra la calificación de la inspección visual (Bueno / Malo).
+  - Una vez terminada la captura, si aprueba la visual, se continúa con las demás pruebas (OBD y emisiones gasolina/diésel); si reprueba, es rechazo directo.
+  - *Consecuencia técnica:* Esto ratifica plenamente la **Opción A** (mover la inspección visual a la estación de Captura). Solo queda la confirmación de Luis sobre la definición formal del texto.
+
+---
+
+### Preguntas aún en curso
 
 Para el cliente, vía Luis:
 
-1. ¿"Antes de terminar la captura" significa antes de **confirmar los datos del vehículo** (Opción B) o antes de que el expediente **salga de la caseta hacia Prueba** (Opción A)?
-2. ¿Qué plantilla imprime un rechazo visual y uno por emisiones? (sección 6)
-3. ¿El ID del técnico es una clave nueva por usuario o es su usuario del sistema?
-4. Si la inspección visual y la prueba las hacen técnicos distintos, ¿cuál va en el campo 001?
+1. ¿Qué plantilla física imprime un rechazo visual y uno por emisiones? (sección 6: si se usan plantillas aprobadas/rechazadas o formato `RECHAZO.doc`)
 
 Para René:
 
-1. ¿Prefiere la Opción A o la B?
+1. Ratificación de la Opción A para inicio de implementación.
 2. ¿La estación de Prueba debe seguir pudiendo inspeccionar durante la transición?
-3. ¿Dónde se agrega `clave_tecnico`: migración propia o dentro de la próxima?
 
 ---
 
