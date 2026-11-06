@@ -26,7 +26,7 @@ Sistema de control y certificación de emisiones vehiculares del Estado de Oaxac
 ## 2. Comandos Clave
 
 ```powershell
-# Pruebas de Frontend (Vitest: 11 suites, 397 tests pasando al 100%)
+# Pruebas de Frontend (Vitest: 11 suites, 401 tests pasando al 100%)
 npm --prefix frontend test
 
 # Compilación de Producción de Frontend (0 errores, 694 módulos)
@@ -35,7 +35,7 @@ npm --prefix frontend run build
 # Prueba de humo del ciclo vehicular completo (requiere backend, Postgres y Redis arriba)
 node scripts/smoke_e2e_flujo.mjs
 
-# Pruebas de Backend (Pytest: 468 tests pasando al 100%)
+# Pruebas de Backend (Pytest: 519 tests pasando al 100%)
 # Requiere contenedores Postgres/Redis arriba y DLLs de WeasyPrint en PATH
 $env:WEASYPRINT_DLL_DIRECTORIES = "C:\msys64\ucrt64\bin;C:\msys64\mingw64\bin"
 cd backend; .venv\Scripts\activate; python -m pytest -q
@@ -62,15 +62,18 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 
 ## 4. Estado Actual (Working State)
 
-- **Backend:** 468/468 pruebas aprobadas. 
+- **Backend:** 519/519 pruebas aprobadas (parche de René 2026-11-04; migraciones `c8d2e6f1a3b7` y `d9e3f7a2b4c8`, head `d9e3f7a2b4c8`).
   - Seguridad X1 (bloqueo 429 tras 5 fallos), X2 (timeout 30 min inactividad), X6 (complejidad de contraseñas).
+  - Endurecimiento X1/X2/X4/X5/X6 (2026-11-04): tope de fallos por IP (`LOGIN_MAX_INTENTOS_IP`) y bcrypt contra hash ficticio (X1-a/c), IP desde `X-Real-IP` (X1-e), vida máxima de sesión `SESION_DURACION_MAX_H` y cierre de sesiones al cambiar permisos o contraseña (X2-a/b/c), `/docs` apagado con `APP_ENV=production` (X4-d), seeds bloqueados en producción (X5-b), contraseñas con palabras conocidas/leetspeak rechazadas (X6-a). Pendientes: X1-b, X1-d, X2-d, X2-e, X5-e, X6-b, X6-c (ver `docs/RESPUESTA_RENE_2026-11-04.md`).
+  - X7-c CERRADO: auditoría de acciones administrativas en `event_log` (usuarios, permisos, parámetros, equipos, folios) vía `app/services/auditoria_admin.py`; eventos sin expediente solo con `modulo = 'administracion'`, no se encolan a `sync_outbox`.
+  - Campo 001: `clave_tecnico` en `cat_usuarios` (catálogo, opcional y única; editable en `AdministracionPanel.vue`). Aún no se imprime en el certificado (pendiente decisión NOM-047 Opción A/B).
   - Incidencias F1/F2 (`ERROR_INTEGRACION` y reintento explícito), F9 (lotes de sync visibles) y F4 (`cat_equipos` y resolución por estación).
   - Despliegue D1–D3 (Dockerfiles prod + Nginx) y CI D9 (`.github/workflows/ci.yml`).
   - Bloqueo B1 / HU-070 RESUELTO: layout `_LAYOUT_RECHAZO` integrado en `certificado.py` con `fecha_limite` y parámetro configurable `certificado_rechazo_dias_vigencia`.
   - HU-007 RESUELTO: `LoginView.vue` renderiza `permisos_asignados` en acceso denegado (Estado B).
   - Operaciones D4–D8: `scripts/respaldo.sh`/`restaurar.sh` (Linux), `backup_db.*`/`restore_db.*` (PowerShell), `python -m app.bootstrap_prod` (datos de arranque), rotación de logs en `docker-compose.prod.yml`, `README.md`. La estación del equipo se fija con `?estacion=NOMBRE` en la URL (guardado en `localStorage`). Detalle en `docs/HISTORIAL_DETALLADO_PROYECTO.md`.
   - Clarificaciones normativas NOM-047 (2026-10-30): B4 cerrado (operación 100% offline confirmada), B7/Q1 aclarado (Inspección Visual antes de cerrar captura; si falla, rechazo directo sin emisiones; OBD antes de emisiones), B10(b) cerrado (001 es ID de técnico). Plantillas únicas para aprobados y rechazados por confirmar (choca con `_LAYOUT_RECHAZO`); ver `docs/PROPUESTA_FLUJO_INSPECCION_VISUAL_NOM047.md`.
-- **Frontend:** 397/397 pruebas aprobadas en Vitest (11 suites: `session`, `TopAppBar`, `ExpedienteHeader`, `format`, `estado`, `ImpresionView`, `LoginView`, `CapturaView`, `PruebaView`, `SupervisorView` con 110 pruebas incluyendo equipos, `AdministracionPanel`; 100% de componentes cubiertos; 1 `it.fails` documenta un defecto de `session.js`).
+- **Frontend:** 401/401 pruebas aprobadas en Vitest (11 suites: `session`, `TopAppBar`, `ExpedienteHeader`, `format`, `estado`, `ImpresionView`, `LoginView`, `CapturaView`, `PruebaView`, `SupervisorView` con 111 pruebas incluyendo equipos, `AdministracionPanel`; 100% de componentes cubiertos; 1 `it.fails` documenta un defecto de `session.js`).
 - **Build de producción:** 694 módulos compilados limpiamente en Vite (0 errores).
 
 ---
