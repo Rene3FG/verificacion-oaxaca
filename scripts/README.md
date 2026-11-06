@@ -13,7 +13,8 @@ Este directorio contiene las herramientas ejecutables para cumplir con la polít
 | `backup_db.ps1` | Windows / PowerShell | Script equivalente para entornos de prueba y desarrollo local. |
 | `restore_db.ps1` | Windows / PowerShell | Script equivalente de restauración para Windows / PowerShell. |
 | `respaldo.sh` / `restaurar.sh` | Linux | Variante de respaldo y restauración con `pg_dump` comprimido y confirmación explícita (ver `README.md` de la raíz). |
-| `smoke_e2e_flujo.mjs` | Node.js 18+ (cualquier SO) | Prueba de humo del ciclo vehicular completo contra la API local. Ver sección 4. |
+| `smoke_e2e_flujo.mjs` | Node.js 18+ (cualquier SO) | Prueba de humo del ciclo vehicular completo contra la API local. Ver sección 4.1. |
+| `smoke_e2e_ui.mjs` | Node.js 18+ (Puppeteer-core / Chrome / Edge) | Prueba de humo E2E de interfaz en navegador headless (cubre las 5 vistas). Ver sección 4.2. |
 | `desbloquear_usuario.sh` / `.ps1` | Linux / Windows | Soporte: desbloquea a un usuario bloqueado por intentos fallidos de login (X1). Ver sección 5. |
 | `generar_certificados.sh` | Linux, o Windows con Git Bash o WSL | Genera la CA local y el certificado TLS del servidor (X3). Ver sección 6. |
 
@@ -63,7 +64,9 @@ sudo crontab -e
 
 ---
 
-## 4. Prueba de humo del ciclo vehicular (`smoke_e2e_flujo.mjs`)
+## 4. Pruebas de Humo E2E (PENDIENTES Q2)
+
+### 4.1 Ciclo vehicular por API (`smoke_e2e_flujo.mjs`)
 
 Recorre el ciclo completo contra la API local y confirma el estado del expediente después de cada paso, hasta `IMPRESO`. Sirve para comprobar, tras un despliegue o un cambio grande, que Captura, Prueba y Impresión Central siguen conectadas entre sí. Usa solo `fetch` nativo (Node.js 18 o superior) y no instala dependencias.
 
@@ -99,6 +102,31 @@ node scripts\smoke_e2e_flujo.mjs
 | `SMOKE_TIPO_CERTIFICADO` / `SMOKE_TIPO_VERIFICACION` | `PARTICULAR` / `ORDINARIA` | Tipo de certificado y de verificación a usar. |
 
 > **Datos que deja:** cada corrida crea un expediente `PRU-…` en `IMPRESO` y consume un folio. Úsalo en desarrollo o en un ambiente de pruebas, no en producción. Tras 5 contraseñas incorrectas seguidas el backend bloquea al usuario 15 minutos (X1); el script no reintenta logins fallidos.
+
+---
+
+### 4.2 Interfaz de usuario en navegador (`smoke_e2e_ui.mjs`)
+
+Automatiza la navegación e interacción real en navegador headless (Chrome o Edge) cubriendo las 5 pantallas del sistema mediante `puppeteer-core`. Valida:
+
+1. Detección automática de la estación en `LoginView` y el título institucional.
+2. Manejo visual y mensaje de error ante credenciales incorrectas.
+3. Cambio dinámico de estación mediante parámetro `?estacion=CAPTURA-REFORMA-L1`.
+4. Inicio de sesión y redirección a `CapturaView`.
+5. Formulario de placa y creación reactiva de un expediente en Captura.
+6. Cambio a `PRUEBA-REFORMA-L1`, login y visualización de cola en `PruebaView`.
+7. Cambio a `IMPRESION-REFORMA-01`, login, filtros rápidos y cola en `ImpresionView`.
+8. Login de supervisor y visualización de las 5 pestañas de `SupervisorView` (Monitor, Errores y Reintentos, Reimpresión, Auditoría y Administración).
+
+**Uso:**
+```powershell
+# Requiere el frontend y el backend levantados
+node scripts\smoke_e2e_ui.mjs
+
+# Contra otra URL de frontend
+$env:APP_URL = "http://localhost:5173"
+node scripts\smoke_e2e_ui.mjs
+```
 
 ---
 

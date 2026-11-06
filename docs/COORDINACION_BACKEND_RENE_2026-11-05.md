@@ -15,7 +15,7 @@
 | 1 | Conocer el cambio de despliegue: sin certificados, `docker compose up` ya no arranca | Aviso | — | Sección 2 |
 | 2 | Elegir cómo registrar la auditoría administrativa (`event_log` nullable o `admin_event_logs`) | **Decisión** | — | 3.1 |
 | 3 | Elegir la Opción A o B de la inspección visual (NOM-047) | **Decisión** | — | 4 |
-| 4 | Definir cómo se guarda el ID del técnico (campo 001 del certificado) | **Decisión** | — | 4.3 |
+| 4 | Campo 001 del certificado: tomar el técnico desde `operador_id` (ya definido por el cliente; confirmar que se imprime el `username`) | Backend | Bajo | 4.3 |
 | 5 | Endpoint de desbloqueo `POST /api/usuarios/{id}/desbloquear` | Backend | Bajo a medio | 3.2 |
 | 6 | IP real en `access_events` y bloqueo por (usuario, IP) | Backend | Medio | 3.3 |
 | 7 | Vencimiento absoluto de sesión | Backend | Bajo | 3.4 |
@@ -159,17 +159,16 @@ Revisé `state_machine.py` y **casi todo existe**: `INSPECCION_VISUAL_RECHAZADA`
 
 **Mi parte cuando decidas:** mover a `CapturaView.test.js` las 7 pruebas del bloque de inspección y las 3 de avisos que llaman a `registrarInspeccion` (hoy en `PruebaView.test.js`), y ajustar la matriz de trazabilidad. **No toco** `CapturaView.vue`, `PruebaView.vue` ni `backend/**`.
 
-### 4.3 Campo 001 = ID del técnico: migración de `clave_tecnico`
+### 4.3 Campo 001 = ID del usuario (RESUELTO por el cliente el 2026-11-06)
 
-Hoy el 001 sale del parámetro fijo `certificado_numero_equipo` (`certificado.py`, clave de layout `equipo_numero`), igual para todos. `cat_usuarios` no tiene ningún campo para el técnico.
+Don Rubén (el cliente) confirmó: el 001 es el **identificador del usuario del sistema**. En un certificado aprobatorio va el técnico que hizo la prueba de emisiones; en uno de rechazo, el técnico que emitió el rechazo (inspección visual o fin de la prueba de emisiones). Esto respalda además la **Opción A**: en su sistema actual la inspección visual es el último paso de la captura.
 
-**Propuesta.**
-1. Columna `clave_tecnico` en `cat_usuarios` (texto corto, opcional, con índice único parcial donde no sea nula), con su migración, y en los esquemas `UsuarioCreate`, `UsuarioUpdate` y `UsuarioRead`.
-2. Capturarla en el alta y la edición de usuarios (`AdministracionPanel.vue`, campo "Clave de técnico").
-3. Resolver el técnico **al generar la proyección del certificado**, no al imprimir: `operador_id` del `ResultadoPrueba` si existe y, si no (rechazo visual), el de `InspeccionVisual`. Guardar `tecnico_clave` en `certificate_projection_json`, que se fija una sola vez, para que una reimpresión conserve el mismo técnico. En `certificado.py`, imprimir ese valor en `equipo_numero`.
-4. Si el usuario no tiene clave, recomiendo **bloquear la impresión con un 409** que pida capturarla (como `campos_obligatorios_faltantes`), en lugar de usar el parámetro como respaldo: imprimir un número equivocado en un certificado oficial es peor que detener la impresión.
+Hoy el 001 sale del parámetro fijo `certificado_numero_equipo` (`certificado.py`, clave de layout `equipo_numero`), igual para todos. Con la respuesta del cliente **ya no hace falta la columna `clave_tecnico`** que proponía este reporte: se resuelve con datos existentes.
 
-**Decisión que necesito:** si la clave es un campo nuevo por usuario o es el propio nombre de usuario, y qué hacer si la inspección y la prueba las hacen técnicos distintos (por defecto propongo el de la prueba, y el de la inspección en los rechazos visuales). Ambas preguntas van también al cliente.
+**Propuesta simplificada.**
+1. Al generar la proyección del certificado (no al imprimir), tomar el `operador_id` del `ResultadoPrueba` (aprobado o rechazo por emisiones) o el de `InspeccionVisual` (rechazo visual), y guardar el técnico en `certificate_projection_json`, que se fija una sola vez, para que una reimpresión conserve el mismo técnico.
+2. Imprimir ese valor en `equipo_numero`.
+3. **Detalle a decidir:** `operador_id` es un UUID y no cabe en el campo. Lo que se imprimiría es el `username` del usuario (hasta 60 caracteres), así que conviene confirmar con el cliente el formato y la longitud esperados; si prefiere un código corto tipo `001`, entonces sí haría falta un campo dedicado. Si el usuario no tiene un valor imprimible, recomiendo bloquear la impresión con un 409 en lugar de usar el parámetro fijo.
 
 **Otra pregunta abierta con el cliente:** el cliente dice que las plantillas son las mismas para aprobados y rechazados, pero `_LAYOUT_RECHAZO` sale de `RECHAZO.doc`, que el propio cliente entregó el 22 de octubre (sin holograma y con fecha límite). No conviene tocar `_LAYOUT_RECHAZO` hasta aclarar cuál prevalece. Un rechazo visual no tiene lecturas ni potencia que imprimir, así que lo más coherente parece que solo el rechazo por emisiones use la plantilla común, pero hay que confirmarlo.
 
@@ -265,7 +264,7 @@ function resolverDeviceIdentifier() {
 
 1. **Auditoría administrativa:** `event_log.verificacion_id` nullable o tabla `admin_event_logs` (3.1).
 2. **Inspección visual:** Opción A u Opción B (4.2).
-3. **Clave del técnico:** campo nuevo `clave_tecnico` o el nombre de usuario, y qué técnico va en el 001 si inspección y prueba los hacen personas distintas (4.3).
+3. **Campo 001:** ya definido por el cliente (ID del usuario que hizo la prueba o emitió el rechazo). Solo confirmar que se imprime el `username` y no se necesita un código corto aparte (4.3).
 4. **`session.js`:** quién lo corrige (5).
 5. **Scripts de respaldo:** cuál juego queda como oficial, `respaldo.sh` y `restaurar.sh` o `backup_db.*` y `restore_db.*`.
 6. **Orden y tiempos:** qué de la lista de la sección 1 entra primero.

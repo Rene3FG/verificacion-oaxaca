@@ -108,7 +108,9 @@ La diferencia depende de una pregunta (sección 7, pregunta 1): qué significa "
 
 **Hoy:** `cargar_config_certificado` lee el parámetro `certificado_numero_equipo` (por defecto `001`) y `generar_pdf_certificado` lo imprime en la clave de layout `equipo_numero` de las tres copias.
 
-**Propuesta:**
+> **Actualización 2026-11-06:** el cliente confirmó que el 001 es el identificador del usuario (ver sección 7). Los puntos 1, 2 y 5 de abajo (columna `clave_tecnico`) **quedan sin efecto** salvo que el cliente pida un código corto distinto del `username`; los puntos 3 y 4 siguen vigentes, imprimiendo el `username` del usuario resuelto. Falta confirmar el formato a imprimir.
+
+**Propuesta original:**
 
 1. Agregar `clave_tecnico` (texto, opcional) a `cat_usuarios`, con su migración. No hay hoy ningún campo para eso.
 2. Capturarla en el alta y la edición de usuarios (`AdministracionPanel.vue`, campo "Clave de técnico").
