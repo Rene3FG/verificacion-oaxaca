@@ -15,7 +15,7 @@ La sección 3.3 de `PENDIENTES` se escribió el 2026-10-20, antes de que se impl
 |---|---|---|---|
 | X1 Intentos de login | Sin límite ni bloqueo | **Implementado** (429 tras 5 fallos, 15 min, `Retry-After`, reinicio tras éxito) | 5 |
 | X2 Caducidad de sesión | No caduca | **Implementado** (30 min de inactividad) | 6 |
-| X3 TLS | Sin TLS | **Implementado el 2026-11-04**; falta validarlo con Docker, un navegador y la CA en las estaciones | 2 (resueltas en configuración) |
+| X3 TLS | Sin TLS | **Implementado el 2026-11-04 y validado con `nginx -t` en Docker el 2026-11-05**; faltan probarlo con un navegador y la CA en las estaciones | 2 (resueltas en configuración) |
 | X4 CORS | Sin CORS | **Correcto por diseño** (mismo origen vía nginx) | 4 (endurecimiento) |
 | X5 Credenciales y puertos | Credenciales por defecto y puertos abiertos | **Producción bien** (BD y Redis no se publican); desarrollo y ejemplos con huecos | 6 |
 | X6 Política de contraseñas | Sin política | **Implementada** (bcrypt, composición, lista de comunes) | 4 (la lista de comunes es muy corta) |
@@ -23,7 +23,7 @@ La sección 3.3 de `PENDIENTES` se escribió el 2026-10-20, antes de que se impl
 
 ### Las cinco prioridades
 
-1. **X3: TLS en el propio compose. Implementado el 2026-11-04** (ver X3), pendiente de validar con Docker. Antes de eso, las contraseñas (cuerpo del login) y el identificador de sesión viajaban en claro por la red del verificentro; era el único hallazgo que clasifiqué como alto.
+1. **X3: TLS en el propio compose. Implementado el 2026-11-04 y validado con `nginx -t` en Docker el 2026-11-05** (ver X3); falta probarlo con un navegador. Antes de eso, las contraseñas (cuerpo del login) y el identificador de sesión viajaban en claro por la red del verificentro; era el único hallazgo que clasifiqué como alto.
 2. **Rastro de auditoría de las acciones administrativas.** Crear usuarios, restablecer contraseñas, otorgar permisos, cambiar parámetros, registrar folios y editar equipos **no dejan ningún registro** (0 escrituras de bitácora en esos cinco routers).
 3. **X1 + X6 juntos:** el bloqueo solo cuenta usuarios que existen y no hay límite por origen; y la política acepta `Password123`, `Oaxaca2026` o `Admin2026`. Combinados, favorecen el *password spraying*.
 4. **X5: contraseña de relleno pública y `seed` sin guarda.** `.env.prod.example` trae una contraseña conocida que el compose no obliga a cambiar, y `python -m app.seed` crea un supervisor con contraseña pública sin comprobar el entorno.

@@ -247,14 +247,16 @@ function resolverDeviceIdentifier() {
 - Un **handshake TLS real** con los certificados generados: conecta con TLS 1.3 con la CA instalada, rechaza un nombre ajeno al certificado, desconfía si la estación no tiene la CA y rechaza TLS 1.1.
 - El compose, con `docker compose config` (falla con mensaje claro sin `POSTGRES_PASSWORD`; publica 80 y 443).
 - **Validación de Nginx TLS con Docker (`nginx:1.27-alpine`):** `nginx -t` ejecutado con éxito (`syntax is ok / test is successful`) cargando certificados ECDSA y cabeceras de seguridad.
-- **Corrida E2E vehicular (`scripts/smoke_e2e_flujo.mjs`) contra el backend real en Docker:** 17 de 17 pasos aprobados en 9.6 s, incluyendo generación real del PDF con WeasyPrint en el contenedor y expediente en estado final `IMPRESO`.
+- **Corrida E2E vehicular (`scripts/smoke_e2e_flujo.mjs`) contra el backend real en Docker:** 17 de 17 pasos aprobados en 9.6 s, incluyendo generación real del PDF con WeasyPrint en el contenedor y expediente en estado final `IMPRESO`. Recorre la **API**; no automatiza las pantallas.
+- **Comportamiento del nginx real, levantado solo en Docker (2026-11-05):** el puerto 80 redirige a HTTPS conservando la ruta; el desafío ACME no se redirige; las cabeceras de seguridad salen también en `/assets/` y en respuestas 404; no se publica la versión de nginx; y el límite de login activa un **429 en JSON con `detail` legible** tras la ráfaga, sin afectar a las demás rutas de `/api/`. Además, `nginx -t` falla como debe con una llave que no corresponde al certificado y sin la carpeta de certificados.
 - Los scripts de desbloqueo, con un `docker` simulado.
 - La corrección de `session.js`, con una réplica en Node.
 - Frontend: 397 de 397 pruebas en Vitest. El backend (468 pruebas) es el recuento que ustedes reportaron; **no lo volví a ejecutar**.
 
 **No probado todavía:**
 - Probar con un navegador con la CA instalada y pasar la CSP de modo reporte a modo enforcing.
-- Los scripts de soporte de desbloqueo en caliente contra un Postgres interactivo de producción.
+- Los scripts de desbloqueo contra un Postgres real **de pruebas** (no se prueban contra producción: modifican datos).
+- Un E2E de interfaz con navegador (el script de humo solo recorre la API).
 - Let's Encrypt en el VPS: documentado como "sin probar".
 
 ---
