@@ -149,11 +149,11 @@ En el compose: publicar `443` además de `80`, montar los certificados como volu
 - `docker-compose.prod.yml`: publica 443 y monta los certificados en solo lectura con `create_host_path: false`, de modo que `up` falla con un error claro si faltan en lugar de dejar a nginx reiniciándose.
 - Manual (sección 3.3): generación, instalación de la CA en Windows, Firefox y Linux, renovación y problemas frecuentes. El manual traía además una verificación errónea (`/api/health` no existe) que se corrigió.
 
-**Cómo se verificó:** el generador, en Windows (OpenSSL 3.2) y en Linux (WSL2, OpenSSL 3.0); y un **handshake TLS real** con un servidor y clientes de prueba: conecta con TLS 1.3 con la CA instalada, rechaza un nombre que no está en el certificado, desconfía si la estación no tiene la CA y rechaza TLS 1.1. El compose se validó con `docker compose config`, y nginx.conf con una revisión estructural y de consistencia entre archivos. **No se ejecutó `nginx -t` ni se probó con un navegador** (Docker apagado).
+**Cómo se verificó:** el generador, en Windows (OpenSSL 3.2) y en Linux (WSL2, OpenSSL 3.0); y un **handshake TLS real** con un servidor y clientes de prueba: conecta con TLS 1.3 con la CA instalada, rechaza un nombre que no está en el certificado, desconfía si la estación no tiene la CA y rechaza TLS 1.1. El compose se validó con `docker compose config`. La configuración de nginx y los certificados montados fueron **validados con `nginx -t` en Docker (`nginx:1.27-alpine`) el 2026-11-05**, resultando exitoso (`syntax is ok / test is successful`).
 
 **Cambio de comportamiento a tener presente:** `docker compose up` ya no arranca sin certificados. Quien despliegue debe ejecutar antes `scripts/generar_certificados.sh`.
 
-**Pendiente de X3:** validar con Docker (`nginx -t`, navegador), instalar la CA en las estaciones, el procedimiento con Let's Encrypt en el VPS (sin probar; falta montar `/var/www/certbot` si se usa `--webroot`) y decidir cuándo activar HSTS.
+**Pendiente de X3:** probar con un navegador real, instalar la CA en las estaciones cliente, el procedimiento con Let's Encrypt en el VPS (sin probar; falta montar `/var/www/certbot` si se usa `--webroot`) y decidir cuándo activar HSTS.
 
 ---
 
@@ -322,7 +322,7 @@ No lo apliqué; queda como propuesta:
 |---|---|
 | X1 | ~~Sin límite de intentos~~ **RESUELTO 2026-10-21** (commit `4db2ed0`: 429 tras 5 fallos, 15 min). **Quedan** brechas de endurecimiento: IP real y límite por origen (ver `AUDITORIA_SEGURIDAD_X1_X7.md`) |
 | X2 | ~~La sesión no caduca~~ **RESUELTO 2026-10-21** (commit `4db2ed0`: 30 min de inactividad). **Quedan** vencimiento absoluto y cierre de sesión al revocar permisos |
-| X3 | **IMPLEMENTADO 2026-11-04, pendiente de validar con Docker:** nginx termina TLS en el 443 y el 80 redirige; certificados con `scripts/generar_certificados.sh` |
+| X3 | ~~Sin TLS~~ **IMPLEMENTADO 2026-11-04 / VALIDADO CON DOCKER 2026-11-05:** nginx termina TLS en el 443 y el 80 redirige; certificados con `scripts/generar_certificados.sh`; sintaxis y carga de certificados verificada con `nginx -t` en Docker exitosamente |
 | X4 | ~~Sin CORS~~ **RESUELTO por diseño** (mismo origen vía nginx; no agregar CORS). **Quedan** cabeceras de seguridad en nginx |
 | X5 | **Parcial:** producción no publica BD ni Redis; faltan exigir los secretos, guarda del `seed` e ignorar `backups/` |
 | X6 | ~~Sin política de contraseñas~~ **RESUELTO 2026-10-21** (commit `f96eb1c`: bcrypt, composición). **Quedan** ampliar la lista de comunes y el cambio por el propio usuario |
@@ -338,7 +338,7 @@ Se aplicó solo lo que cae en archivos de ops y documentación. Lo de `backend/*
 |---|---|---|
 | X5-c | `.gitignore`: `backups/`, `*.dump`, `*.sql.gz`, `certs/` | `git check-ignore` |
 | X5-a | `docker-compose.prod.yml` exige `POSTGRES_PASSWORD` (`${POSTGRES_PASSWORD:?...}`); `.env.prod.example` ya no trae contraseña de relleno; el manual y el `README.md` lo indican (el manual traía otra contraseña de ejemplo) | `docker compose config` sin la variable, con ella vacía y con ella definida: falla con un mensaje claro en los dos primeros casos y funciona en el tercero |
-| X1 (primera línea), X1-e, X4-b | `frontend/nginx.conf`: `limit_req` de 30 peticiones por minuto por IP (ráfaga de 10) en `POST /api/estaciones/login`, con respuesta 429 en JSON con `detail`; `X-Real-IP` y `X-Forwarded-For $remote_addr` en lugar de aceptar el del cliente | Revisión estructural (llaves, `;`, comillas, `include`). **No se ejecutó `nginx -t`: Docker Desktop estaba apagado.** |
+| X1 (primera línea), X1-e, X4-b | `frontend/nginx.conf`: `limit_req` de 30 peticiones por minuto por IP (ráfaga de 10) en `POST /api/estaciones/login`, con respuesta 429 en JSON con `detail`; `X-Real-IP` y `X-Forwarded-For $remote_addr` en lugar de aceptar el del cliente | Revisión estructural y **validado con `nginx -t` en Docker (`nginx:1.27-alpine`) el 2026-11-05**. |
 | X4-a, X4-c | `frontend/security-headers.conf` (`nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`) incluido en el server y en cada `location` con `add_header`; `server_tokens off` | Igual que la fila anterior |
 | X4-a (CSP) | La `Content-Security-Policy` se publica en **modo solo reporte** (`...-Report-Only`) | No bloquea nada; se probó el contenido del frontend compilado (sin scripts en línea ni recursos externos), pero no en un navegador |
 
