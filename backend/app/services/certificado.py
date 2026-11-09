@@ -375,7 +375,9 @@ def html_certificado(
         "semestre": _txt(_texto_semestre(proyeccion.get("semestre"), momento_generado.year)),
         "cvv_linea": _txt(f"{cfg['clave_centro']}  Línea: {verificacion.linea_id}"),
         "equipo_marca": _txt(cfg["marca_equipo"]),
-        "equipo_numero": _txt(cfg["numero_equipo"]),
+        # Campo 001: técnico congelado en la proyección; el parámetro fijo
+        # solo queda para expedientes sin operador registrado.
+        "equipo_numero": _txt(proyeccion.get("technician_id") or cfg["numero_equipo"]),
         "certificado_anterior": _txt(getattr(verificacion, "certificado_anterior", None)),
         "multa": _txt(getattr(verificacion, "folio_multa", None)),
         "fecha": fin.strftime("%d/%m/%Y"),

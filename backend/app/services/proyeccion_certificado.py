@@ -91,6 +91,7 @@ def generar_proyeccion_certificado(
     resultado_prueba: ResultadoPrueba | None,
     *,
     fecha_final_prorroga: datetime.date | None = None,
+    tecnico: str | None = None,
 ) -> dict:
     """`resultado_prueba` es `None` cuando el rechazo viene de inspección
     visual (nunca pasó por Prueba) — el contrato (sección 4) no define un
@@ -142,5 +143,8 @@ def generar_proyeccion_certificado(
         ),
         "fields": fields,
         "evaluation_result": evaluation_result,
+        # Campo 001 (ver app.services.tecnico_certificado). Agregado al
+        # SCHEMA del contrato v1 el 2026-11-09 por definición del cliente.
+        "technician_id": tecnico,
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }

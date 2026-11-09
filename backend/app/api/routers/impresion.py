@@ -40,6 +40,7 @@ from app.services.folio_inventario import SinFolioDisponible, asignar_siguiente_
 from app.services.impresora import imprimir as imprimir_en_impresora
 from app.services.paquete_documental import html_resultados, pdf_de_html, pdf_paquete
 from app.services.proyeccion_certificado import LayoutSinMapeo, generar_proyeccion_certificado
+from app.services.tecnico_certificado import resolver_tecnico
 from app.services.semestre import obtener_prorroga_activa
 from app.services.sync import registrar_evento_con_sync
 
@@ -168,11 +169,13 @@ async def _generar_y_fijar_proyeccion(
 
     resultado_prueba = await _ultimo_resultado_prueba(db, verificacion.id)
     prorroga = await obtener_prorroga_activa(db)
+    tecnico = await resolver_tecnico(db, verificacion, resultado_prueba)
     try:
         proyeccion = generar_proyeccion_certificado(
             verificacion,
             resultado_prueba,
             fecha_final_prorroga=prorroga.fecha_final if prorroga else None,
+            tecnico=tecnico,
         )
     except LayoutSinMapeo as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -377,11 +380,13 @@ async def vista_previa_certificado(
     # producirá la impresión real.
     resultado_prueba = await _ultimo_resultado_prueba(db, verificacion.id)
     prorroga = await obtener_prorroga_activa(db)
+    tecnico = await resolver_tecnico(db, verificacion, resultado_prueba)
     try:
         proyeccion = generar_proyeccion_certificado(
             verificacion,
             resultado_prueba,
             fecha_final_prorroga=prorroga.fecha_final if prorroga else None,
+            tecnico=tecnico,
         )
     except LayoutSinMapeo as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
