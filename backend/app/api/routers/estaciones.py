@@ -246,11 +246,17 @@ async def iniciar_sesion(
             headers={"Retry-After": str(espera_ip)},
         )
 
+    # X1-d: serializa los intentos del mismo usuario hasta el commit, para
+    # que peticiones simultáneas no cuenten fallos en paralelo y rebasen el
+    # límite. Se libera sola al terminar la transacción.
+    nombre = payload.username.strip().lower()
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext("login:" + nombre))))
+
     usuario = (
         await db.execute(
             # X6-c: el usuario no distingue mayúsculas.
             select(CatUsuario).where(
-                func.lower(CatUsuario.username) == payload.username.strip().lower()
+                func.lower(CatUsuario.username) == nombre
             )
         )
     ).scalar_one_or_none()
