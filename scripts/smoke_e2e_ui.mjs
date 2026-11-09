@@ -230,7 +230,8 @@ async function main() {
   await pSupervisor.setViewport({ width: 1280, height: 800 });
 
   await paso("Iniciar sesión como supervisor y acceder a SupervisorView", async () => {
-    await pSupervisor.goto(`${config.baseUrl}/?estacion=${config.estaciones.impresion}`, {
+    // El seed solo da a supervisor1 permiso (con supervisión) en Captura.
+    await pSupervisor.goto(`${config.baseUrl}/?estacion=${config.estaciones.captura}`, {
       waitUntil: "networkidle0",
     });
     await loginEnEstacion(pSupervisor, config.supervisor, config.passwordSupervisor);

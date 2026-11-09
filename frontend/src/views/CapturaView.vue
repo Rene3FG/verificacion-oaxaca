@@ -781,7 +781,9 @@ onMounted(cargarExpedientesEnCurso);
         </v-card-text>
       </v-card>
 
-      <v-card class="rounded-institucional-lg elevation-institucional-0" variant="flat">
+      <v-card
+        v-if="expediente.estado !== 'INSPECCION_VISUAL_PENDIENTE'"
+        class="rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-text class="d-flex align-center ga-3 flex-wrap">
           <v-btn
             color="primary"
