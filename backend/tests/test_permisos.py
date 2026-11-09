@@ -1,7 +1,7 @@
 import uuid
 
 from app.models.enums import StationType
-from tests.conftest import crear_estacion, crear_permiso, crear_sesion_activa, crear_sesion_supervisor
+from tests.conftest import crear_estacion, crear_usuario, crear_permiso, crear_sesion_activa, crear_sesion_supervisor
 
 
 async def _sesion_supervisor(db_session, *, center_id: str = "OAX-01"):
@@ -26,7 +26,7 @@ async def test_listar_permisos_sin_supervisor_responde_403(client, db_session):
 
 async def test_crear_permiso_exitoso(client, db_session):
     sesion = await _sesion_supervisor(db_session)
-    nuevo_user_id = uuid.uuid4()
+    nuevo_user_id = (await crear_usuario(db_session)).id
     await db_session.commit()
 
     resp = await client.post(
@@ -51,7 +51,7 @@ async def test_crear_permiso_exitoso(client, db_session):
 
 async def test_crear_permiso_duplicado_responde_409(client, db_session):
     sesion = await _sesion_supervisor(db_session)
-    nuevo_user_id = uuid.uuid4()
+    nuevo_user_id = (await crear_usuario(db_session)).id
     await crear_permiso(
         db_session,
         user_id=nuevo_user_id,
@@ -151,3 +151,20 @@ async def test_listar_permisos_filtra_por_center_y_station_type(client, db_sessi
     body = resp.json()
     assert all(p["center_id"] == "OAX-01" and p["station_type"] == "prueba" for p in body)
     assert len(body) >= 1
+
+
+async def test_crear_permiso_usuario_inexistente_responde_404(client, db_session):
+    sesion = await _sesion_supervisor(db_session)
+    await db_session.commit()
+    resp = await client.post(
+        "/api/permisos",
+        json={
+            "user_id": str(uuid.uuid4()),
+            "station_type": "prueba",
+            "center_id": "OAX-01",
+            "line_id": 1,
+            "can_operate": True,
+        },
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 404

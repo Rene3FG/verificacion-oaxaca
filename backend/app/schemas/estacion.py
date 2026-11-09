@@ -21,6 +21,21 @@ class WorkstationRead(BaseModel):
     capacidad_dinamometro_kg: float | None
 
 
+class WorkstationPublica(BaseModel):
+    """Lo que ve el login antes de autenticarse (GET público
+    /api/estaciones/{device_identifier}): sin capacidad del dinamómetro ni
+    banderas internas."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    station_type: StationType
+    center_id: str
+    line_id: int | None
+    allowed_line_ids: list[int] | None
+
+
 class StationSessionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -39,6 +54,8 @@ class StationSessionRead(BaseModel):
     # para mostrar/ocultar la pantalla de Supervisor sin depender de a qué
     # tipo de estación física se conectó la sesión.
     can_supervise: bool = False
+    # X6-b: el login avisa que hay que cambiar la contraseña antes de operar.
+    must_change_password: bool = False
 
 
 class WorkstationCreate(BaseModel):

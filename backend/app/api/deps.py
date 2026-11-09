@@ -16,6 +16,7 @@ from app.models.workstation import StationSession, UserStationPermission, Workst
 __all__ = [
     "get_db",
     "get_current_session",
+    "get_session_cambio_password",
     "SessionContext",
     "assert_linea_permitida",
     "requiere_estacion",
@@ -49,9 +50,28 @@ class SessionContext:
         return {self.line_id} if self.line_id is not None else set()
 
 
+MENSAJE_CAMBIO_PASSWORD = "Debes cambiar tu contraseña antes de continuar."
+
+
 async def get_current_session(
     x_session_id: Annotated[str | None, Header(alias="X-Session-Id")] = None,
     db: AsyncSession = Depends(get_db),
+) -> SessionContext:
+    return await _resolver_sesion(x_session_id, db, permitir_cambio_pendiente=False)
+
+
+async def get_session_cambio_password(
+    x_session_id: Annotated[str | None, Header(alias="X-Session-Id")] = None,
+    db: AsyncSession = Depends(get_db),
+) -> SessionContext:
+    """Igual que `get_current_session` pero admite a un usuario con
+    `must_change_password`: solo la usan cambiar la propia contraseña y
+    cerrar sesión."""
+    return await _resolver_sesion(x_session_id, db, permitir_cambio_pendiente=True)
+
+
+async def _resolver_sesion(
+    x_session_id: str | None, db: AsyncSession, *, permitir_cambio_pendiente: bool
 ) -> SessionContext:
     # Sin encabezado (p. ej. la pantalla siguió abierta tras cerrar sesión)
     # o con un valor que no es UUID: es falta de sesión, no un error de
@@ -100,9 +120,13 @@ async def get_current_session(
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
 
     # Un usuario desactivado pierde acceso aunque su sesión siga "activa".
+    # X2-e: una sesión cuyo usuario ya no existe falla cerrado.
     usuario = await db.get(CatUsuario, sesion.user_id)
-    if usuario is not None and not usuario.is_active:
+    if usuario is None or not usuario.is_active:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    # X6-b: con una contraseña fijada por el supervisor solo se puede cambiar.
+    if usuario.must_change_password and not permitir_cambio_pendiente:
+        raise HTTPException(status_code=403, detail=MENSAJE_CAMBIO_PASSWORD)
 
     return SessionContext(
         session_id=sesion.id,

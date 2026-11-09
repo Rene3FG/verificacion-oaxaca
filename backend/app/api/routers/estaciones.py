@@ -8,13 +8,19 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.api.deps import SessionContext, get_current_session, get_db, requiere_supervisor
+from app.api.deps import (
+    SessionContext,
+    get_db,
+    get_session_cambio_password,
+    requiere_supervisor,
+)
 from app.models.access_event import AccessEvent
 from app.models.enums import AccessEventResultado, StationType
 from app.models.usuario import CatUsuario
 from app.models.workstation import StationSession, UserStationPermission, Workstation
 from app.schemas.estacion import (
     StationSessionRead,
+    WorkstationPublica,
     WorkstationCreate,
     WorkstationRead,
     WorkstationUpdate,
@@ -156,7 +162,7 @@ async def actualizar_estacion(
     return estacion
 
 
-@router.get("/{device_identifier}", response_model=WorkstationRead)
+@router.get("/{device_identifier}", response_model=WorkstationPublica)
 async def detectar_estacion(
     device_identifier: str, db: AsyncSession = Depends(get_db)
 ) -> Workstation:
@@ -191,11 +197,14 @@ class LoginRequest(BaseModel):
 async def _segundos_de_bloqueo(db: AsyncSession, user_id: uuid.UUID) -> int:
     """Segundos que le faltan al usuario para poder volver a intentar (0 si
     no está bloqueado)."""
+    # Un login correcto o un desbloqueo del supervisor reinician la cuenta.
     ultimo_ok = (
         select(func.max(AccessEvent.created_at))
         .where(
             AccessEvent.user_id == user_id,
-            AccessEvent.resultado == AccessEventResultado.PERMITIDO,
+            AccessEvent.resultado.in_(
+                (AccessEventResultado.PERMITIDO, AccessEventResultado.DESBLOQUEO)
+            ),
         )
         .scalar_subquery()
     )
@@ -239,7 +248,10 @@ async def iniciar_sesion(
 
     usuario = (
         await db.execute(
-            select(CatUsuario).where(CatUsuario.username == payload.username)
+            # X6-c: el usuario no distingue mayúsculas.
+            select(CatUsuario).where(
+                func.lower(CatUsuario.username) == payload.username.strip().lower()
+            )
         )
     ).scalar_one_or_none()
 
@@ -364,13 +376,14 @@ async def iniciar_sesion(
     await db.commit()
     await db.refresh(sesion)
     sesion.can_supervise = permiso_valido.can_supervise
+    sesion.must_change_password = usuario.must_change_password
     return sesion
 
 
 @router.post("/logout/{session_id}")
 async def cerrar_sesion(
     session_id: uuid.UUID,
-    session: SessionContext = Depends(get_current_session),
+    session: SessionContext = Depends(get_session_cambio_password),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Hallazgo de la revisión del PR #1 (2026-09-22): este endpoint no

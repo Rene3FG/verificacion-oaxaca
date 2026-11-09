@@ -117,6 +117,17 @@ async def crear_estacion(
     return estacion
 
 
+_HASHES: dict[str, str] = {}
+
+
+def _hash_cacheado(password: str) -> str:
+    """bcrypt es lento a propósito; en pruebas se reutiliza el hash por
+    contraseña (verify_password funciona igual con un hash repetido)."""
+    if password not in _HASHES:
+        _HASHES[password] = hash_password(password)
+    return _HASHES[password]
+
+
 async def crear_usuario(
     db_session: AsyncSession,
     *,
@@ -126,7 +137,7 @@ async def crear_usuario(
 ) -> CatUsuario:
     usuario = CatUsuario(
         username=username or f"usuario-{uuid.uuid4().hex[:8]}",
-        password_hash=hash_password(password),
+        password_hash=_hash_cacheado(password),
         nombre_completo="Usuario de prueba",
         is_active=is_active,
     )
@@ -160,8 +171,12 @@ async def crear_permiso(
 async def crear_sesion_activa(
     db_session: AsyncSession, *, estacion: Workstation, user_id: uuid.UUID | None = None
 ) -> StationSession:
+    # X2-e: get_current_session rechaza sesiones de usuarios inexistentes,
+    # así que sin user_id explícito se crea un usuario real.
+    if user_id is None:
+        user_id = (await crear_usuario(db_session)).id
     sesion = StationSession(
-        user_id=user_id or uuid.uuid4(),
+        user_id=user_id,
         workstation_id=estacion.id,
         station_type=estacion.station_type,
         center_id=estacion.center_id,

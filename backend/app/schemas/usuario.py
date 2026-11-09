@@ -39,6 +39,7 @@ class UsuarioRead(BaseModel):
     nombre_completo: str
     is_active: bool
     clave_tecnico: str | None = None
+    must_change_password: bool = False
 
 
 class UsuarioCreate(BaseModel):
@@ -68,3 +69,12 @@ class UsuarioUpdate(BaseModel):
 
     _pw = field_validator("password")(_validar_bytes)
     _clave = field_validator("clave_tecnico")(_normalizar_clave_tecnico)
+
+
+class CambioPasswordPropio(BaseModel):
+    """X6-b: el propio usuario cambia su contraseña; exige la actual."""
+
+    password_actual: str = Field(min_length=1, max_length=100)
+    password_nueva: str = Field(min_length=8, max_length=100)
+
+    _pw = field_validator("password_nueva")(_validar_bytes)

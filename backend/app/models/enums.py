@@ -163,3 +163,5 @@ class SyncStatus(str, enum.Enum):
 class AccessEventResultado(str, enum.Enum):
     PERMITIDO = "PERMITIDO"
     DENEGADO = "DENEGADO"
+    # Un supervisor (o soporte) reinicia la cuenta de intentos fallidos.
+    DESBLOQUEO = "DESBLOQUEO"

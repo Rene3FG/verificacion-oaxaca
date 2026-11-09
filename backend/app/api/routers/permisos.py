@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionContext, get_db, requiere_supervisor
 from app.models.enums import StationType
+from app.models.usuario import CatUsuario
 from app.models.workstation import UserStationPermission
 from app.schemas.permiso import PermisoCreate, PermisoRead, PermisoUpdate
 from app.services.auditoria_admin import registrar_evento_admin
@@ -55,6 +56,11 @@ async def crear_permiso(
     """HU-121: administrar user_station_permissions desde la aplicación en
     vez de por base de datos directa. Evita duplicar la misma combinación
     (user_id, station_type, center_id, line_id)."""
+
+    # La tabla no tiene FK a cat_usuarios: sin esto se aceptaba un user_id
+    # inexistente.
+    if await db.get(CatUsuario, payload.user_id) is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     existente = await db.execute(
         select(UserStationPermission).where(
