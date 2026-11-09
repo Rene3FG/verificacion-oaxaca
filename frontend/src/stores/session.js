@@ -6,12 +6,21 @@ import { api } from "../api/client";
 //    equipo se configura una vez abriendo esa dirección), 2) lo guardado,
 // 3) VITE_DEVICE_IDENTIFIER de build (desarrollo), 4) un valor de ejemplo.
 function resolverDeviceIdentifier() {
+  let delUrl = null;
   try {
-    const delUrl = new URLSearchParams(window.location.search).get("estacion");
-    if (delUrl) {
+    delUrl = new URLSearchParams(window.location.search).get("estacion");
+  } catch {
+    // Sin acceso a la URL.
+  }
+  if (delUrl) {
+    try {
       localStorage.setItem("device_identifier", delUrl);
-      return delUrl;
+    } catch {
+      // Modo privado o cuota llena: se usa igualmente el valor de la URL.
     }
+    return delUrl;
+  }
+  try {
     const guardado = localStorage.getItem("device_identifier");
     if (guardado) return guardado;
   } catch {

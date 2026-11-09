@@ -216,8 +216,7 @@ describe("identificador de estación del equipo (?estacion=)", () => {
   // excepción salta el `return delUrl` y el identificador de la URL se descarta
   // en silencio: el equipo se identifica con el valor de build o el de ejemplo
   // (otra estación). Debería usar el de la URL aunque no pueda guardarlo.
-  // it.fails pasa mientras el defecto exista; quitar .fails al corregirlo.
-  it.fails("con ?estacion=NOMBRE y localStorage no disponible usa igualmente el valor de la URL", async () => {
+  it("con ?estacion=NOMBRE y localStorage no disponible usa igualmente el valor de la URL", async () => {
     const url = await detectarCon({
       search: "?estacion=CAPTURA-L2",
       env: "DEV-LOCAL-07",
