@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { api } from "../api/client";
 import ExpedienteHeader from "../components/ExpedienteHeader.vue";
+import InspeccionVisualCard from "../components/InspeccionVisualCard.vue";
 import { estadoColors } from "../plugins/vuetify";
 import { useSessionStore } from "../stores/session";
 import { limpiarPayload, municipiosDe, useCatalogos } from "../utils/catalogos";
@@ -10,16 +11,16 @@ import { textoEstado } from "../utils/estado";
 const session = useSessionStore();
 const { entidades, carrocerias } = useCatalogos();
 
-// Estados en los que el expediente sigue siendo "de Captura". A partir de
-// DATOS_NORMALIZADOS pasa a Inspección Visual, que corre en la estación de
-// Prueba (decisión de negocio 2026-08-07, ver CLAUDE.md) — esta vista solo
-// cubre el paso de Registro.
+// Estados en los que los datos del expediente se editan en Captura. Desde
+// 2026-11-09 (NOM-047, Opción A) la inspección visual también es de la
+// caseta: el expediente sigue en esta lista hasta registrarla.
 const ESTADOS_CAPTURA = [
   "CREADO",
   "DATOS_SIOX_CONSULTADOS",
   "DATOS_SIOX_IMPORTADOS",
   "DATOS_CAPTURADOS_MANUALMENTE",
 ];
+const ESTADOS_LISTA = [...ESTADOS_CAPTURA, "INSPECCION_VISUAL_PENDIENTE"];
 const ESTADOS_NORMALIZABLES = ["DATOS_SIOX_IMPORTADOS", "DATOS_CAPTURADOS_MANUALMENTE"];
 const ESTADOS_CONSULTABLES_SIOX = ["CREADO", "DATOS_SIOX_CONSULTADOS"];
 
@@ -49,7 +50,7 @@ const VEHICULO_CAMPOS = [
 
 const pasos = [
   { title: "Registro", subtitle: "Captura" },
-  { title: "Inspección visual", subtitle: "Estación de Prueba" },
+  { title: "Inspección visual", subtitle: "Captura" },
   { title: "OBD/SBD", subtitle: "Estación de Prueba" },
   { title: "Enviar", subtitle: "Prueba dinámica/estática" },
 ];
@@ -103,7 +104,8 @@ const aviso = ref(null);
 const pasoActual = computed(() => {
   if (!expediente.value) return 1;
   if (ESTADOS_CAPTURA.includes(expediente.value.estado)) return 1;
-  return 2;
+  if (expediente.value.estado === "INSPECCION_VISUAL_PENDIENTE") return 2;
+  return 3;
 });
 
 const puedeConsultarSiox = computed(
@@ -167,7 +169,7 @@ async function cargarExpedientesEnCurso() {
         linea_id: session.estacion.line_id,
       },
     });
-    expedientesEnCurso.value = data.filter((exp) => ESTADOS_CAPTURA.includes(exp.estado));
+    expedientesEnCurso.value = data.filter((exp) => ESTADOS_LISTA.includes(exp.estado));
   } catch (err) {
     error.value = err.response?.data?.detail || "No se pudo cargar la lista de expedientes.";
   } finally {
@@ -311,6 +313,14 @@ async function confirmarNormalizacion() {
   }
 }
 
+function inspeccionRegistrada(data) {
+  aviso.value =
+    data.resultado === "RECHAZADA"
+      ? "Inspección rechazada. El expediente se envió a Impresión Central."
+      : "Inspección visual aprobada. El expediente pasa a la estación de Prueba.";
+  cerrarExpediente(true);
+}
+
 onMounted(cargarExpedientesEnCurso);
 </script>
 
@@ -388,6 +398,12 @@ onMounted(cargarExpedientesEnCurso);
       </v-alert>
 
       <v-progress-linear v-if="cargandoExpediente" indeterminate class="mb-4" />
+
+      <InspeccionVisualCard
+        v-if="expediente.estado === 'INSPECCION_VISUAL_PENDIENTE'"
+        :verificacion-id="expediente.id"
+        @registrada="inspeccionRegistrada"
+      />
 
       <v-card class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
         <v-card-title class="d-flex align-center ga-2">

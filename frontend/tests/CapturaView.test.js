@@ -574,3 +574,95 @@ describe("CapturaView - Reglas de Negocio de Normalización (HU-010 / HU-020)", 
     expect(alerta.props("type")).toBe("success");
   });
 });
+
+describe("CapturaView - Inspección visual en la caseta (NOM-047, Opción A)", () => {
+  const CHECKLIST = [
+    { clave: "escape", etiqueta: "Sistema de escape" },
+    { clave: "tapon", etiqueta: "Tapón de combustible" },
+  ];
+  const EXP_INSPECCION = { ...MOCK_EXPEDIENTE_DETALLE, estado: "INSPECCION_VISUAL_PENDIENTE" };
+
+  function montarInspeccion(resultado = "APROBADA") {
+    return montar({
+      customExpediente: EXP_INSPECCION,
+      listaExpedientes: [
+        { id: "exp-009", placa: "INS-009", estado: "INSPECCION_VISUAL_PENDIENTE" },
+        { id: "exp-010", placa: "OBD-010", estado: "OBD_PENDIENTE" },
+      ],
+      apiGetHandler: (url) =>
+        url === "/inspeccion/checklist" ? Promise.resolve({ data: CHECKLIST }) : undefined,
+      apiPostHandler: (url) =>
+        url.startsWith("/inspeccion/") ? Promise.resolve({ data: { resultado } }) : undefined,
+    });
+  }
+
+  it("lista los expedientes pendientes de inspección y no los que ya pasaron", async () => {
+    const w = montarInspeccion();
+    await flushPromises();
+    expect(w.vm.expedientesEnCurso.map((e) => e.placa)).toEqual(["INS-009"]);
+  });
+
+  it("al abrir uno pendiente muestra el checklist en el paso 2", async () => {
+    const w = montarInspeccion();
+    await flushPromises();
+    await w.vm.abrirExpediente("exp-009");
+    await flushPromises();
+    expect(w.vm.pasoActual).toBe(2);
+    expect(api.get).toHaveBeenCalledWith("/inspeccion/checklist");
+    expect(w.text()).toContain("Sistema de escape");
+  });
+
+  it("registrar aprobada envía el checklist y vuelve a la lista con aviso", async () => {
+    const w = montarInspeccion("APROBADA");
+    await flushPromises();
+    await w.vm.abrirExpediente("exp-009");
+    await flushPromises();
+    const card = w.findComponent({ name: "InspeccionVisualCard" });
+    card.vm.respuestas.escape = "BUENO";
+    card.vm.respuestas.tapon = "NO_APLICA";
+    await card.vm.registrar();
+    await flushPromises();
+    expect(api.post).toHaveBeenCalledWith("/inspeccion/exp-009", {
+      checklist: { escape: "BUENO", tapon: "NO_APLICA" },
+      observaciones: null,
+    });
+    expect(w.vm.expediente).toBeNull();
+    expect(w.vm.aviso).toContain("estación de Prueba");
+  });
+
+  it("registrar rechazada avisa que va a Impresión Central", async () => {
+    const w = montarInspeccion("RECHAZADA");
+    await flushPromises();
+    await w.vm.abrirExpediente("exp-009");
+    await flushPromises();
+    const card = w.findComponent({ name: "InspeccionVisualCard" });
+    card.vm.respuestas.escape = "MALO";
+    card.vm.respuestas.tapon = "BUENO";
+    expect(card.vm.resultado).toBe("RECHAZADA");
+    await card.vm.registrar();
+    await flushPromises();
+    expect(w.vm.aviso).toBe("Inspección rechazada. El expediente se envió a Impresión Central.");
+  });
+
+  it("si el servidor rechaza el registro, el error queda en la tarjeta y el expediente abierto", async () => {
+    const w = montar({
+      customExpediente: EXP_INSPECCION,
+      apiGetHandler: (url) =>
+        url === "/inspeccion/checklist" ? Promise.resolve({ data: CHECKLIST }) : undefined,
+      apiPostHandler: (url) =>
+        url.startsWith("/inspeccion/")
+          ? Promise.reject({ response: { status: 409, data: { detail: "Estado inválido" } } })
+          : undefined,
+    });
+    await flushPromises();
+    await w.vm.abrirExpediente("exp-009");
+    await flushPromises();
+    const card = w.findComponent({ name: "InspeccionVisualCard" });
+    card.vm.respuestas.escape = "BUENO";
+    card.vm.respuestas.tapon = "BUENO";
+    await card.vm.registrar();
+    await flushPromises();
+    expect(card.vm.error).toBe("Estado inválido");
+    expect(w.vm.expediente).not.toBeNull();
+  });
+});

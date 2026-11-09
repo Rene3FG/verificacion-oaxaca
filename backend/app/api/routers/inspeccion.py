@@ -37,7 +37,7 @@ class InspeccionVisualCreate(BaseModel):
 
 @router.get("/checklist")
 async def catalogo_checklist(
-    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
+    session: SessionContext = Depends(requiere_estacion(StationType.CAPTURA, StationType.PRUEBA)),
 ) -> list[dict]:
     """Catálogo de los 8 puntos reales del checklist — el frontend lo
     renderiza desde aquí en vez de duplicar claves/etiquetas."""
@@ -52,7 +52,7 @@ async def catalogo_checklist(
 async def registrar_inspeccion(
     expediente_id: uuid.UUID,
     payload: InspeccionVisualCreate,
-    session: SessionContext = Depends(requiere_estacion(StationType.PRUEBA)),
+    session: SessionContext = Depends(requiere_estacion(StationType.CAPTURA, StationType.PRUEBA)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     verificacion = await db.get(Verificacion, expediente_id)
