@@ -31,7 +31,43 @@ async function entrar() {
     // session.errorTipo distingue 401 (credenciales) de 403 (sin permiso).
     return;
   }
+  if (session.sesion?.must_change_password) {
+    // X6-b: primero cambiar la contraseña que fijó el supervisor.
+    passwordActual.value = password.value;
+    return;
+  }
+  irAEstacion();
+}
+
+function irAEstacion() {
   router.push({ name: ROUTE_BY_STATION_TYPE[session.estacion.station_type] });
+}
+
+// X6-b: cambio obligatorio de contraseña en el primer acceso.
+const passwordActual = ref("");
+const passwordNueva = ref("");
+const passwordConfirmacion = ref("");
+const errorCambio = ref(null);
+const guardandoCambio = ref(false);
+
+async function cambiarPassword() {
+  errorCambio.value = null;
+  if (passwordNueva.value !== passwordConfirmacion.value) {
+    errorCambio.value = "La confirmación no coincide con la contraseña nueva.";
+    return;
+  }
+  guardandoCambio.value = true;
+  try {
+    await session.cambiarPasswordPropia(passwordActual.value, passwordNueva.value);
+  } catch (err) {
+    errorCambio.value = err.response?.data?.detail || "No se pudo cambiar la contraseña.";
+    return;
+  } finally {
+    guardandoCambio.value = false;
+  }
+  passwordNueva.value = "";
+  passwordConfirmacion.value = "";
+  irAEstacion();
 }
 
 function cambiarUsuario() {
@@ -79,6 +115,7 @@ const estado = computed(() => {
     return session.cargando && !session.errorTipo ? "cargando" : "estacion_no_configurada";
   }
   if (session.errorTipo === "sin_permiso") return "sin_permiso";
+  if (session.sesion?.must_change_password) return "cambiar_password";
   return "formulario";
 });
 </script>
@@ -147,6 +184,51 @@ const estado = computed(() => {
         <v-btn color="primary" variant="outlined" class="text-none" @click="cambiarUsuario">
           Cambiar usuario
         </v-btn>
+      </v-card-text>
+    </v-card>
+
+    <!-- Estado D: cambio obligatorio de contraseña (X6-b) -->
+    <v-card
+      v-else-if="estado === 'cambiar_password'"
+      class="login-card rounded-institucional-lg elevation-institucional-0"
+      variant="flat"
+    >
+      <v-card-title class="login-titulo">Cambia tu contraseña</v-card-title>
+      <v-card-subtitle class="texto-ayuda">
+        Tu contraseña la asignó un supervisor. Elige una nueva que solo tú conozcas antes de continuar.
+      </v-card-subtitle>
+      <v-card-text class="pt-4">
+        <v-alert v-if="errorCambio" type="error" class="mb-4">{{ errorCambio }}</v-alert>
+        <v-text-field
+          v-model="passwordNueva"
+          label="Contraseña nueva"
+          type="password"
+          variant="outlined"
+          autocomplete="new-password"
+          hint="Mínimo 8 caracteres, con letras y números; sin tu usuario ni palabras comunes."
+          persistent-hint
+          class="mb-2"
+        />
+        <v-text-field
+          v-model="passwordConfirmacion"
+          label="Confirmar contraseña nueva"
+          type="password"
+          variant="outlined"
+          autocomplete="new-password"
+          @keyup.enter="cambiarPassword"
+        />
+        <v-btn
+          color="primary"
+          block
+          size="large"
+          class="text-none"
+          :loading="guardandoCambio"
+          :disabled="!passwordNueva || !passwordConfirmacion"
+          @click="cambiarPassword"
+        >
+          Guardar y continuar
+        </v-btn>
+        <v-btn variant="text" block class="text-none mt-2" @click="session.cerrarSesion()">Cancelar</v-btn>
       </v-card-text>
     </v-card>
 

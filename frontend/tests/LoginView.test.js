@@ -411,3 +411,61 @@ describe("LoginView - HU-005 / HU-006: contexto de la estación en la pantalla i
     expect(fila(w, "Línea")).toBe("Línea 2");
   });
 });
+
+describe("LoginView - X6-b: cambio obligatorio de contraseña", () => {
+  async function entrarConCambioPendiente() {
+    api.get.mockResolvedValueOnce({ data: ESTACION_CAPTURA });
+    api.post.mockResolvedValueOnce({
+      data: { id: "ses-400", user_id: "u-4", can_supervise: false, must_change_password: true },
+    });
+    const w = montar();
+    await flushPromises();
+    w.vm.username = "nuevo";
+    w.vm.password = "Inicial-77x";
+    await w.vm.entrar();
+    await flushPromises();
+    return w;
+  }
+
+  it("no redirige y muestra el formulario de cambio", async () => {
+    const w = await entrarConCambioPendiente();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(w.vm.estado).toBe("cambiar_password");
+    expect(w.text()).toContain("Cambia tu contraseña");
+  });
+
+  it("valida la confirmación sin llamar al servidor", async () => {
+    const w = await entrarConCambioPendiente();
+    w.vm.passwordNueva = "CafeLluvia42";
+    w.vm.passwordConfirmacion = "OtraCosa42";
+    await w.vm.cambiarPassword();
+    expect(api.post).toHaveBeenCalledTimes(1); // solo el login
+    expect(w.vm.errorCambio).toContain("no coincide");
+  });
+
+  it("cambia la contraseña con la actual y entra a su estación", async () => {
+    const w = await entrarConCambioPendiente();
+    api.post.mockResolvedValueOnce({ status: 204 });
+    w.vm.passwordNueva = "CafeLluvia42";
+    w.vm.passwordConfirmacion = "CafeLluvia42";
+    await w.vm.cambiarPassword();
+    await flushPromises();
+    expect(api.post).toHaveBeenLastCalledWith("/usuarios/me/password", {
+      password_actual: "Inicial-77x",
+      password_nueva: "CafeLluvia42",
+    });
+    expect(useSessionStore().sesion.must_change_password).toBe(false);
+    expect(mockPush).toHaveBeenCalledWith({ name: "captura" });
+  });
+
+  it("muestra el motivo si el servidor rechaza la contraseña nueva", async () => {
+    const w = await entrarConCambioPendiente();
+    api.post.mockRejectedValueOnce({ response: { status: 422, data: { detail: "Contraseña demasiado común." } } });
+    w.vm.passwordNueva = "Password123";
+    w.vm.passwordConfirmacion = "Password123";
+    await w.vm.cambiarPassword();
+    await flushPromises();
+    expect(w.vm.errorCambio).toBe("Contraseña demasiado común.");
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+});

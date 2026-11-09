@@ -120,6 +120,17 @@ export const useSessionStore = defineStore("session", {
       }
     },
 
+    // X6-b: con una contraseña fijada por el supervisor (alta o
+    // restablecimiento), el backend solo permite cambiarla. Tras el cambio
+    // la sesión queda operativa sin volver a iniciar sesión.
+    async cambiarPasswordPropia(actual, nueva) {
+      await api.post("/usuarios/me/password", {
+        password_actual: actual,
+        password_nueva: nueva,
+      });
+      if (this.sesion) this.sesion = { ...this.sesion, must_change_password: false };
+    },
+
     // Botón "Cambiar usuario" de la pantalla de acceso denegado: vuelve al
     // formulario sin recargar y conserva la estación ya detectada.
     limpiarError() {
@@ -157,7 +168,7 @@ export const useSessionStore = defineStore("session", {
     },
 
     async actualizarEstadoSync() {
-      if (!this.tieneSesionActiva) return;
+      if (!this.tieneSesionActiva || this.sesion?.must_change_password) return;
       try {
         const { data } = await api.get("/sync/estado");
         this.estadoSync = data;

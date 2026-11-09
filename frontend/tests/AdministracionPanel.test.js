@@ -757,3 +757,29 @@ describe("AdministracionPanel - Alertas", () => {
     expect(w.find(".v-alert").exists()).toBe(false);
   });
 });
+
+describe("AdministracionPanel - Desbloqueo y cambio pendiente (X1, X6-b)", () => {
+  it("Desbloquear llama al endpoint del usuario y avisa", async () => {
+    const w = await montar();
+    const desbloquear = w.findAll("button").filter((b) => b.text() === "Desbloquear");
+    expect(desbloquear).toHaveLength(2);
+    await desbloquear[0].trigger("click");
+    await flushPromises();
+    expect(api.post).toHaveBeenCalledWith("/usuarios/u1/desbloquear");
+    expect(w.text()).toContain("operador1 puede volver a iniciar sesión.");
+  });
+
+  it("si el desbloqueo falla muestra el motivo", async () => {
+    srv.post["/usuarios/u1/desbloquear"] = () => rechazo("Usuario no encontrado");
+    const w = await montar();
+    await w.findAll("button").find((b) => b.text() === "Desbloquear").trigger("click");
+    await flushPromises();
+    expect(w.text()).toContain("Usuario no encontrado");
+  });
+
+  it("marca a los usuarios con cambio de contraseña pendiente", async () => {
+    srv.get["/usuarios"] = [{ ...USUARIOS[0], must_change_password: true }, USUARIOS[1]];
+    const w = await montar();
+    expect(w.text()).toContain("Cambio de contraseña pendiente");
+  });
+});

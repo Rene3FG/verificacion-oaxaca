@@ -41,6 +41,10 @@ router.beforeEach((to) => {
   if (to.meta.stationType && !session.tieneSesionActiva) {
     return { name: "login" };
   }
+  // X6-b: con cambio de contraseña pendiente solo se puede estar en el login.
+  if (to.name !== "login" && session.sesion?.must_change_password) {
+    return { name: "login" };
+  }
   if (to.meta.stationType && session.estacion?.station_type !== to.meta.stationType) {
     return { name: "login" };
   }

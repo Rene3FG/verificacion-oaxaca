@@ -94,6 +94,18 @@ async function alternarUsuario(u) {
   }
 }
 
+// X1: reinicia la cuenta de intentos fallidos de un usuario bloqueado.
+async function desbloquearUsuario(u) {
+  error.value = null;
+  aviso.value = null;
+  try {
+    await api.post(`/usuarios/${u.id}/desbloquear`);
+    aviso.value = `${u.username} puede volver a iniciar sesión.`;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "No se pudo desbloquear al usuario.";
+  }
+}
+
 // --- Estaciones ---
 const estaciones = ref([]);
 const cargandoEstaciones = ref(false);
@@ -263,9 +275,13 @@ onMounted(() => {
                 <v-chip size="small" :color="u.is_active ? 'success' : 'grey'" variant="tonal">
                   {{ u.is_active ? "Activo" : "Inactivo" }}
                 </v-chip>
+                <v-chip v-if="u.must_change_password" size="small" color="warning" variant="tonal" class="ml-1">
+                  Cambio de contraseña pendiente
+                </v-chip>
               </td>
               <td class="text-right">
                 <v-btn variant="text" size="small" @click="abrirUsuario(u)">Editar</v-btn>
+                <v-btn variant="text" size="small" @click="desbloquearUsuario(u)">Desbloquear</v-btn>
                 <v-btn variant="text" size="small" :color="u.is_active ? 'error' : 'success'" @click="alternarUsuario(u)">
                   {{ u.is_active ? "Desactivar" : "Reactivar" }}
                 </v-btn>
