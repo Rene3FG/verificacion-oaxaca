@@ -9,11 +9,11 @@ import { textoEstado } from "../utils/estado";
 const session = useSessionStore();
 const { entidades, carrocerias } = useCatalogos();
 
-// Estados que le corresponden a esta estación (Inspección Visual y OBD/SBD
-// corren aquí, decisión de negocio 2026-08-07 — ver CLAUDE.md). Fuera de
-// esta lista, el expediente ya salió a Impresión o no ha llegado todavía.
+// Estados que le corresponden a esta estación (desde 2026-11-09, NOM-047
+// Opción A: Inspección Visual se realiza en Captura; OBD/SBD y la prueba de
+// emisiones corren aquí). Fuera de esta lista, el expediente ya salió a
+// Impresión o no ha llegado todavía.
 const ESTADOS_PRUEBA = [
-  "INSPECCION_VISUAL_PENDIENTE",
   "INSPECCION_VISUAL_APROBADA",
   "OBD_PENDIENTE",
   "OBD_SOLICITADO",
@@ -22,18 +22,6 @@ const ESTADOS_PRUEBA = [
   "PRUEBA_CONFIGURADA",
   "PRUEBA_EN_PROCESO",
   "ERROR_INTEGRACION",
-];
-
-// Checklist real de inspección visual (sección 8 de la revisión del Figma
-// 2026-08-24): los 8 puntos y sus etiquetas viven en el backend
-// (GET /api/inspeccion/checklist) — aquí solo se renderizan. Cada punto se
-// captura como BUENO / MALO / NO_APLICA; el resultado lo determina el
-// backend (cualquier MALO rechaza), no el operador.
-const checklistItems = ref([]);
-const OPCIONES_ITEM = [
-  { value: "BUENO", label: "Bueno" },
-  { value: "MALO", label: "Malo" },
-  { value: "NO_APLICA", label: "No aplica" },
 ];
 
 const expedientesEnCurso = ref([]);
@@ -104,44 +92,6 @@ async function guardarVehiculo() {
     error.value = err.response?.data?.detail || "No se pudieron guardar los datos.";
   } finally {
     guardandoVehiculo.value = false;
-  }
-}
-
-// --- Inspección visual ---
-// Cada punto arranca sin respuesta (null): el operador debe pronunciarse
-// sobre los 8 antes de poder registrar.
-const checklistForm = reactive({});
-const observacionesInspeccion = ref("");
-const registrandoInspeccion = ref(false);
-
-const itemsMalos = computed(() =>
-  checklistItems.value.filter((item) => checklistForm[item.clave] === "MALO")
-);
-const checklistCompleto = computed(
-  () =>
-    checklistItems.value.length > 0 &&
-    checklistItems.value.every((item) => checklistForm[item.clave] != null)
-);
-// Espejo informativo de la regla del backend (cualquier MALO rechaza) —
-// la decisión real la toma el servidor al registrar.
-const resultadoInspeccion = computed(() => {
-  if (!checklistCompleto.value) return null;
-  return itemsMalos.value.length === 0 ? "APROBADA" : "RECHAZADA";
-});
-
-function reiniciarChecklist() {
-  for (const item of checklistItems.value) checklistForm[item.clave] = null;
-  observacionesInspeccion.value = "";
-}
-
-async function cargarCatalogoChecklist() {
-  try {
-    const { data } = await api.get("/inspeccion/checklist");
-    checklistItems.value = data;
-    reiniciarChecklist();
-  } catch (err) {
-    error.value =
-      err.response?.data?.detail || "No se pudo cargar el checklist de inspección visual.";
   }
 }
 
@@ -391,7 +341,6 @@ async function abrirExpediente(id) {
   try {
     const { data } = await api.get(`/expedientes/${id}`);
     expediente.value = data;
-    reiniciarChecklist();
     reiniciarPrueba();
     sincronizarVehiculoForm(data.vehiculo);
     configuracionPrueba.value = null;
@@ -428,28 +377,6 @@ function cerrarExpediente(conservarAviso = false) {
 
 async function recargarExpediente() {
   await abrirExpediente(expediente.value.id);
-}
-
-async function registrarInspeccion() {
-  registrandoInspeccion.value = true;
-  error.value = null;
-  try {
-    const { data } = await api.post(`/inspeccion/${expediente.value.id}`, {
-      checklist: { ...checklistForm },
-      observaciones: observacionesInspeccion.value.trim() || null,
-    });
-    if (data.resultado === "RECHAZADA") {
-      aviso.value = "Inspección rechazada. El expediente se envió a Impresión Central.";
-      cerrarExpediente(true);
-    } else {
-      aviso.value = "Inspección visual aprobada.";
-      await recargarExpediente();
-    }
-  } catch (err) {
-    error.value = err.response?.data?.detail || "No se pudo registrar la inspección.";
-  } finally {
-    registrandoInspeccion.value = false;
-  }
 }
 
 async function evaluarObd() {
@@ -614,7 +541,6 @@ async function guardarResultadoPrueba() {
 
 onMounted(() => {
   cargarExpedientesEnCurso();
-  cargarCatalogoChecklist();
 });
 onUnmounted(detenerSondeoCorrida);
 </script>
@@ -643,7 +569,7 @@ onUnmounted(detenerSondeoCorrida);
         <v-card-text>
           <v-progress-circular v-if="cargandoLista" indeterminate />
           <p v-else-if="expedientesEnCurso.length === 0" class="text-medium-emphasis">
-            No hay expedientes pendientes en Inspección Visual, OBD/SBD o Prueba en esta línea.
+            No hay expedientes pendientes en OBD/SBD o Prueba en esta línea.
           </p>
           <v-list v-else>
             <v-list-item
@@ -727,77 +653,9 @@ onUnmounted(detenerSondeoCorrida);
         </v-card-text>
       </v-card>
 
-      <!-- Inspección visual: 8 puntos reales del diseño, cada uno
-           Bueno/Malo/No aplica. El resultado lo determina el backend
-           (cualquier MALO rechaza); aquí solo se anticipa. -->
-      <v-card v-if="expediente.estado === 'INSPECCION_VISUAL_PENDIENTE'" class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat">
-        <v-card-title>Inspección visual</v-card-title>
-        <v-card-text>
-          <div
-            v-for="item in checklistItems"
-            :key="item.clave"
-            class="d-flex align-center justify-space-between flex-wrap ga-2 py-2 border-b"
-          >
-            <span class="text-body-2" style="max-width: 55%">{{ item.etiqueta }}</span>
-            <v-btn-toggle
-              v-model="checklistForm[item.clave]"
-              density="compact"
-              divided
-              variant="outlined"
-              color="primary"
-            >
-              <v-btn
-                v-for="opcion in OPCIONES_ITEM"
-                :key="opcion.value"
-                :value="opcion.value"
-                size="small"
-                :color="opcion.value === 'MALO' ? 'error' : undefined"
-              >
-                {{ opcion.label }}
-              </v-btn>
-            </v-btn-toggle>
-          </div>
-
-          <v-alert
-            v-if="resultadoInspeccion"
-            :type="resultadoInspeccion === 'APROBADA' ? 'success' : 'warning'"
-            variant="tonal"
-            density="compact"
-            class="my-3"
-          >
-            <template v-if="resultadoInspeccion === 'APROBADA'">Resultado: Aprobada</template>
-            <template v-else>
-              Resultado: Rechazada —
-              {{ itemsMalos.map((item) => item.etiqueta).join("; ") }}
-            </template>
-          </v-alert>
-          <v-alert v-else type="info" variant="tonal" density="compact" class="my-3">
-            Marca los {{ checklistItems.length }} puntos para poder registrar la inspección.
-          </v-alert>
-
-          <v-textarea
-            v-if="resultadoInspeccion === 'RECHAZADA'"
-            v-model="observacionesInspeccion"
-            label="Observaciones (opcional — los puntos en Malo ya son la causal)"
-            variant="outlined"
-            density="comfortable"
-            rows="2"
-          />
-
-          <v-btn
-            color="primary"
-            :loading="registrandoInspeccion"
-            :disabled="!checklistCompleto"
-            @click="registrarInspeccion"
-          >
-            Registrar inspección
-          </v-btn>
-        </v-card-text>
-      </v-card>
-
       <!-- OBD/SBD -->
       <v-card
-        v-else-if="['INSPECCION_VISUAL_APROBADA', 'OBD_PENDIENTE', 'OBD_SOLICITADO', 'OBD_RECIBIDO'].includes(expediente.estado)"
+        v-if="['INSPECCION_VISUAL_APROBADA', 'OBD_PENDIENTE', 'OBD_SOLICITADO', 'OBD_RECIBIDO'].includes(expediente.estado)"
         class="mb-4 rounded-institucional-lg elevation-institucional-0" variant="flat"
       >
         <v-card-title>OBD / SBD</v-card-title>

@@ -40,7 +40,7 @@ const CHECKLIST = [
 const RESULTADO_GAS = { ralenti: { hc_ppm: 50, co_pct: 0.2 }, crucero: { hc_ppm: 40, co_pct: 0.1 } };
 
 const LISTA = [
-  { id: "exp-1", placa: "AAA-001", estado: "INSPECCION_VISUAL_PENDIENTE" },
+  { id: "exp-1", placa: "AAA-001", estado: "INSPECCION_VISUAL_APROBADA" },
   { id: "exp-2", placa: "BBB-002", estado: "LISTO_PARA_PRUEBA" },
   { id: "exp-3", placa: "CCC-003", estado: "ERROR_INTEGRACION" },
   { id: "exp-4", placa: "DDD-004", estado: "CREADO" }, // aún en Captura: se filtra
@@ -51,7 +51,7 @@ function expedienteBase(extra = {}) {
   return {
     id: "exp-1",
     placa: "AAA-001",
-    estado: "INSPECCION_VISUAL_PENDIENTE",
+    estado: "INSPECCION_VISUAL_APROBADA",
     linea_id: 1,
     centro_id: "OAX-01",
     folio_multa: null,
@@ -186,23 +186,11 @@ describe("PruebaView - Lista de expedientes en curso", () => {
     expect(w.text()).toContain("Base de datos caída");
   });
 
-  it("carga el catálogo de checklist de inspección al montar", async () => {
-    const w = montar();
-    await flushPromises();
-    expect(api.get).toHaveBeenCalledWith("/inspeccion/checklist");
-    expect(w.vm.checklistItems).toHaveLength(3);
-  });
 
-  it("avisa si no se puede cargar el checklist", async () => {
-    srv.fallaGet["/inspeccion/checklist"] = () => rechazo(500, "Checklist no disponible");
-    const w = montar();
-    await flushPromises();
-    expect(w.vm.error).toBe("Checklist no disponible");
-  });
 });
 
 describe("PruebaView - Apertura de expediente", () => {
-  it("abre el expediente y no consulta equipo ni configuración en inspección visual", async () => {
+  it("abre el expediente y no consulta equipo ni configuración si aún no está listo para prueba", async () => {
     const w = montar();
     await flushPromises();
     await abrir(w);
@@ -272,98 +260,6 @@ describe("PruebaView - Apertura de expediente", () => {
 
     expect(w.vm.expediente).toBeNull();
     expect(api.get).toHaveBeenCalledWith("/expedientes", expect.anything());
-  });
-});
-
-describe("PruebaView - Inspección visual", () => {
-  async function conChecklist() {
-    const w = montar();
-    await flushPromises();
-    await abrir(w);
-    return w;
-  }
-
-  it("no hay resultado ni checklist completo hasta pronunciarse sobre los 8 puntos", async () => {
-    const w = await conChecklist();
-    expect(w.vm.checklistCompleto).toBe(false);
-    expect(w.vm.resultadoInspeccion).toBeNull();
-
-    w.vm.checklistForm.luces = "BUENO";
-    w.vm.checklistForm.llantas = "NO_APLICA";
-    await flushPromises();
-    expect(w.vm.checklistCompleto).toBe(false);
-  });
-
-  it("espejo informativo: APROBADA si no hay MALO, RECHAZADA con al menos uno", async () => {
-    const w = await conChecklist();
-    w.vm.checklistForm.luces = "BUENO";
-    w.vm.checklistForm.llantas = "NO_APLICA";
-    w.vm.checklistForm.escape = "BUENO";
-    await flushPromises();
-    expect(w.vm.resultadoInspeccion).toBe("APROBADA");
-
-    w.vm.checklistForm.escape = "MALO";
-    await flushPromises();
-    expect(w.vm.resultadoInspeccion).toBe("RECHAZADA");
-    expect(w.vm.itemsMalos.map((i) => i.clave)).toEqual(["escape"]);
-  });
-
-  it("registra inspección aprobada, avisa y recarga el expediente", async () => {
-    srv.postHandlers["/inspeccion/"] = () => Promise.resolve({ data: { resultado: "APROBADA" } });
-    const w = await conChecklist();
-    w.vm.checklistForm.luces = "BUENO";
-    w.vm.checklistForm.llantas = "BUENO";
-    w.vm.checklistForm.escape = "BUENO";
-    w.vm.observacionesInspeccion = "  todo en orden  ";
-
-    await w.vm.registrarInspeccion();
-    await flushPromises();
-
-    expect(api.post).toHaveBeenCalledWith("/inspeccion/exp-1", {
-      checklist: { luces: "BUENO", llantas: "BUENO", escape: "BUENO" },
-      observaciones: "todo en orden",
-    });
-    expect(w.vm.aviso).toBe("Inspección visual aprobada.");
-    expect(w.vm.expediente).not.toBeNull();
-  });
-
-  it("observaciones vacías viajan como null", async () => {
-    srv.postHandlers["/inspeccion/"] = () => Promise.resolve({ data: { resultado: "APROBADA" } });
-    const w = await conChecklist();
-    w.vm.observacionesInspeccion = "   ";
-    await w.vm.registrarInspeccion();
-    expect(api.post.mock.calls.find(([u]) => u === "/inspeccion/exp-1")[1].observaciones).toBeNull();
-  });
-
-  it("inspección RECHAZADA envía el expediente a Impresión y vuelve a la lista", async () => {
-    srv.postHandlers["/inspeccion/"] = () => Promise.resolve({ data: { resultado: "RECHAZADA" } });
-    const w = await conChecklist();
-
-    await w.vm.registrarInspeccion();
-    await flushPromises();
-
-    expect(w.vm.expediente).toBeNull();
-    expect(llamadasPost("/inspeccion/")).toHaveLength(1);
-  });
-
-  // Corregido por René (d791bb8): registrarInspeccion cierra con
-  // cerrarExpediente(true) y el aviso se anuncia en la lista.
-  it("el aviso de inspección rechazada sobrevive al cierre del expediente", async () => {
-    srv.postHandlers["/inspeccion/"] = () => Promise.resolve({ data: { resultado: "RECHAZADA" } });
-    const w = await conChecklist();
-    await w.vm.registrarInspeccion();
-    await flushPromises();
-    expect(w.vm.aviso).toBe("Inspección rechazada. El expediente se envió a Impresión Central.");
-    expect(w.text()).toContain("Inspección rechazada. El expediente se envió a Impresión Central.");
-  });
-
-  it("muestra el error del backend si no se puede registrar la inspección", async () => {
-    srv.postHandlers["/inspeccion/"] = () => rechazo(409, "Estado inválido para inspección");
-    const w = await conChecklist();
-    await w.vm.registrarInspeccion();
-    await flushPromises();
-    expect(w.vm.error).toBe("Estado inválido para inspección");
-    expect(w.vm.registrandoInspeccion).toBe(false);
   });
 });
 
@@ -1026,34 +922,9 @@ describe("PruebaView - Avisos de resultado: color y vida del aviso (d791bb8)", (
       expect(claseAlertaAviso(w)).toMatch(/success/);
     });
 
-    it("inspección rechazada: se ve en la lista en ámbar", async () => {
-      srv.postHandlers["/inspeccion/"] = () => Promise.resolve({ data: { resultado: "RECHAZADA" } });
-      const w = await conExpediente();
-
-      await w.vm.registrarInspeccion();
-      await flushPromises();
-
-      expect(w.vm.expediente).toBeNull();
-      expect(w.text()).toContain("Inspección rechazada");
-      expect(claseAlertaAviso(w)).toMatch(/warning/);
-    });
-
-    it("inspección aprobada: el aviso queda en el detalle, que sigue abierto", async () => {
-      srv.postHandlers["/inspeccion/"] = () => Promise.resolve({ data: { resultado: "APROBADA" } });
-      const w = await conExpediente();
-
-      await w.vm.registrarInspeccion();
-      await flushPromises();
-
-      expect(w.vm.expediente).not.toBeNull();
-      expect(w.text()).toContain("Inspección visual aprobada.");
-      expect(claseAlertaAviso(w)).toMatch(/success/);
-    });
-
     it("el aviso se puede cerrar con la X de la alerta", async () => {
-      srv.postHandlers["/inspeccion/"] = () => Promise.resolve({ data: { resultado: "RECHAZADA" } });
       const w = await conExpediente();
-      await w.vm.registrarInspeccion();
+      w.vm.aviso = "Aviso de prueba para verificar cierre";
       await flushPromises();
 
       await w.find(".v-alert .v-alert__close button").trigger("click");
