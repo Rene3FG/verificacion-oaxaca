@@ -120,13 +120,12 @@ verificacion-oaxaca/
 │   ├── MANUAL_INSTALACION_Y_OPERACION.md  # Manual operativo y de instalación D6
 │   └── PENDIENTES_2026-10-20.md           # Lista maestra de bloqueos B1-B11 (B1 RESUELTO) y supuestos S1-S12
 ├── scripts/
-│   ├── backup_db.sh / restore_db.sh       # Scripts Bash de respaldo D4 (Linux)
-│   ├── respaldo.sh / restaurar.sh         # Variante de respaldo y restauración (René)
+│   ├── respaldo.sh / restaurar.sh         # Respaldo y restauración en Linux (producción, .sql.gz)
 │   ├── smoke_e2e_flujo.mjs                # Prueba de humo del ciclo vehicular (Node 18+)
 │   ├── desbloquear_usuario.sh / .ps1      # Soporte: desbloquea usuarios bloqueados por intentos fallidos
-│   ├── backup_db.ps1 / restore_db.ps1     # Scripts PowerShell de respaldo D4 (Windows)
+│   ├── backup_db.ps1 / restore_db.ps1     # Respaldo y restauración en Windows (desarrollo, .dump)
 │   └── README.md                          # Guía de respaldos y de la prueba de humo
-├── docker-compose.yml                     # Compose de desarrollo local (db 5433, redis 6379)
+├── docker-compose.yml                     # Compose de desarrollo local (db 5433, redis 6379, solo en 127.0.0.1)
 ├── docker-compose.prod.yml                # Compose de producción aislado (db, redis, backend, web)
 ├── .env.prod.example                      # Plantilla de variables de producción
 ├── RECHAZO.doc                            # Plantilla oficial Word de rechazo entregada por el cliente
