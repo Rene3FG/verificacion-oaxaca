@@ -16,15 +16,15 @@ def _checklist(**overrides) -> dict:
     return checklist
 
 
-async def _sesion_prueba(db_session, *, line_id: int = 1):
+async def _sesion_captura(db_session, *, line_id: int = 1):
     estacion = await crear_estacion(
-        db_session, station_type=StationType.PRUEBA, center_id="OAX-01", line_id=line_id
+        db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=line_id
     )
     return await crear_sesion_activa(db_session, estacion=estacion)
 
 
 async def test_catalogo_checklist_expone_los_8_puntos_reales(client, db_session):
-    sesion = await _sesion_prueba(db_session)
+    sesion = await _sesion_captura(db_session)
     await db_session.commit()
 
     resp = await client.get(
@@ -41,7 +41,7 @@ async def test_inspeccion_todo_bueno_o_no_aplica_aprueba(client, db_session):
     """El resultado no lo manda el operador: sin ningún MALO, el backend
     aprueba solo. NO_APLICA no cuenta como falla."""
 
-    sesion = await _sesion_prueba(db_session)
+    sesion = await _sesion_captura(db_session)
     expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE
     )
@@ -74,7 +74,7 @@ async def test_inspeccion_con_malo_rechaza_y_guarda_causales(client, db_session)
     MALO quedan como causales (con etiqueta legible), más las observaciones
     del operador."""
 
-    sesion = await _sesion_prueba(db_session)
+    sesion = await _sesion_captura(db_session)
     expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE
     )
@@ -111,7 +111,7 @@ async def test_inspeccion_con_malo_rechaza_y_guarda_causales(client, db_session)
 
 
 async def test_inspeccion_checklist_incompleto_responde_422(client, db_session):
-    sesion = await _sesion_prueba(db_session)
+    sesion = await _sesion_captura(db_session)
     expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE
     )
@@ -130,7 +130,7 @@ async def test_inspeccion_checklist_incompleto_responde_422(client, db_session):
 
 
 async def test_inspeccion_punto_desconocido_responde_422(client, db_session):
-    sesion = await _sesion_prueba(db_session)
+    sesion = await _sesion_captura(db_session)
     expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE
     )
@@ -147,7 +147,7 @@ async def test_inspeccion_punto_desconocido_responde_422(client, db_session):
 
 
 async def test_inspeccion_valor_invalido_responde_422(client, db_session):
-    sesion = await _sesion_prueba(db_session)
+    sesion = await _sesion_captura(db_session)
     expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE
     )
@@ -167,7 +167,7 @@ async def test_inspeccion_fuera_de_estado_pendiente_responde_409(client, db_sess
     registrar inspección fuera de INSPECCION_VISUAL_PENDIENTE tiraba
     TransitionNotAllowed sin manejar (500)."""
 
-    sesion = await _sesion_prueba(db_session)
+    sesion = await _sesion_captura(db_session)
     expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.LISTO_PARA_PRUEBA
     )
@@ -182,9 +182,9 @@ async def test_inspeccion_fuera_de_estado_pendiente_responde_409(client, db_sess
     assert resp.status_code == 409
 
 
-async def test_inspeccion_desde_estacion_captura_registra(client, db_session):
+async def test_inspeccion_desde_estacion_prueba_responde_403(client, db_session):
     estacion = await crear_estacion(
-        db_session, station_type=StationType.CAPTURA, line_id=1
+        db_session, station_type=StationType.PRUEBA, line_id=1
     )
     sesion = await crear_sesion_activa(db_session, estacion=estacion)
     expediente = await crear_expediente(
@@ -197,12 +197,11 @@ async def test_inspeccion_desde_estacion_captura_registra(client, db_session):
         json={"checklist": _checklist()},
         headers={"X-Session-Id": str(sesion.id)},
     )
-    assert resp.status_code == 200
-    assert resp.json()["resultado"] == "APROBADA"
+    assert resp.status_code == 403
 
 
 async def test_inspeccion_expediente_otra_linea_responde_403(client, db_session):
-    sesion = await _sesion_prueba(db_session, line_id=1)
+    sesion = await _sesion_captura(db_session, line_id=1)
     expediente = await crear_expediente(
         db_session, linea_id=2, estado=EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE
     )

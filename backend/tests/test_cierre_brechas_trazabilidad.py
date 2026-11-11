@@ -25,6 +25,15 @@ async def _sesion_prueba(db_session):
 
 
 async def _rechazar_inspeccion(client, db_session):
+    """Inspección en Captura (NOM-047); devuelve también la sesión de Prueba
+    para los pasos posteriores (OBD)."""
+
+    captura = await crear_sesion_activa(
+        db_session,
+        estacion=await crear_estacion(
+            db_session, station_type=StationType.CAPTURA, center_id="OAX-01", line_id=1
+        ),
+    )
     sesion = await _sesion_prueba(db_session)
     expediente = await crear_expediente(
         db_session, linea_id=1, estado=EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE
@@ -33,15 +42,15 @@ async def _rechazar_inspeccion(client, db_session):
     resp = await client.post(
         f"/api/inspeccion/{expediente.id}",
         json={"checklist": _checklist(neumaticos="MALO")},
-        headers={"X-Session-Id": str(sesion.id)},
+        headers={"X-Session-Id": str(captura.id)},
     )
     assert resp.status_code == 200
-    return sesion, expediente
+    return sesion, expediente, captura
 
 
 async def test_transicion_guarda_estado_anterior_nuevo_usuario_hora_y_causales(client, db_session):
     """HU-027."""
-    sesion, expediente = await _rechazar_inspeccion(client, db_session)
+    sesion, expediente, captura = await _rechazar_inspeccion(client, db_session)
 
     eventos = (
         await db_session.execute(
@@ -54,14 +63,14 @@ async def test_transicion_guarda_estado_anterior_nuevo_usuario_hora_y_causales(c
     assert len(eventos) == 1
     ev = eventos[0]
     assert ev.estado_anterior == EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE
-    assert ev.usuario_id == sesion.user_id
+    assert ev.usuario_id == captura.user_id
     assert ev.created_at is not None
     assert ev.detalle_json["causales"] == ["neumaticos"]
 
 
 async def test_visual_rechazada_no_ofrece_obd_y_va_directo_a_impresion(client, db_session):
     """HU-034."""
-    sesion, expediente = await _rechazar_inspeccion(client, db_session)
+    sesion, expediente, captura = await _rechazar_inspeccion(client, db_session)
     await db_session.refresh(expediente)
     assert expediente.estado == EstadoVerificacion.PENDIENTE_DE_IMPRESION_RECHAZO
 

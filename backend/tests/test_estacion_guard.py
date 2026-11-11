@@ -100,7 +100,7 @@ async def test_folios_solicitar_desde_impresion_no_es_403(client, db_session):
 
 async def test_inspeccion_desde_captura_responde_200(client, db_session):
     """NOM-047, Opción A (2026-11-09): la inspección visual es el último
-    paso de la captura. Prueba se sigue aceptando durante la transición."""
+    paso de la captura."""
 
     sesion = await _sesion(db_session, station_type=StationType.CAPTURA)
     expediente = await crear_expediente(
@@ -114,6 +114,23 @@ async def test_inspeccion_desde_captura_responde_200(client, db_session):
         headers={"X-Session-Id": str(sesion.id)},
     )
     assert resp.status_code == 200
+
+
+async def test_inspeccion_desde_prueba_responde_403(client, db_session):
+    """Transición cerrada: Prueba ya no registra inspección visual."""
+
+    sesion = await _sesion(db_session, station_type=StationType.PRUEBA)
+    expediente = await crear_expediente(
+        db_session, linea_id=1, estado=EstadoVerificacion.INSPECCION_VISUAL_PENDIENTE
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/inspeccion/{expediente.id}",
+        json={"checklist": CHECKLIST_TODO_BUENO},
+        headers={"X-Session-Id": str(sesion.id)},
+    )
+    assert resp.status_code == 403
 
 
 async def test_obd_evaluar_desde_impresion_responde_403(client, db_session):
@@ -168,7 +185,7 @@ async def test_flujo_completo_captura_a_inspeccion_visual(client, db_session):
     resp_inspeccion = await client.post(
         f"/api/inspeccion/{expediente.id}",
         json={"checklist": CHECKLIST_TODO_BUENO},
-        headers={"X-Session-Id": str(prueba.id)},
+        headers={"X-Session-Id": str(captura.id)},
     )
     assert resp_inspeccion.status_code == 200
     assert (

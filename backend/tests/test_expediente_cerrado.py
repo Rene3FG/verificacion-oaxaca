@@ -27,7 +27,7 @@ OPERACIONES = [
     (StationType.CAPTURA, "post", "/api/expedientes/{id}/normalizar", None),
     (StationType.CAPTURA, "post", "/api/siox/consultar/{id}", None),
     (StationType.CAPTURA, "post", "/api/siox/captura-manual/{id}", {}),
-    (StationType.PRUEBA, "post", "/api/inspeccion/{id}", {"checklist": {}}),
+    (StationType.CAPTURA, "post", "/api/inspeccion/{id}", {"checklist": {}}),
     (StationType.PRUEBA, "post", "/api/obd/evaluar/{id}", None),
     (StationType.PRUEBA, "post", "/api/obd/solicitar/{id}", None),
     (StationType.PRUEBA, "post", "/api/obd/resultado/{id}", {"resultado": "APROBADO"}),
