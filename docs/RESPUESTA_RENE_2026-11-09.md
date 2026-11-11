@@ -43,7 +43,7 @@ Respuesta a `docs/COORDINACION_BACKEND_RENE_2026-11-05.md`. Nota: ese reporte se
 ## Sigue pendiente de mi lado
 
 - **X1-b:** bloqueo por (usuario, IP). Lo dejo para decidir juntos: con el tope por IP y el desbloqueo del supervisor, el riesgo de que alguien bloquee a un supervisor desde otra máquina ya tiene remedio.
-- **X2-d:** barrido periódico de sesiones vencidas (hoy se marcan al usarse).
+- ~~**X2-d:** barrido periódico de sesiones vencidas~~ hecho 2026-11-10 (cada 300 s, `SESION_BARRIDO_INTERVALO_S`).
 - **X5-e:** rol de BD de mínimo privilegio en `bootstrap_prod`.
-- Quitar `PRUEBA` de `inspeccion.py` cuando termine la transición (ver arriba).
+- ~~Quitar `PRUEBA` de `inspeccion.py`~~ hecho 2026-11-10 (`a8d708b`).
 - **B10 (a):** potencia 7.8 vs. Tabla 1, sigue con el cliente.

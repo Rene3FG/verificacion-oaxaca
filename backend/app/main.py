@@ -22,17 +22,20 @@ from app.api.routers import (
 )
 
 from app.core.config import settings
+from app.services.sesiones_barrido import barrido_habilitado, bucle_barrido_sesiones
 from app.services.sync_auto import bucle_sync_auto, sync_auto_habilitado
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     tarea = asyncio.create_task(bucle_sync_auto()) if sync_auto_habilitado() else None
+    barrido = asyncio.create_task(bucle_barrido_sesiones()) if barrido_habilitado() else None
     try:
         yield
     finally:
-        if tarea:
-            tarea.cancel()
+        for t in (tarea, barrido):
+            if t:
+                t.cancel()
 
 
 # X4-d: en producción no se publica el mapa de la API.

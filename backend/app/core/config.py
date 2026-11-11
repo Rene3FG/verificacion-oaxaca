@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # X2-a: vida máxima de una sesión aunque tenga actividad continua (un
     # turno). 0 lo apaga.
     sesion_duracion_max_h: int = 12
+    # X2-d: cada cuántos segundos se marcan como expiradas las sesiones vencidas
+    # (0 = sin barrido; la expiración perezosa de deps.py sigue operando).
+    sesion_barrido_intervalo_s: float = 300.0
 
     # Equipment Integration Contract v1 (ver app/services/equipo_gateway.py):
     # "manual" = sin gateway, el operador captura las lecturas; "simulador" =
