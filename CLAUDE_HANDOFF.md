@@ -122,11 +122,13 @@ verificacion-oaxaca/
 ├── scripts/
 │   ├── respaldo.sh / restaurar.sh         # Respaldo y restauración en Linux (producción, .sql.gz)
 │   ├── smoke_e2e_flujo.mjs                # Prueba de humo del ciclo vehicular (Node 18+)
+│   ├── sql/minimo_privilegio.sql          # Rol de BD de mínimo privilegio (X5-e), opcional y sin aplicar
 │   ├── desbloquear_usuario.sh / .ps1      # Soporte: desbloquea usuarios bloqueados por intentos fallidos
 │   ├── backup_db.ps1 / restore_db.ps1     # Respaldo y restauración en Windows (desarrollo, .dump)
 │   └── README.md                          # Guía de respaldos y de la prueba de humo
 ├── docker-compose.yml                     # Compose de desarrollo local (db 5433, redis 6379, solo en 127.0.0.1)
 ├── docker-compose.prod.yml                # Compose de producción aislado (db, redis, backend, web)
+├── docker-compose.minimo-privilegio.yml   # Override OPCIONAL: migraciones con el dueño y backend con rol de BD limitado (X5-e)
 ├── .env.prod.example                      # Plantilla de variables de producción
 ├── RECHAZO.doc                            # Plantilla oficial Word de rechazo entregada por el cliente
 ├── CLAUDE.md                              # Guía técnica condensada (< 10k chars)

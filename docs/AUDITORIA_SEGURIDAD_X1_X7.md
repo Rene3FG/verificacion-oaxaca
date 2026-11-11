@@ -198,7 +198,7 @@ add_header Content-Security-Policy "default-src 'self'; frame-ancestors 'none'" 
 | X5-b | Media | **`python -m app.seed` no comprueba el entorno** y crea `operador1/operador1` y `supervisor1/supervisor1` (este último con permiso de supervisor). Ejecutarlo en producción por error dejaría un supervisor con contraseña pública. La política X6 las rechazaría por la API, pero el seed las inserta directo. | `seed.py:26`, `:32` |
 | X5-c | Media | **`.gitignore` no cubre `backups/` ni `*.dump`.** Los scripts de PowerShell escriben por defecto en `.\backups`, y esos archivos contienen propietario, domicilio y placas. Solo `respaldos/` (de los scripts de René) está ignorado; se comprobó con `git check-ignore`. | `.gitignore`; `scripts/README.md` |
 | X5-d | Baja | ~~En desarrollo, Redis sin contraseña y Postgres publicados a toda la red local.~~ **RESUELTO 2026-11-10:** `docker-compose.yml` publica `127.0.0.1:5433:5432` y `127.0.0.1:6379:6379`, de modo que solo el propio equipo los alcanza. | `docker-compose.yml:9`, `:21` |
-| X5-e | Baja | La aplicación se conecta con el mismo usuario con el que se crea la base (superusuario del contenedor). Por mínimo privilegio debería usar un rol sin `SUPERUSER` ni `CREATEDB`. | `docker-compose.prod.yml:18-21`, `:42-43` |
+| X5-e | Baja | La aplicación se conecta con el mismo usuario con el que se crea la base (superusuario del contenedor). Por mínimo privilegio debería usar un rol sin `SUPERUSER` ni `CREATEDB`. **Preparado el 2026-11-10, sin aplicar ni probar contra PostgreSQL real:** `scripts/sql/minimo_privilegio.sql` (rol sin DDL; la sintaxis se validó con el analizador de PostgreSQL), `docker-compose.minimo-privilegio.yml` (servicio `migrate` con el dueño y backend con el rol limitado; combinación validada con `docker compose config`) y la sección 3.6 del manual. | `docker-compose.prod.yml:18-21`, `:42-43` |
 | X5-f | Baja | `config.py` trae por defecto `verificacion:verificacion@localhost`. En producción fallaría por no alcanzar la base, pero conviene que la variable sea obligatoria. | `core/config.py:7-8` |
 
 **Mitigación propuesta**
@@ -207,7 +207,7 @@ add_header Content-Security-Policy "default-src 'self'; frame-ancestors 'none'" 
 2. **Guarda de entorno en `seed.py`** (X5-b): negarse a correr con `APP_ENV=production`, o exigir `--forzar` explícito. René.
 3. **`.gitignore`:** agregar `backups/`, `*.dump`, `*.sql.gz`, `certs/` (X5-c). Es un cambio de una línea y evita el incidente más caro de este grupo. Sebas.
 4. Bajar el riesgo en desarrollo (X5-d): publicar `127.0.0.1:5433:5432` y `127.0.0.1:6379:6379`.
-5. Rol de aplicación con privilegios mínimos (X5-e), creado por `bootstrap_prod`. René.
+5. Rol de aplicación con privilegios mínimos (X5-e). **Preparado por Sebas el 2026-11-10** como SQL independiente más un Compose opcional (no hizo falta tocar el backend: `alembic` y la aplicación ya leen variables distintas); René puede adoptarlo o llamarlo desde `bootstrap_prod`.
 
 **Esfuerzo:** bajo (medio día), salvo el rol de BD (medio día más).
 

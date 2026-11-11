@@ -195,6 +195,60 @@ Respuesta esperada: `HTTP/2 200` (la pantalla de la aplicación) y, con `curl -I
 
 El estado de salud del backend lo informa `docker compose ... ps` (el contenedor `backend` tiene un `healthcheck` sobre `/health`, ruta interna que nginx no expone).
 
+### 3.6 Rol de base de datos de mínimo privilegio (opcional, X5-e)
+
+Por defecto el backend se conecta a PostgreSQL con `POSTGRES_USER`, que es superusuario del contenedor. Si alguien lograra ejecutar código o SQL a través de la aplicación, alcanzaría toda la instancia. Esta sección reemplaza esa conexión por un rol que **solo lee y escribe datos**: no crea ni borra tablas, no administra roles y no puede vaciar tablas.
+
+> **Estado:** preparado, **no aplicado en ningún ambiente y no probado contra un PostgreSQL real** (la sintaxis del SQL se validó con el analizador de PostgreSQL y la combinación de los dos archivos de Compose con `docker compose config`). Pruébalo primero en un ambiente de pruebas, con una copia de la base.
+
+Piezas:
+
+| Archivo | Qué hace |
+|---|---|
+| `scripts/sql/minimo_privilegio.sql` | Crea (o actualiza) el rol de la aplicación y le da los permisos mínimos. Se ejecuta una vez por base; es repetible. |
+| `docker-compose.minimo-privilegio.yml` | Segundo archivo de Compose, opcional: corre las migraciones con el dueño en un servicio aparte y arranca el backend con el rol limitado. |
+| `APP_DB_USER`, `APP_DB_PASSWORD` | Variables de `.env.prod` con el rol y su contraseña (en `.env.prod.example`, comentadas). |
+
+**Por qué hay un servicio de migraciones aparte.** El backend normalmente ejecuta `alembic upgrade head` al arrancar, y eso exige cambiar el esquema. Con el rol limitado no puede. Con el segundo archivo de Compose, el servicio `migrate` corre las migraciones con las credenciales del dueño y termina; el backend espera a que concluya bien y no recibe nunca la contraseña del dueño. Esto no requiere modificar el código del backend (`alembic` lee `DATABASE_URL_SYNC` y la aplicación lee `DATABASE_URL`, variables distintas).
+
+**Pasos**
+
+1. Con el stack ya instalado y las migraciones aplicadas al menos una vez, elige la contraseña del rol (16 caracteres o más, solo letras y números, para que sirva sin escapar dentro de la URL de conexión) y aplica el SQL **con el mismo usuario que corre las migraciones**:
+
+   ```bash
+   read -rsp "Contraseña del rol de la aplicación: " APP_DB_PASSWORD; echo
+   { printf '\\set app_user verificacion_app\n\\set app_password %s\n' "'$APP_DB_PASSWORD'"; \
+     cat scripts/sql/minimo_privilegio.sql; } \
+   | docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T db \
+       sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f -'
+   ```
+
+   Debe terminar con `OK: rol verificacion_app creado o actualizado con privilegios mínimos.` El script verifica los permisos y, si algo no queda como se espera, deshace todo. Para que además las bitácoras `event_log` y `access_events` queden de solo escritura, agrega la línea `\set inmutables 1` antes del `cat` (pruébalo antes con la suite completa).
+2. Agrega a `.env.prod`: `APP_DB_USER=verificacion_app` y `APP_DB_PASSWORD=` con la misma contraseña.
+3. Arranca con los dos archivos:
+
+   ```bash
+   docker compose -f docker-compose.prod.yml -f docker-compose.minimo-privilegio.yml \
+       --env-file .env.prod up -d --build
+   ```
+
+4. Comprueba que el backend funciona (inicio de sesión y un expediente de prueba) y que el rol no es superusuario:
+
+   ```bash
+   echo "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = 'verificacion_app';" \
+   | docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T db \
+       sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+   ```
+
+**Importante**
+
+- En **todos** los comandos posteriores hay que repetir los dos `-f` (o el contenedor del backend volvería al modo normal y fallaría al no tener permiso para migrar).
+- Los scripts de soporte (`respaldo.sh`, `restaurar.sh`, `desbloquear_usuario.*`) siguen usando `POSTGRES_USER`, como corresponde: son tareas de administración.
+- El script quita el permiso de conexión a `PUBLIC` sobre la base. Si usas otro rol para monitoreo, concédele `CONNECT` aparte.
+- Las migraciones nuevas que agregue el equipo funcionan sin repetir el SQL: los permisos se asignan por defecto a las tablas que cree el dueño.
+- La contraseña pasa por la entrada estándar y no queda en el historial del shell, pero el SQL la recibe en claro: si activas `log_statement = all` en PostgreSQL, quedaría en el registro del servidor.
+- **Volver al modo normal:** omitir el segundo `-f` y reiniciar. El rol puede quedarse o eliminarse con `DROP OWNED BY verificacion_app; DROP ROLE verificacion_app;` ejecutado como dueño.
+
 ---
 
 ## 4. Configuración y Roles de Estaciones

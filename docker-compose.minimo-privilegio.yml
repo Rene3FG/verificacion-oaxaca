@@ -1,0 +1,46 @@
+# OPCIONAL: la aplicación con un rol de base de datos de mínimo privilegio (X5-e).
+# NO se usa por defecto: docker-compose.prod.yml sigue funcionando igual sin esto.
+#
+# Qué cambia respecto a producción normal:
+#   - Las migraciones (alembic upgrade head) corren en un servicio aparte, "migrate",
+#     con las credenciales del dueño (POSTGRES_USER). Termina y se apaga.
+#   - El backend arranca solo con uvicorn y se conecta con APP_DB_USER, que solo
+#     puede leer y escribir datos. Sus variables de entorno ya no contienen la
+#     contraseña del superusuario.
+#
+# Requisitos (ver docs/MANUAL_INSTALACION_Y_OPERACION.md, "Rol de base de datos de
+# mínimo privilegio"):
+#   1. Haber ejecutado antes scripts/sql/minimo_privilegio.sql en la base.
+#   2. Definir APP_DB_USER y APP_DB_PASSWORD en .env.prod.
+#
+# Uso (se agrega el segundo archivo con -f):
+#   docker compose -f docker-compose.prod.yml -f docker-compose.minimo-privilegio.yml \
+#       --env-file .env.prod up -d --build
+#
+# Para volver al modo normal, basta con omitir el segundo -f.
+services:
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      # alembic solo lee DATABASE_URL_SYNC (backend/alembic/env.py).
+      DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD:?definir POSTGRES_PASSWORD en .env.prod}@db:5432/${POSTGRES_DB}
+      APP_ENV: production
+      TZ: America/Mexico_City
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    # Sin "alembic upgrade head": de eso se encarga el servicio migrate.
+    command: ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${APP_DB_USER:?definir APP_DB_USER en .env.prod}:${APP_DB_PASSWORD:?definir APP_DB_PASSWORD en .env.prod}@db:5432/${POSTGRES_DB}
+      # El backend no usa esta URL, pero no debe quedarse con la del dueño.
+      DATABASE_URL_SYNC: postgresql+psycopg2://${APP_DB_USER:?definir APP_DB_USER en .env.prod}:${APP_DB_PASSWORD:?definir APP_DB_PASSWORD en .env.prod}@db:5432/${POSTGRES_DB}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
