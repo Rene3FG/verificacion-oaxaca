@@ -197,7 +197,7 @@ add_header Content-Security-Policy "default-src 'self'; frame-ancestors 'none'" 
 | X5-a | Media | `.env.prod.example` trae una contraseña de relleno **pública** (`CAMBIAR_contraseña_larga_y_unica`) y el compose no obliga a cambiarla: usa `${POSTGRES_PASSWORD}` sin comprobar. Un despliegue que copie el ejemplo sin editarlo queda con una contraseña conocida. | `.env.prod.example:3`; `docker-compose.prod.yml:20` |
 | X5-b | Media | **`python -m app.seed` no comprueba el entorno** y crea `operador1/operador1` y `supervisor1/supervisor1` (este último con permiso de supervisor). Ejecutarlo en producción por error dejaría un supervisor con contraseña pública. La política X6 las rechazaría por la API, pero el seed las inserta directo. | `seed.py:26`, `:32` |
 | X5-c | Media | **`.gitignore` no cubre `backups/` ni `*.dump`.** Los scripts de PowerShell escriben por defecto en `.\backups`, y esos archivos contienen propietario, domicilio y placas. Solo `respaldos/` (de los scripts de René) está ignorado; se comprobó con `git check-ignore`. | `.gitignore`; `scripts/README.md` |
-| X5-d | Baja | En desarrollo, Redis sin contraseña y Postgres publicados a toda la red local. | `docker-compose.yml:9`, `:21` |
+| X5-d | Baja | ~~En desarrollo, Redis sin contraseña y Postgres publicados a toda la red local.~~ **RESUELTO 2026-11-10:** `docker-compose.yml` publica `127.0.0.1:5433:5432` y `127.0.0.1:6379:6379`, de modo que solo el propio equipo los alcanza. | `docker-compose.yml:9`, `:21` |
 | X5-e | Baja | La aplicación se conecta con el mismo usuario con el que se crea la base (superusuario del contenedor). Por mínimo privilegio debería usar un rol sin `SUPERUSER` ni `CREATEDB`. | `docker-compose.prod.yml:18-21`, `:42-43` |
 | X5-f | Baja | `config.py` trae por defecto `verificacion:verificacion@localhost`. En producción fallaría por no alcanzar la base, pero conviene que la variable sea obligatoria. | `core/config.py:7-8` |
 
@@ -349,7 +349,7 @@ Se aplicó solo lo que cae en archivos de ops y documentación. Lo de `backend/*
 3. ~~Comprobar que el 429 del login se ve como un mensaje legible y no como un error de permisos~~ **VALIDADO 2026-11-09:** comprobado mediante Puppeteer; el 429 renderiza de forma nítida la alerta roja con el texto *"Demasiados intentos de inicio de sesión desde este equipo. Espera un minuto."* sin desbordar el contenedor ni romper el formulario con una respuesta 429 simulada en el navegador (captura local del equipo, no versionada en el repositorio); falta verlo con el nginx real.
 4. Si todas las estaciones de un centro salen por una misma IP (NAT o proxy), el límite de 30 por minuto se compartirá entre ellas; subir `rate` y `burst` si se nota al iniciar turno.
 
-**Sin aplicar de la Fase A:** puertos de desarrollo en `127.0.0.1` (X5-d), guarda de entorno del `seed`, ampliar la lista de comunes y apagar `/docs` en producción (backend).
+**Sin aplicar de la Fase A:** ~~puertos de desarrollo en `127.0.0.1` (X5-d)~~ (hecho el 2026-11-10), guarda de entorno del `seed`, ampliar la lista de comunes y apagar `/docs` en producción (backend).
 
 ---
 
