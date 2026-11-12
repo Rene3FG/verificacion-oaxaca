@@ -193,7 +193,7 @@ Comprobar que nginx responde por HTTPS con la CA local:
 ```bash
 curl --cacert certs/ca/ca.crt -I https://localhost/
 ```
-Respuesta esperada: `HTTP/2 200` (la pantalla de la aplicación) y, con `curl -I http://localhost/`, un `301` hacia `https://`.
+Respuesta esperada: `HTTP/2 200` (la pantalla de la aplicación) y, con `curl -I http://localhost/`, un `301` hacia `https://`. En Windows, `curl.exe` usa SChannel y exige además `--ssl-no-revoke`, porque la CA local no publica una lista de revocación (CRL).
 
 El estado de salud del backend lo informa `docker compose ... ps` (el contenedor `backend` tiene un `healthcheck` sobre `/health`, ruta interna que nginx no expone).
 
@@ -201,7 +201,7 @@ El estado de salud del backend lo informa `docker compose ... ps` (el contenedor
 
 Por defecto el backend se conecta a PostgreSQL con `POSTGRES_USER`, que es superusuario del contenedor. Si alguien lograra ejecutar código o SQL a través de la aplicación, alcanzaría toda la instancia. Esta sección reemplaza esa conexión por un rol que **solo lee y escribe datos**: no crea ni borra tablas, no administra roles y no puede vaciar tablas.
 
-> **Estado:** preparado y no aplicado en ningún ambiente. **Probado 2026-11-11 contra PostgreSQL 16 real** (contenedor desechable): el script rechaza los 3 casos inválidos (sin `app_user`, contraseña corta, `app_user` = dueño), es repetible, y el rol no puede `TRUNCATE`, `DROP`, `ALTER`, `CREATE TABLE`, `CREATE ROLE` ni leer `alembic_version`. Con el backend conectado como ese rol, el smoke E2E de API (17 pasos) pasó completo, también con `inmutables=1`, y bloqueo/desbloqueo/logout funcionaron sin errores de permisos. `desbloquear_usuario.sh` (con `--simular` y real) también se probó contra esa base. El archivo de Compose combinado no se levantó completo (solo se validó con `docker compose config`). Pruébalo primero en un ambiente de pruebas, con una copia de la base.
+> **Estado:** preparado y **no aplicado en producción**. Probado en un ambiente de pruebas: René (2026-11-11) contra PostgreSQL 16 real y el equipo (2026-11-12, proyecto aislado `qa-oaxaca` en Docker, 2026-11-12, resultado reportado por el equipo) con el Compose combinado y TLS. El script rechaza los 3 casos inválidos (sin `app_user`, contraseña corta, `app_user` = dueño), es repetible, y el rol no puede `TRUNCATE`, `DROP`, `ALTER`, `CREATE TABLE`, `CREATE ROLE` ni leer `alembic_version`. Con `docker-compose.prod.yml` más `docker-compose.minimo-privilegio.yml`: `migrate` aplicó las migraciones hasta `e1f4a8c2d5b9`, se aplicó `minimo_privilegio.sql` con `inmutables=1`, el backend con `verificacion_app` quedó `healthy` y `python -m app.bootstrap_prod` cargó los límites NOM-041 y NOM-045, las estaciones y el supervisor. El smoke E2E de API (17 pasos) pasó contra `https://localhost` con ese rol, también con `inmutables=1`, y bloqueo, desbloqueo y cierre de sesión funcionaron sin errores de permisos. Pruébalo primero en un ambiente de pruebas, con una copia de la base.
 
 Piezas:
 
@@ -359,7 +359,7 @@ Pide escribir `SI` porque **borra la base actual**: detiene el backend, la recre
 
 Procedimiento para pasar el servidor de una versión a otra sin perder los registros: **respaldo previo verificado → actualización de imágenes y migraciones → verificación → rollback si algo falla**. Las migraciones de base de datos (`alembic upgrade head`) se aplican solas al arrancar el backend.
 
-> **Estado:** procedimiento redactado a partir de los scripts y de la configuración del repositorio. **No se ha ejecutado de punta a punta con datos reales** y los comandos de Compose no se corrieron al redactarlo. Ensayarlo primero en un ambiente aparte (un servidor de pruebas con una copia de un respaldo) antes de la primera actualización real.
+> **Estado:** **ensayado en parte** en un ambiente de pruebas (proyecto aislado `qa-oaxaca` en Docker, 2026-11-12, resultado reportado por el equipo): respaldo con `--no-owner` (97 689 bytes), restauración de prueba en `verificacion_prueba` y su `DROP DATABASE`; y el rollback de 8.4 con el rol de mínimo privilegio: se ensució la base (una tabla de una migración "fallida" y `alembic_version` falsa), se hizo `down` sin `-v`, `up -d db` y la restauración, y después `alembic_version` volvió a `e1f4a8c2d5b9`, la tabla ensuciada desapareció y `verificaciones` quedó legible por `verificacion_app`. **Falta** ensayar la actualización completa sobre una copia de un respaldo de producción real y comprobar HTTP 200 con el stack levantado después de restaurar (ese último `up -d` del ensayo se interrumpió antes de comprobarlo). Hacerlo antes de la primera actualización real.
 
 **Antes de empezar**
 - La actualización **detiene el servicio**: las estaciones no pueden operar mientras dura. Hacerla fuera del horario de verificación y avisar.
@@ -451,8 +451,8 @@ Se vuelve atrás **restaurando el respaldo previo**, no con `alembic downgrade`:
    ```bash
    scripts/restaurar.sh /var/respaldos/verificacion/verificacion_AAAAMMDD_HHMMSS.sql.gz
    ```
-   Pide escribir `SI`, detiene el backend (que aquí aún no existe), recrea la base y carga el respaldo. Este script usa fijo `docker-compose.prod.yml` y `.env.prod`, sin el archivo de mínimo privilegio, lo cual basta porque solo toca la base de datos. Su último paso inicia el backend, y como en este punto no hay contenedor de backend es posible que termine con un aviso o un error en ese paso: la restauración ya se hizo antes. Comprobarlo con la consulta de revisión (`alembic_version`) y la de conteos de 8.2.2, y continuar.
-6. **Solo si se usa el rol de mínimo privilegio** (sección 3.6): volver a aplicar `scripts/sql/minimo_privilegio.sql` (paso 1 de 3.6, con la misma contraseña de `APP_DB_PASSWORD`). Restaurar borra y recrea la base, y un respaldo de `pg_dump` no conserva los permisos a nivel de base de datos (el `REVOKE` y `GRANT CONNECT ON DATABASE` del script): sin este paso la aplicación funciona, pero la base queda más abierta que antes. El script es repetible, así que no estorba si ya estaban.
+   Pide escribir `SI`, detiene el backend (que aquí aún no existe), recrea la base y carga el respaldo. Este script usa fijo `docker-compose.prod.yml` y `.env.prod`, sin el archivo de mínimo privilegio, lo cual basta porque solo toca la base de datos. Sus pasos `stop backend` y `start backend` no fallan aunque el contenedor del backend aún no exista (comprobado con Docker Compose v5.5.1 en el ensayo; en otras versiones, si el script termina con un aviso en ese último paso, la restauración ya se hizo: comprobar con la consulta de revisión y la de conteos de 8.2.2 y continuar). Como el backend no existe todavía, quedará levantado en el paso 7.
+6. **Solo si se usa el rol de mínimo privilegio** (sección 3.6): volver a aplicar `scripts/sql/minimo_privilegio.sql` (paso 1 de 3.6, con la misma contraseña de `APP_DB_PASSWORD`). Restaurar borra y recrea la base, y un respaldo de `pg_dump` no conserva los permisos a nivel de base de datos (el `REVOKE` y `GRANT CONNECT ON DATABASE` del script): sin este paso la aplicación funciona, pero la base queda más abierta que antes. En el ensayo se comprobó que, tras `DROP` y `CREATE DATABASE`, `PUBLIC` vuelve a tener `CONNECT`, y que reaplicar el script lo quita de nuevo. El script es repetible, así que no estorba si ya estaban.
 7. Levantar el stack con la versión anterior (el servicio `migrate`, si se usa, no tendrá nada que migrar):
    ```bash
    $COMPOSE up -d --build

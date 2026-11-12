@@ -172,7 +172,7 @@ COMPOSE_ARGS="-f docker-compose.yml" scripts/desbloquear_usuario.sh operador1
 - Requiere que el contenedor `db` esté en ejecución y modifica la base directamente: hacer un respaldo antes si hay dudas.
 - Solo levanta el bloqueo **por intentos**. No reactiva a un usuario desactivado (`is_active = false`); eso se hace desde Administración.
 - Tras el desbloqueo, la contraseña sigue siendo la misma: si el usuario no la recuerda, un supervisor debe restablecerla.
-- Los scripts se probaron con un `docker` simulado (validación de argumentos, confirmación, simulación, error si quedan intentos y que el SQL sea ASCII y no contenga el usuario). René probó `desbloquear_usuario.sh` (con `--simular` y real) contra un PostgreSQL 16 real el 2026-11-11. La versión de PowerShell (`.ps1`) solo se probó con un `docker` simulado; la primera corrida contra una base real debería hacerse con `-Simular` en un ambiente de pruebas.
+- Los scripts se probaron con un `docker` simulado (validación de argumentos, confirmación, simulación, error si quedan intentos y que el SQL sea ASCII y no contenga el usuario). René probó `desbloquear_usuario.sh` (con `--simular` y real) contra un PostgreSQL 16 real el 2026-11-11. El equipo probó `desbloquear_usuario.ps1` el 2026-11-12 en Windows contra un PostgreSQL 16 real (proyecto aislado `qa-oaxaca`, con `inmutables=1`; resultado reportado por el equipo): con un usuario bloqueado por 5 fallos (HTTP 429), `-Simular` listó los 5 intentos sin modificar la base y la ejecución real, confirmando con `SI`, los liberó y el usuario volvió a poder entrar. En una base de producción, correr primero con `-Simular`.
 
 ---
 
