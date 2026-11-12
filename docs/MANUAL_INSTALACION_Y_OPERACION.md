@@ -152,6 +152,8 @@ La carpeta `certs/` no se versiona. Al terminar, el script muestra la **huella S
 
 Comprobar siempre que la huella que muestra el sistema coincida con la anotada.
 
+Para no hacerlo a mano, los scripts `scripts/instalar_ca.ps1` (Windows, usa `certutil`) y `scripts/instalar_ca.sh` (Linux) validan que el archivo sea una CA vigente, comparan la huella con `-HuellaEsperada` / `--huella` (la anotada al generar los certificados), instalan solo si coincide y son repetibles; ver `scripts/README.md`, sección 7. En Linux, Chrome y Chromium usan su propia base NSS: ejecutar además `scripts/instalar_ca.sh --nss` como el usuario de la estación.
+
 **3. Renovación.** El certificado del servidor dura 825 días. Anotar la fecha y renovarlo **antes** de que venza (con 60 días de margen):
 ```bash
 openssl x509 -in certs/server/server.crt -noout -enddate        # fecha de vencimiento

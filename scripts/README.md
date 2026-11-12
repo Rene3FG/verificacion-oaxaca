@@ -17,6 +17,7 @@ Este directorio contiene las herramientas ejecutables para cumplir con la polít
 | `desbloquear_usuario.sh` / `.ps1` | Linux / Windows | Soporte: desbloquea a un usuario bloqueado por intentos fallidos de login (X1). Ver sección 5. |
 | `sql/minimo_privilegio.sql` | PostgreSQL (psql) | Crea el rol de BD de mínimo privilegio de la aplicación (X5-e). Opcional y no aplicado; ver el manual, sección 3.6. |
 | `generar_certificados.sh` | Linux, o Windows con Git Bash o WSL | Genera la CA local y el certificado TLS del servidor (X3). Ver sección 6. |
+| `instalar_ca.sh` / `.ps1` | Linux / Windows | Instala o quita la CA local en el almacén de confianza de las estaciones cliente (X3). Ver sección 7. |
 
 ---
 
@@ -83,8 +84,8 @@ Recorre el ciclo completo contra la API local y confirma el estado del expedient
 
 1. Detección de estación y login en Captura.
 2. Creación del expediente con una placa única `PRU-` + 6 dígitos del reloj.
-3. Captura de datos del vehículo y del certificado, y normalización.
-4. Login en Prueba, inspección visual aprobada (el checklist se lee de `GET /api/inspeccion/checklist`) y evaluación OBD/SBD.
+3. Captura de datos del vehículo y del certificado, normalización e inspección visual aprobada en caseta (NOM-047 Opción A; el checklist se lee de `GET /api/inspeccion/checklist`).
+4. Login en Prueba y evaluación OBD/SBD.
 5. Configuración, inicio y resultado de la prueba con lecturas aprobadas (modo de equipo `manual`, o `simulador` con escenario `APROBADO`).
 6. Login en Impresión Central, verificación del inventario de folios (da de alta un lote si no quedan), tipo de certificado, solicitud de folio e impresión, con estado final `IMPRESO`.
 
@@ -197,3 +198,40 @@ scripts/generar_certificados.sh --hosts "verificentro.local,192.168.1.100"
 **Renovar:** volver a ejecutarlo con las mismas opciones. Si la CA existe y no vence en 30 días, se reutiliza y las estaciones no cambian nada; solo se firma un certificado de servidor nuevo.
 
 **Cómo se probó:** en Windows (Git Bash, OpenSSL 3.2) y en Linux (WSL2, OpenSSL 3.0). Se comprobó la validación de argumentos (incluida la lista de `--hosts`: espacios internos, IPs mal escritas y nombres que parecen IP), la cadena de confianza, los nombres y la IP recomendados, la reutilización de la CA y la renovación, y se hizo un **handshake TLS real** con un servidor y clientes de prueba: conecta con TLS 1.3 con la CA instalada, rechaza un nombre que no está en el certificado, desconfía si la estación no tiene la CA y rechaza TLS 1.1. **No se ha probado con el `nginx` del stack** (pendiente de encender Docker).
+
+---
+
+## 7. Instalación de la CA en Estaciones Cliente (`instalar_ca.sh` / `instalar_ca.ps1`)
+
+Registra el certificado de la CA raíz (`certs/ca/ca.crt`) en el almacén de certificados de confianza de las estaciones cliente del verificentro (**PENDIENTES X3**), permitiendo que Chrome y Edge establezcan conexiones HTTPS seguras sin advertencias.
+
+```bash
+# Linux (almacén del sistema, requiere sudo)
+sudo scripts/instalar_ca.sh --ca certs/ca/ca.crt --huella "CA:ED:09:..."
+
+# Linux (base NSS de Chrome/Chromium del usuario, sin sudo)
+scripts/instalar_ca.sh --nss --ca certs/ca/ca.crt --huella "CA:ED:09:..."
+```
+
+```powershell
+# Windows (PowerShell como Administrador, almacén Equipo/Root)
+.\scripts\instalar_ca.ps1 -CaCert certs\ca\ca.crt -HuellaEsperada "CA:ED:09:..."
+
+# Modo simulación
+.\scripts\instalar_ca.ps1 -Simular
+```
+
+| Opción | Por defecto | Uso |
+|---|---|---|
+| `-CaCert` / `--ca` | `certs/ca/ca.crt` | Ruta al archivo de la CA exportada desde el servidor. |
+| `-HuellaEsperada` / `--huella` | Opcional | Huella SHA-256 informada al generar los certificados. Si no coincide, rechaza la instalación. |
+| `-Desinstalar` / `--desinstalar` | Desactivado | Retira el certificado del almacén de confianza. |
+| `-Simular` / `--simular` | Desactivado | Valida el certificado y muestra el comando sin modificar el sistema. |
+| `-Alcance` (Windows) | `Equipo` | `Equipo` instala para todos los usuarios y exige PowerShell como administrador; `Usuario` solo para el usuario actual (Windows muestra un cuadro de confirmación). |
+| `-Almacen` (Windows) | `Root` | Almacén de destino; solo se cambia para pruebas. |
+| `--destino` (Linux) | según la distribución | Carpeta de anclas del sistema (`/usr/local/share/ca-certificates` o `/etc/pki/ca-trust/source/anchors`); solo para pruebas o distribuciones raras. |
+
+Ambos scripts rechazan un archivo que no sea una CA (por ejemplo `server.crt`), una CA vencida o una huella que no coincida, y son repetibles: si la CA ya está instalada no hacen nada.
+
+**Verificación (2026-11-11):** la versión de Windows se probó con el `certutil` real contra un almacén de prueba del usuario (instalar, repetir, desinstalar y rechazos), sin tocar `Root`; la de Linux, con `update-ca-certificates` e `id` simulados. **No se han ejecutado** contra el almacén `Root` de una estación real, ni `update-ca-trust` (Fedora/RHEL), ni la base NSS real (`--nss`, solo en simulación). Probar primero en una estación de pruebas.
+

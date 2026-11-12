@@ -153,7 +153,7 @@ En el compose: publicar `443` además de `80`, montar los certificados como volu
 
 **Cambio de comportamiento a tener presente:** `docker compose up` ya no arranca sin certificados. Quien despliegue debe ejecutar antes `scripts/generar_certificados.sh`.
 
-**Pendiente de X3:** probar con un navegador real, instalar la CA en las estaciones cliente, el procedimiento con Let's Encrypt en el VPS (sin probar; falta montar `/var/www/certbot` si se usa `--webroot`) y decidir cuándo activar HSTS.
+**Pendiente de X3:** instalar la CA en las estaciones físicas (los instaladores `scripts/instalar_ca.ps1` y `.sh` están listos y probados con almacenes de prueba, no en una estación real), el procedimiento con Let's Encrypt en el VPS (sin probar; falta montar `/var/www/certbot` si se usa `--webroot`) y decidir cuándo activar HSTS.
 
 ---
 
