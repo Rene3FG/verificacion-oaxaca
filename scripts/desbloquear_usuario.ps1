@@ -2,8 +2,9 @@
 .SYNOPSIS
     Desbloquea a un usuario bloqueado por intentos fallidos de login (PENDIENTES X1).
 .DESCRIPTION
-    Herramienta de SOPORTE: toca la base de datos directamente. La API no tiene hoy una vía
-    de desbloqueo (falta POST /api/usuarios/{id}/desbloquear).
+    Herramienta de SOPORTE: toca la base de datos directamente. Lo normal es que otro
+    supervisor use el botón Desbloquear (POST /api/usuarios/{id}/desbloquear, desde
+    2026-11-09); este script queda para cuando el bloqueado es el único supervisor.
 
     El backend bloquea a un usuario cuando acumula LOGIN_MAX_INTENTOS intentos fallidos
     recientes (motivo "Credenciales inválidas" en access_events, desde su último login

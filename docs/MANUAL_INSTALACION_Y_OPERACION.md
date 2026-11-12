@@ -201,7 +201,7 @@ El estado de salud del backend lo informa `docker compose ... ps` (el contenedor
 
 Por defecto el backend se conecta a PostgreSQL con `POSTGRES_USER`, que es superusuario del contenedor. Si alguien lograra ejecutar código o SQL a través de la aplicación, alcanzaría toda la instancia. Esta sección reemplaza esa conexión por un rol que **solo lee y escribe datos**: no crea ni borra tablas, no administra roles y no puede vaciar tablas.
 
-> **Estado:** preparado, **no aplicado en ningún ambiente y no probado contra un PostgreSQL real** (la sintaxis del SQL se validó con el analizador de PostgreSQL y la combinación de los dos archivos de Compose con `docker compose config`). Pruébalo primero en un ambiente de pruebas, con una copia de la base.
+> **Estado:** preparado y no aplicado en ningún ambiente. **Probado 2026-11-11 contra PostgreSQL 16 real** (contenedor desechable): el script rechaza los 3 casos inválidos (sin `app_user`, contraseña corta, `app_user` = dueño), es repetible, y el rol no puede `TRUNCATE`, `DROP`, `ALTER`, `CREATE TABLE`, `CREATE ROLE` ni leer `alembic_version`. Con el backend conectado como ese rol, el smoke E2E de API (17 pasos) pasó completo, también con `inmutables=1`, y bloqueo/desbloqueo/logout funcionaron sin errores de permisos. `desbloquear_usuario.sh` (con `--simular` y real) también se probó contra esa base. El archivo de Compose combinado no se levantó completo (solo se validó con `docker compose config`). Pruébalo primero en un ambiente de pruebas, con una copia de la base.
 
 Piezas:
 
