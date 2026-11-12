@@ -77,7 +77,7 @@ El código funciona con estas decisiones tomadas "por defecto"; cada una vive en
 | # | Hallazgo | Riesgo |
 |---|---|---|
 | R1 | Un snapshot viejo reintentado después de uno nuevo podría sobrescribir el estado en el central si éste aplica "última llegada gana" | Hay que fijar en el contrato (B3) que resuelva por `created_at` del cuerpo |
-| R2 | Con varios workers de uvicorn hay un bucle de sync automático por proceso | Envío duplicado inofensivo (idempotente); aun así, documentar "un solo worker" en el manual |
+| R2 | ~~Con varios workers de uvicorn hay un bucle de sync automático por proceso~~ **DOCUMENTADO 2026-11-11**: `Dockerfile.prod` ya arranca con `--workers 1`; el manual (sección de operación sin internet) indica no aumentarlo | Envío duplicado inofensivo (idempotente) |
 | R3 | `procesar_pendientes` mantiene la transacción abierta hasta 50 × 10 s con el central caído | Bloqueos largos; ya se mitigó con `SKIP LOCKED` y corte del lote, conviene vigilarlo en carga real |
 | R4 | `PATCH` de vehículo ahora es 409 desde `IMPRESO`; antes se permitía en cualquier punto | Confirmar con el cliente que corregir datos con el papel impreso va por reimpresión supervisada |
 
@@ -116,7 +116,7 @@ Auditoría completa del 2026-11-04 en `docs/AUDITORIA_SEGURIDAD_X1_X7.md` (evide
 |---|---|
 | Q1 | ~~Pruebas de frontend: hoy hay 60 (estado, sesión, TopAppBar, ExpedienteHeader). **Faltan** las vistas grandes: `ImpresionView` (1 053 líneas), `PruebaView`, `CapturaView`, `SupervisorView`~~ **RESUELTO 2026-10-23** (las cuatro vistas con suite: `ImpresionView` el 10-21, `CapturaView` el 10-22, `PruebaView` y `SupervisorView` el 10-23). Después se sumó `AdministracionPanel` (10-28): hoy hay 397 pruebas en 11 suites de Vitest y todos los componentes y vistas están cubiertos |
 | Q2 | ~~Pruebas de extremo a extremo (Puppeteer)~~ **RESUELTO 2026-11-06**: Doble cobertura E2E automatizada y repetible: (1) Por API con `scripts/smoke_e2e_flujo.mjs` (17 pasos de Captura a Impresión Central, 100% verde en Docker con PDF generado); y (2) Por interfaz en navegador con `scripts/smoke_e2e_ui.mjs` (Puppeteer/Chrome headless, 11 pasos interactivos cubriendo LoginView con detección de estación, rechazo de credenciales, CapturaView con creación de expedientes, PruebaView, ImpresionView y las 5 pestañas de SupervisorView, 100% verde en 19.5 s) |
-| Q3 | Cobertura 403 por router: completa en `impresion.py`; **todas las rutas de supervisor y el 401 de todas las privadas con prueba automática desde 2026-11-09**; faltan combinaciones de tipo de estación en `obd`, `pruebas`, `folios` |
+| Q3 | Cobertura 403 por router: completa en `impresion.py`; **todas las rutas de supervisor y el 401 de todas las privadas con prueba automática desde 2026-11-09**. ~~Faltan combinaciones de tipo de estación en `obd`, `pruebas`, `folios`~~ **RESUELTO 2026-11-11**: `test_rutas_protegidas.py` lee los tipos de cada `requiere_estacion(...)` y prueba 403 desde cada tipo no permitido en todas las rutas (66 casos, incluye obd/pruebas/folios) |
 | Q4 | Pruebas de carga y concurrencia realistas (varias estaciones simultáneas, folios atómicos bajo carga) |
 | Q5 | **UAT de las 41 pantallas contra el Figma**, con lista de diferencias (Fase 4). El Figma no se relee desde el 09-28 |
 | Q6 | ~~HU en SOLO_FRONTEND sin prueba: HU-005, 006, 050, 058, 059, 060~~ **RESUELTO 2026-10-27** (categoría `SOLO_FRONTEND` erradicada, 0 HUs; HU-005 y HU-006 con las pruebas de `27f2a5a`) |

@@ -312,6 +312,7 @@ El sistema cuenta con resiliencia total frente a cortes del enlace estatal de in
 2. **Continuidad Operativa:** El centro **NO debe suspender operaciones**. Las capturas, pruebas, asignaciones de folio e impresiones continúan ejecutándose normalmente contra la base de datos local.
 3. **Cola de Salida (`sync_outbox`):** Cada evento y medición queda registrado con firma de integridad SHA-256 en la cola transaccional local.
 4. **Restablecimiento del Servicio:** Al volver la conectividad, el servicio de sincronización en segundo plano drenará progresivamente los registros pendientes hacia el servidor central. El supervisor también puede forzar el reintento inmediato mediante el botón *"Sincronizar ahora"*.
+5. **Un solo proceso de backend:** el bucle de sincronización corre dentro de cada proceso de uvicorn. La imagen de producción arranca con `--workers 1`; no aumentar ese número, porque cada proceso extra repetiría los envíos al central (son idempotentes, pero duplican tráfico y bloqueos).
 
 ---
 
