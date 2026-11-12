@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Prueba de humo del ciclo vehicular completo contra la API local.
 //
-// Recorre: Captura -> Inspección visual -> OBD/SBD -> Prueba -> Folio ->
-// Impresión Central, con un expediente de placa única (PRU-<dígitos>), y
-// valida el estado del expediente después de cada paso. Termina con el estado
-// final IMPRESO. Solo usa `fetch` nativo (Node 18 o superior).
+// Recorre: Captura (registro, datos e inspección visual NOM-047) -> Prueba
+// (OBD/SBD y emisiones) -> Folio -> Impresión Central, con un expediente de
+// placa única (PRU-<dígitos>), y valida el estado del expediente después de cada
+// paso. Termina con el estado final IMPRESO. Solo usa `fetch` nativo (Node 18 o
+// superior).
 //
 // Uso:  node scripts/smoke_e2e_flujo.mjs
 // Requiere backend, Postgres y Redis arriba y `python -m app.seed` aplicado
@@ -170,7 +171,7 @@ async function ciclo() {
     );
   });
 
-  await paso("Confirmar normalización y enviar a Inspección Visual", async () => {
+  await paso("Confirmar normalización y pasar a Inspección Visual", async () => {
     const exp = await api("POST", `/api/expedientes/${id}/normalizar`, { sesion: captura });
     esperar(
       exp.estado === "INSPECCION_VISUAL_PENDIENTE",
@@ -178,20 +179,20 @@ async function ciclo() {
     );
   });
 
-  // 3-4. Inspección visual y OBD en la estación de Prueba
+  await paso("Inspección visual en Captura aprobada (NOM-047, todos en BUENO)", async () => {
+    const puntos = await api("GET", "/api/inspeccion/checklist", { sesion: captura });
+    esperar(Array.isArray(puntos) && puntos.length > 0, "el checklist de inspección llegó vacío");
+    const checklist = Object.fromEntries(puntos.map((p) => [p.clave, "BUENO"]));
+    const r = await api("POST", `/api/inspeccion/${id}`, { sesion: captura, cuerpo: { checklist } });
+    esperar(r.resultado === "APROBADA", `resultado esperado APROBADA, recibido ${r.resultado}`);
+    return { nota: `${puntos.length} puntos evaluados en caseta` };
+  });
+
+  // 3-4. OBD y prueba en la estación de Prueba
   const prueba = await paso(`Login en estación de Prueba (${config.estaciones.prueba})`, async () => {
     const { sesion, estacion } = await iniciarSesion("prueba");
     esperar(estacion.station_type === "prueba", `la estación detectada es de tipo ${estacion.station_type}`);
     return { valor: sesion, nota: `línea ${sesion.line_id}` };
-  });
-
-  await paso("Inspección visual aprobada (todos los puntos en BUENO)", async () => {
-    const puntos = await api("GET", "/api/inspeccion/checklist", { sesion: prueba });
-    esperar(Array.isArray(puntos) && puntos.length > 0, "el checklist de inspección llegó vacío");
-    const checklist = Object.fromEntries(puntos.map((p) => [p.clave, "BUENO"]));
-    const r = await api("POST", `/api/inspeccion/${id}`, { sesion: prueba, cuerpo: { checklist } });
-    esperar(r.resultado === "APROBADA", `resultado esperado APROBADA, recibido ${r.resultado}`);
-    return { nota: `${puntos.length} puntos` };
   });
 
   await paso("Evaluar OBD/SBD", async () => {
