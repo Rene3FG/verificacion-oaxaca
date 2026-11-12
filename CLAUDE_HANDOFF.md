@@ -2,9 +2,9 @@
 
 **De:** Antigravity (AI Pair Programmer)  
 **Para:** Claude (AI Assistant) & Sebas  
-**Fecha de corte:** 4 de noviembre de 2026 (Semana 8 — Miércoles)  
-**Rama activa:** `frontend-impresion-central` (merge de upstream `7d36cdc`; auditoría de seguridad y Fase A de ops integradas)  
-**Estado upstream:** Upstream de René (`origin/etapa1-y-siox` en `8632769`) integrado vía merge `7d36cdc`: F9 (contador `sincronizando`, `14469e3`) y F4 (catálogo de equipos, `8632769`).
+**Fecha de corte:** 11 de noviembre de 2026 (Semana 8 — Miércoles)  
+**Rama activa:** `frontend-impresion-central`, en paridad con René hasta `f326084` (Q3: 403 por tipo de estación en todas las rutas). Incluye de René el cierre de NOM-047 Opción A (inspección visual solo en Captura; Prueba recibe 403, `a8d708b`), el barrido de sesiones vencidas (X2-d, `b9cf70b`) y el retiro del symlink `backend/.venv` (`fe5348e`).  
+**Estado upstream:** `origin/etapa1-y-siox` integrado en la rama; sin commits nuevos de René pendientes de integrar al momento del corte.  
 
 ---
 
@@ -69,6 +69,15 @@
    - **Verificado:** el generador en Windows (OpenSSL 3.2) y Linux (WSL2, OpenSSL 3.0) y un handshake TLS real (TLS 1.3 con la CA instalada; rechaza nombre ajeno al certificado, estación sin la CA y TLS 1.1); el compose con `docker compose config`. `nginx -t` pasó en Docker el 2026-11-05, y con el nginx real levantado solo se comprobaron la redirección 80 a 443, las cabeceras, `server_tokens off` y el 429 en JSON del límite de login. **Falta probarlo con un navegador.**
    - **Cambio de comportamiento:** `docker compose up` ya no arranca sin certificados; hay que ejecutar antes el generador. El manual traía además una verificación errónea (`/api/health` no existe) que se corrigió.
    - **Valores definidos con el equipo (2026-11-04):** `scripts/generar_certificados.sh --hosts "verificentro.local,192.168.1.100"` (el script acepta `--hosts` con lista separada por comas; la IP se cambia por la que asigne el router de cada centro; `localhost` y `127.0.0.1` van siempre). Los nombres `.local` solo resuelven si la red lo permite (mDNS, DNS del router o `hosts`); si no, las estaciones abren por la IP, que también está en el certificado. Staging en la nube (`stg-analizador.verificacionoaxaca.com`): certificado público (Let's Encrypt), no la CA local.
+
+
+9. **Cierre de NOM-047 y seguridad operativa (2026-11-09 al 2026-11-11):**
+   - **NOM-047 Opción A, cerrada de ambos lados.** Frontend (`5e69677`): se retiró de `PruebaView.vue` el estado `INSPECCION_VISUAL_PENDIENTE` y el checklist duplicado; la inspección vive en `CapturaView.vue` con `InspeccionVisualCard.vue`. Backend (`a8d708b`): `inspeccion.py` solo acepta Captura y Prueba recibe 403. Campo 001: se imprime la `clave_tecnico` del técnico de la prueba o del rechazo, y si no la tiene, su `username`.
+   - **CSP en modo enforcing** (`8102f46`): probada en Chrome con las vistas con sesión y la vista previa del PDF (el equipo reportó 0 violaciones); el 429 se vio bien con una respuesta simulada.
+   - **Operaciones:** puertos de desarrollo en `127.0.0.1` (X5-d), un solo juego de scripts de respaldo por plataforma (`respaldo.sh`/`restaurar.sh` en Linux, `backup_db.ps1`/`restore_db.ps1` en Windows; los formatos `.sql.gz` y `.dump` no son intercambiables; retención por defecto de 14 respaldos) y **rol de BD de mínimo privilegio preparado, sin aplicar** (X5-e: `scripts/sql/minimo_privilegio.sql`, `docker-compose.minimo-privilegio.yml`, manual 3.6; sin probar contra un PostgreSQL real).
+   - **X1-b evaluado (2026-11-11): mitigado, no cerrado.** El límite de nginx y el tope por IP no impiden bloquear a un usuario (bastan 5 fallos); lo que lo mitiga es la expiración a los 15 min, el botón *Desbloquear* del supervisor, el script de soporte y la IP real en `access_events`. Es un riesgo de disponibilidad: aceptable en la LAN con condiciones, y a implementar (bloqueo por usuario e IP) antes de exponer el sistema a internet. Aceptado por Sebas y el equipo de frontend para la LAN el 2026-11-11 (falta ratificarlo con René); el bloqueo por usuario e IP es requisito obligatorio antes de publicar en un VPS. Detalle en la auditoría.
+   - **Instaladores de la CA para estaciones:** `scripts/instalar_ca.ps1` (Windows, `certutil`) y `scripts/instalar_ca.sh` (Linux, y `--nss` para Chrome/Chromium): validan que sea una CA vigente, comparan la huella SHA-256 y son repetibles. Probados contra un almacén de prueba del usuario en Windows y con comandos simulados en Linux; **no se han ejecutado contra el almacén `Root` de una estación real**. Uso en `scripts/README.md`, sección 7.
+   - **Backend (reporte de René):** 643 pruebas aprobadas el 2026-11-09 más `test_rutas_protegidas.py` (66 casos de 403 por tipo de estación, Q3). No se re-ejecutó el backend aquí. Barrido de sesiones vencidas (X2-d) y R2 (`--workers 1`) documentado.
 
 ---
 
@@ -154,25 +163,17 @@ verificacion-oaxaca/
 ## 4. Estado Actual (Working State) y Próximos Pasos (TODOs)
 
 ### 4.1 Qué está 100% probado y funcional
-- **Backend:** 468 pruebas en pytest pasando al 100% (recuento reportado por el equipo; no se re-ejecutó en esta sesión). `_LAYOUT_RECHAZO` integrado, login 403 con `permisos_asignados`, docker prod, CI y datos de arranque de producción listos.
-- **Frontend:** 397 pruebas en Vitest pasando al 100% (11 suites). `SupervisorView` (110), `PruebaView` (78), `AdministracionPanel` (61), `estado` (29), `ImpresionView` (25), `session` (25), `CapturaView` (19), `LoginView` (19), `TopAppBar` (15), `ExpedienteHeader` (9), `format` (7). 100% de componentes cubiertos. Queda 1 prueba `it.fails` (defecto de `session.js`, ver sección 1, punto 5).
-- **Compilación:** `npm run build` genera 694 módulos limpios sin errores.
-- **Clarificaciones normativas NOM-047 (2026-10-30, reportadas por el equipo):** B4 cerrado (operación sin internet), B7/Q1 aclarado (inspección visual antes de terminar la captura; rechazo directo sin emisiones; OBD antes de emisiones) y campo 001 = ID del técnico. **Sin confirmar:** el cliente dice que las plantillas son las mismas para aprobados y rechazados, lo que choca con `_LAYOUT_RECHAZO` (de `RECHAZO.doc`); ver sección 6 de la propuesta.
+- **Backend:** 643 pruebas en Pytest (recuento de René del 2026-11-09, más las de Q3 de `f326084`; no se re-ejecutó aquí). Head de migraciones `e1f4a8c2d5b9`.
+- **Frontend:** 402 pruebas en Vitest pasando al 100% (11 suites), verificadas por última vez el 2026-11-10 tras el refactor de `PruebaView`. 100% de componentes cubiertos y sin pruebas `it.fails`.
+- **Compilación:** `npm run build` genera 695 módulos limpios sin errores.
+- **E2E:** `scripts/smoke_e2e_flujo.mjs` (API, 17 pasos) y `scripts/smoke_e2e_ui.mjs` (interfaz, 11 pasos) corridos en verde por el equipo. El de API se alineó con NOM-047 (la inspección visual se registra desde la sesión de Captura, evitando el 403 de Prueba); el equipo reportó su corrida en verde y aquí solo se revisó el cambio y su sintaxis, sin ejecutarlo contra un backend.
+- **Normativa NOM-047:** B4 cerrado (operación sin internet), inspección visual en Captura antes de cerrar la captura (Opción A), rechazo directo sin emisiones, OBD antes de la prueba y campo 001 = ID del usuario. **Sin confirmar:** si las plantillas son las mismas para aprobados y rechazados (choca con `_LAYOUT_RECHAZO`, ver sección 6 de la propuesta).
 
 ### 4.2 Siguientes Tareas Inmediatas
 
-1. **Para René (backend), según `docs/AUDITORIA_SEGURIDAD_X1_X7.md`:**
-   - **Login (X1):** IP real tomada de `X-Real-IP` (nginx ya la envía) y guardada en `access_events`; bloqueo por (usuario, IP) y contador por IP; igualar tiempos de respuesta con usuarios inexistentes; `POST /api/usuarios/{id}/desbloquear` para supervisores.
-   - **Sesiones (X2):** vencimiento absoluto; cerrar sesiones al revocar o cambiar permisos y al restablecer una contraseña.
-   - **Contraseñas (X6):** lista de comunes ampliada, cambio por el propio usuario y `must_change_password`.
-   - **Auditoría administrativa (X7-c):** `verificacion_id` nullable (o `admin_event_logs`), serializador de sincronización y auditoría de supervisión con `LEFT JOIN`.
-   - **Otros:** guarda de entorno en `seed.py`, apagar `/docs` en producción, reducir `WorkstationRead` público, validar `user_id` al otorgar permisos.
-   - **Pruebas:** una que recorra todas las rutas y exija 401 sin sesión, y 403 para las rutas que modifican datos (13 de supervisor y varias de estación sin prueba).
-2. **Validar y operar TLS (X3):** instalar la CA en las estaciones y anotar la fecha de vencimiento del certificado (825 días; renovar con 60 días de margen); decidir cuándo activar HSTS; y el procedimiento con Let's Encrypt en el VPS (sin probar; falta montar `/var/www/certbot` si se usa `--webroot`).
-3. **Probar con un navegador** (`nginx -t`, la redirección y el 429 en JSON ya están validados en Docker): **VALIDADO 2026-11-09:** auditada la consola de las 5 vistas completas (login, captura, prueba, impresión y supervisor) y generación de blobs PDF en Chrome headless, confirmando 0 violaciones de CSP con la cabecera en enforcing; comprobado que el 429 se lee de forma nítida en la alerta roja de `LoginView` (con una respuesta 429 simulada; captura local no versionada); y validado el script `scripts/desbloquear_usuario.ps1 -Simular`. Queda pendiente la instalación física de la CA en las estaciones.
-4. **Esperar la respuesta de René a la propuesta NOM-047** (`docs/PROPUESTA_FLUJO_INSPECCION_VISUAL_NOM047.md`): Opción A (mover la estación de la inspección visual a Captura) u Opción B (reordenar estados). Hasta entonces no se modifica código de René.
-5. **Confirmación del cliente sobre la plantilla física de rechazo:** qué plantilla imprime un rechazo visual y uno por emisiones (choca con `_LAYOUT_RECHAZO`, ver B1, B9 y S5), y confirmar el formato del campo 001. Ya resuelto por el cliente el 2026-11-06: el 001 es el ID del usuario (técnico de la prueba en aprobados; quien emitió el rechazo en rechazos) y la inspección visual es el último paso de la captura, lo que respalda la Opción A; falta la decisión de René y confirmar si se imprime el `username`.
-6. **E2E de interfaz con navegador (RESUELTO 2026-11-06):** implementado `scripts/smoke_e2e_ui.mjs` con `puppeteer-core` y Chromium/Edge headless. Recorre 11 pasos interactivos cubriendo las 5 pantallas (Login, Captura con creación de expediente, Prueba, Impresión Central y las 5 pestañas de Supervisión); validado al 100% en verde en 19.5 s. Cierra formalmente la fila Q2 de `PENDIENTES`.
-7. **Avisar a René** del defecto de `?estacion=` con `localStorage` bloqueado (hay 1 `it.fails` en `session.test.js`; quitar el `.fails` cuando lo corrija) y acordar qué juego de scripts de respaldo queda.
-8. **Bloqueos que siguen abiertos** en `PENDIENTES`: B10(a), B2, B3, B5 (hosting: el cliente entregó una ficha de hosting compartido incompatible; se requiere un VPS Linux), B9 (papel real) y los demás de terceros. Las 5 HUs en PARCIAL se cierran con el hardware del proveedor, no con más código de interfaz.
-9. **`git push`** de commits locales solo con confirmación explícita.
+1. **Decisiones de seguridad:** ratificar con René la aceptación de X1-b en la LAN (el bloqueo por usuario e IP es obligatorio antes del VPS; ver auditoría) y decidir si se adopta el rol de BD de mínimo privilegio (X5-e) en producción.
+2. **Con Docker encendido:** probar el rol de mínimo privilegio contra un PostgreSQL real (`scripts/sql/minimo_privilegio.sql` y `docker-compose.minimo-privilegio.yml`), correr `scripts/desbloquear_usuario.* --simular` contra un Postgres de pruebas, y repetir la revisión de consola (CSP) y el 429 con el nginx real con TLS.
+3. **Operar TLS (X3):** instalar la CA en las estaciones con `scripts/instalar_ca.ps1` o `.sh` (comparando la huella anotada en el servidor), anotar el vencimiento del certificado (825 días; renovar con 60 días de margen), decidir cuándo activar HSTS y probar Let's Encrypt en el VPS (falta montar `/var/www/certbot` si se usa `--webroot`).
+4. **Confirmaciones del cliente:** qué plantilla física imprime un rechazo visual y uno por emisiones (choca con `_LAYOUT_RECHAZO`; B1, B9 y S5) y si basta el `username` como respaldo del campo 001 cuando el técnico no tiene `clave_tecnico`.
+5. **Bloqueos que siguen abiertos** en `PENDIENTES`: B10(a), B2, B3, B5 (hosting: el cliente entregó una ficha de hosting compartido incompatible; se requiere un VPS Linux, que Don Rubén tiene en revisión), B9 (papel real) y los demás de terceros. Las 5 HUs en PARCIAL se cierran con el hardware del proveedor, no con más código de interfaz.
+6. **`git push`** de commits locales solo con confirmación explícita.
