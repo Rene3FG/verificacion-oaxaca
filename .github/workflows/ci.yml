@@ -32,7 +32,8 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Dependencias del sistema (WeasyPrint)
         run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt ruff==0.8.6
+      - run: ruff check .
       - run: python -m pytest -q
 
   frontend:
@@ -48,5 +49,6 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - run: npm run lint
       - run: npm test
       - run: npm run build

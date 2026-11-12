@@ -136,10 +136,6 @@ async function abrir(w, id = "exp-1") {
   await flushPromises();
 }
 
-function llamadasPost(prefijo) {
-  return api.post.mock.calls.filter(([url]) => url.startsWith(prefijo));
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   reiniciarServidor();

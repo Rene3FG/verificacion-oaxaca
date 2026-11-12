@@ -12,7 +12,6 @@ from app.models.enums import EstadoVerificacion, MetodoPrueba, TipoPrueba
 from app.models.event_log import EventLog
 from app.models.resultado_prueba import ResultadoPrueba
 from app.services.equipo_gateway import (
-    EscenarioSimulador,
     EstadoEquipo,
     SimuladorGateway,
     get_equipment_gateway,

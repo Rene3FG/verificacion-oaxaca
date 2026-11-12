@@ -1,5 +1,6 @@
 import datetime
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Enum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
@@ -7,6 +8,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
 from app.models.enums import EstadoVerificacion, ResultadoFinal, TipoPrueba
+
+if TYPE_CHECKING:
+    from app.models.usuario import CatUsuario
+    from app.models.vehiculo import Vehiculo
 
 
 class Verificacion(Base, UUIDPKMixin, TimestampMixin):

@@ -1,0 +1,9 @@
+# Q8: linter del backend. Reglas por defecto de ruff (E4/E7/E9/F: errores
+# reales, imports sin usar, nombres no definidos). Sin formateador obligatorio
+# para no reescribir todo el código de golpe.
+target-version = "py312"
+line-length = 120
+
+[lint.per-file-ignores]
+# conftest fija DATABASE_URL a la BD de pruebas ANTES de importar la app.
+"tests/conftest.py" = ["E402"]

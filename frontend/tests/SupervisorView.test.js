@@ -150,10 +150,6 @@ async function montar({ station_type = "captura" } = {}) {
   return { w, session };
 }
 
-function llamadas(metodo, prefijo) {
-  return api[metodo].mock.calls.filter(([url]) => url.startsWith(prefijo));
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   reiniciarServidor();

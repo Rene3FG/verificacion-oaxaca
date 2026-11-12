@@ -12,7 +12,7 @@ from app.models.access_event import AccessEvent
 from app.models.enums import AccessEventResultado, StationType
 from app.models.event_log import EventLog
 from app.models.usuario import CatUsuario
-from app.models.workstation import StationSession, Workstation
+from app.models.workstation import StationSession
 from tests.conftest import (
     crear_estacion,
     crear_permiso,

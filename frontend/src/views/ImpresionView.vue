@@ -39,7 +39,6 @@ const error = ref(null);
 const aviso = ref(null);
 
 const expediente = ref(null);
-const cargandoExpediente = ref(false);
 
 const calculandoTipo = ref(false);
 const solicitandoFolio = ref(false);

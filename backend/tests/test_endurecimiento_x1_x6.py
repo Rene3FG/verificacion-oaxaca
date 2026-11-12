@@ -14,7 +14,6 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.models.access_event import AccessEvent
 from app.models.enums import StationType
-from app.models.workstation import StationSession
 from app.services.auth import validar_politica_password
 from tests.conftest import (
     crear_estacion,

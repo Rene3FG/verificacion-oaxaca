@@ -121,7 +121,7 @@ Auditoría completa del 2026-11-04 en `docs/AUDITORIA_SEGURIDAD_X1_X7.md` (evide
 | Q5 | **UAT de las 41 pantallas contra el Figma**, con lista de diferencias (Fase 4). El Figma no se relee desde el 09-28 |
 | Q6 | ~~HU en SOLO_FRONTEND sin prueba: HU-005, 006, 050, 058, 059, 060~~ **RESUELTO 2026-10-27** (categoría `SOLO_FRONTEND` erradicada, 0 HUs; HU-005 y HU-006 con las pruebas de `27f2a5a`) |
 | Q7 | ~~HU PARCIAL por criterio ambiguo o sin prueba: HU-007, 037, HU-024~~ **RESUELTO 2026-11-04** (HU-007 resuelto 10-22, HU-037 resuelto 10-27, HU-024 cerrado 11-04: el rechazo ingresa a la cola de rechazo y el PrintJob se genera con folio asignado). 0 HUs ambiguas pendientes en software |
-| Q8 | Linter / formateador (ni `ruff` ni `eslint` configurados) |
+| Q8 | ~~Linter / formateador (ni `ruff` ni `eslint` configurados)~~ **RESUELTO 2026-11-11**: `backend/ruff.toml` (reglas por defecto: errores, imports sin usar, nombres no definidos) y `frontend/eslint.config.js` (JS recomendado + Vue essential, `npm run lint`); ambos corren en CI antes de las pruebas. Sin formateador obligatorio, para no reescribir todo el código de golpe |
 | Q9 | Ejecutar el plan de impresión **en papel real** con la impresora del cliente (B9) |
 
 ## 4. Resumen por área

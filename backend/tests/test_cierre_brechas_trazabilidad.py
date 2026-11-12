@@ -93,7 +93,7 @@ async def test_visual_rechazada_no_ofrece_obd_y_va_directo_a_impresion(client, d
 async def test_expediente_conserva_estado_y_datos_al_retomarlo(client, db_session):
     """HU-088: un expediente a medias se vuelve a consultar con su estado y
     datos intactos, desde otra sesión de la misma estación."""
-    sesion = await _sesion_prueba(db_session)
+    await _sesion_prueba(db_session)
     expediente = await crear_expediente(
         db_session,
         linea_id=1,
