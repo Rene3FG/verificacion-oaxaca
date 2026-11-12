@@ -80,6 +80,7 @@
    - **Backend (reporte de René):** 643 pruebas aprobadas el 2026-11-09 más `test_rutas_protegidas.py` (66 casos de 403 por tipo de estación, Q3). No se re-ejecutó el backend aquí. Barrido de sesiones vencidas (X2-d) y R2 (`--workers 1`) documentado.
 
    - **Q8 resuelto (René, `18ebe0a`):** `ruff` en el backend (`backend/ruff.toml`) y `eslint` en el frontend (`frontend/eslint.config.js`, `npm run lint`), ambos en CI antes de las pruebas; el equipo reportó `npm run lint` con 0 errores y 0 warnings y Vitest en 402/402. Tras un `git pull` hay que correr `npm --prefix frontend install` para tener el linter.
+   - **D10 documentado (2026-11-12):** el manual (secciones 7 y 8) trae el procedimiento de actualización del stack conservando datos (respaldo previo verificado, migraciones, verificación posterior y rollback restaurando el respaldo) y la sección 7 se alineó con `respaldo.sh` y `restaurar.sh`. **No se ha ensayado de punta a punta** con datos reales.
 ---
 
 ## 2. Estado Actual de la Arquitectura y Árbol de Archivos

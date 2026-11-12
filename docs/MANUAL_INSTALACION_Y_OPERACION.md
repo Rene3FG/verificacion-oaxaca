@@ -320,37 +320,147 @@ El sistema cuenta con resiliencia total frente a cortes del enlace estatal de in
 
 ## 7. Política de Respaldos y Restauración de Base de Datos (D4)
 
-La base de datos PostgreSQL local almacena el registro legal y formal de los certificados emitidos. Debe asegurarse un respaldo periódico diario.
+La base de datos PostgreSQL local almacena el registro legal y formal de los certificados emitidos. Debe asegurarse un respaldo periódico diario. En el servidor (Linux) se usan `scripts/respaldo.sh` y `scripts/restaurar.sh`, que trabajan sobre el stack de producción (`docker-compose.prod.yml` y `.env.prod`) y se ejecutan **desde la raíz del repositorio**. Los scripts de PowerShell (`backup_db.ps1`, `restore_db.ps1`) son solo para desarrollo en Windows y producen otro formato (`.dump`): sus archivos no se restauran con los scripts de Linux.
 
-### 7.1 Respaldo Automatizado Diario
-Crear una tarea programada en el servidor local (`/etc/cron.daily/respaldo_verificacion.sh`):
+### 7.1 Respaldo automatizado diario
+```bash
+scripts/respaldo.sh /var/respaldos/verificacion
+```
+Deja un archivo `verificacion_AAAAMMDD_HHMMSS.sql.gz`, comprueba que esté íntegro (`gzip -t`) y que no esté vacío, y conserva los últimos 14 (`RETENCION=n` para cambiarlo). Programarlo con `cron` (diario, 02:00):
 
 ```bash
-#!/bin/bash
-FECHA=$(date +%Y%m%d_%H%M%S)
-DESTINO="/var/backups/verificacion"
-mkdir -p "$DESTINO"
+0 2 * * * cd /ruta/verificacion-oaxaca && scripts/respaldo.sh /var/respaldos/verificacion
+```
+Copiar los archivos **fuera del servidor** con regularidad: un respaldo en el mismo disco no protege de la falla del disco.
 
-docker exec -t verificacion-oaxaca-db-1 pg_dump -U verificacion -F c verificacion > "$DESTINO/respaldo_${FECHA}.dump"
-find "$DESTINO" -name "respaldo_*.dump" -mtime +30 -delete
+### 7.2 Comprobar que un respaldo se puede restaurar
+Que el archivo esté íntegro no prueba que sirva. Se comprueba cargándolo en una base temporal, sin tocar la real:
+
+```bash
+COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
+ARCHIVO=/var/respaldos/verificacion/verificacion_AAAAMMDD_HHMMSS.sql.gz
+
+$COMPOSE exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE verificacion_prueba"'
+gzip -dc "$ARCHIVO" | $COMPOSE exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -q -U "$POSTGRES_USER" -d verificacion_prueba'
+$COMPOSE exec -T db sh -c 'psql -U "$POSTGRES_USER" -d verificacion_prueba -c "SELECT count(*) FROM verificaciones"'
+$COMPOSE exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE verificacion_prueba"'
+```
+La cuenta debe coincidir (o ser algo menor, si se registró trabajo después del respaldo) con la de la base real. Hacerlo periódicamente y siempre antes de una actualización (sección 8).
+
+### 7.3 Procedimiento de restauración
+```bash
+scripts/restaurar.sh /var/respaldos/verificacion/verificacion_AAAAMMDD_HHMMSS.sql.gz
+```
+Pide escribir `SI` porque **borra la base actual**: detiene el backend, la recrea, carga el respaldo y vuelve a iniciar el backend. Después, comprobar el estado del stack como se indica en la sección 3.5.
+
+---
+
+## 8. Actualización del Stack en Producción Conservando los Datos (D10)
+
+Procedimiento para pasar el servidor de una versión a otra sin perder los registros: **respaldo previo verificado → actualización de imágenes y migraciones → verificación → rollback si algo falla**. Las migraciones de base de datos (`alembic upgrade head`) se aplican solas al arrancar el backend.
+
+> **Estado:** procedimiento redactado a partir de los scripts y de la configuración del repositorio. **No se ha ejecutado de punta a punta con datos reales** y los comandos de Compose no se corrieron al redactarlo. Ensayarlo primero en un ambiente aparte (un servidor de pruebas con una copia de un respaldo) antes de la primera actualización real.
+
+**Antes de empezar**
+- La actualización **detiene el servicio**: las estaciones no pueden operar mientras dura. Hacerla fuera del horario de verificación y avisar.
+- Todos los comandos asumen la variable `COMPOSE` de abajo. Si se usa el rol de base de datos de mínimo privilegio (sección 3.6), agregar `-f docker-compose.minimo-privilegio.yml` en **todos** los comandos `$COMPOSE`, también en el rollback (`scripts/restaurar.sh` es la excepción: usa fijo `docker-compose.prod.yml`, lo cual basta porque solo toca la base de datos).
+- El servidor construye las imágenes (`--build`): necesita acceso a internet para bajar imágenes base y dependencias. Si la red del verificentro es limitada, ejecutar `$COMPOSE build` **antes** de la ventana, con el servicio aún en marcha, y dejar solo `up -d` para la ventana.
+
+```bash
+COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
+VERSION=<etiqueta o rama de la versión nueva>
 ```
 
-### 7.2 Procedimiento de Restauración
-Para restaurar la base de datos a partir de un respaldo:
+### 8.1 Preparación (antes de la ventana)
+1. Anotar la versión actual del código y la revisión de la base de datos (con el rol de mínimo privilegio, `alembic` no puede leer su propia tabla, por eso se consulta desde `db`):
+   ```bash
+   git rev-parse --short HEAD
+   $COMPOSE exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT version_num FROM alembic_version"'
+   ```
+2. Traer la versión nueva **sin aplicarla** y revisar qué cambia, sobre todo migraciones, Compose y variables:
+   ```bash
+   git fetch origin --tags
+   git log --oneline HEAD.."$VERSION"
+   git diff --stat HEAD "$VERSION" -- backend/alembic/versions docker-compose.prod.yml .env.prod.example frontend/nginx.conf
+   ```
+3. Agregar a `.env.prod` las variables que la versión nueva requiera (`git diff HEAD "$VERSION" -- .env.prod.example`). Una variable obligatoria que falte hace que `docker compose` se niegue a arrancar, y se detecta en el paso 8.2.4.
+4. Leer las notas de cambio de la versión: algunas migraciones imponen condiciones sobre los datos. Por ejemplo, `e1f4a8c2d5b9` falla si hay dos usuarios que solo difieren en mayúsculas; se comprueba antes con:
+   ```bash
+   $COMPOSE exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT lower(username), count(*) FROM cat_usuarios GROUP BY 1 HAVING count(*) > 1"'
+   ```
+5. Recomendado, sobre todo la primera vez: ensayar en un ambiente aparte (restaurar una copia reciente del respaldo, arrancar la versión nueva y comprobar que las migraciones corren y que los datos siguen ahí).
 
-1. Detener los servicios operativos:
+### 8.2 Ventana de actualización
+1. **Cerrar el servicio** para que no se escriba nada durante el respaldo:
    ```bash
-   docker compose -f docker-compose.prod.yml stop backend web
+   $COMPOSE stop web backend
    ```
-2. Restaurar el archivo `.dump` en la base de datos:
+2. **Respaldo previo**, verificado (sección 7.2) y con los conteos anotados:
    ```bash
-   docker exec -i verificacion-oaxaca-db-1 pg_restore -U verificacion -d verificacion --clean --if-exists < /var/backups/verificacion/respaldo_FECHA.dump
+   scripts/respaldo.sh /var/respaldos/verificacion
+   $COMPOSE exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT (SELECT count(*) FROM verificaciones) AS verificaciones, (SELECT count(*) FROM folios) AS folios, (SELECT count(*) FROM sync_outbox) AS sync_outbox, (SELECT count(*) FROM cat_usuarios) AS usuarios"'
    ```
-3. Reiniciar el stack completo:
+   Copiar ese archivo fuera del servidor y anotar su nombre: **es el punto de retorno**. Conservarlo hasta haber comprobado la versión nueva; no dejar que la rotación lo borre.
+3. **Actualizar el código:**
    ```bash
-   docker compose -f docker-compose.prod.yml restart
+   git checkout "$VERSION"
    ```
-4. Comprobar la integridad ejecutando el healthcheck:
+4. **Validar la configuración** (falla con un mensaje claro si falta una variable obligatoria):
    ```bash
-   curl http://localhost/api/health
+   $COMPOSE config -q
    ```
+5. **Construir y arrancar.** El backend aplica las migraciones pendientes al iniciar (con el Compose de mínimo privilegio lo hace el servicio `migrate`):
+   ```bash
+   $COMPOSE up -d --build
+   $COMPOSE logs -f backend
+   ```
+   Esperar a ver `Application startup complete` en el backend. Si aparece un error de migración, ir directamente a 8.4.
+
+### 8.3 Verificación posterior
+- `$COMPOSE ps`: todos los servicios en `Up` y el backend `healthy`.
+- La versión de la base coincide con la de la versión nueva: la consulta `SELECT version_num FROM alembic_version` (la del paso 8.1.1) debe devolver el mismo valor que `$COMPOSE exec -T backend alembic heads`.
+- Repetir la consulta de conteos del paso 8.2.2: ninguno puede ser **menor** que el anotado.
+- `curl --cacert certs/ca/ca.crt -I https://localhost/` responde `HTTP/2 200`.
+- Desde una estación: iniciar sesión como supervisor, abrir un expediente existente y comprobar que sus datos están completos; en Supervisión, revisar las pendientes de sincronización.
+- Revisar el registro unos minutos: `$COMPOSE logs --since 10m backend`, sin errores repetidos.
+- **No** ejecutar en producción `scripts/smoke_e2e_flujo.mjs` ni `scripts/smoke_e2e_ui.mjs`: crean expedientes de prueba y consumen un folio. Son solo para pruebas.
+
+Si todo está bien, anotar la actualización (fecha, versión anterior y nueva, archivo del respaldo previo).
+
+### 8.4 Rollback
+Cuándo: una migración falla, el backend no queda `healthy`, la verificación 8.3 no pasa o se detecta pérdida de datos.
+
+Se vuelve atrás **restaurando el respaldo previo**, no con `alembic downgrade`: hay migraciones que se aplican por partes (por ejemplo las que agregan valores a un tipo de PostgreSQL) y una migración fallida puede dejar la base a medias, y un `downgrade` no devuelve los datos modificados.
+
+1. Guardar el registro del fallo para diagnosticarlo después: `$COMPOSE logs backend > /var/respaldos/fallo_actualizacion.log`
+2. Detener y quitar los contenedores, **conservando el volumen de datos**:
+   ```bash
+   $COMPOSE down
+   ```
+   **Nunca** agregar `-v` ni `--volumes`: borraría la base de datos.
+3. Volver al código anterior (el commit anotado en 8.1.1):
+   ```bash
+   git checkout <commit anotado>
+   ```
+4. Levantar **solo la base de datos** y esperar a que `$COMPOSE ps` la muestre `healthy`:
+   ```bash
+   $COMPOSE up -d db
+   ```
+   No arrancar todavía el backend ni `migrate`: con la base aún en el esquema nuevo, las migraciones de la versión anterior fallarían (y con el Compose de mínimo privilegio, `migrate` fallido impide que el backend arranque).
+5. Restaurar el respaldo previo:
+   ```bash
+   scripts/restaurar.sh /var/respaldos/verificacion/verificacion_AAAAMMDD_HHMMSS.sql.gz
+   ```
+   Pide escribir `SI`, detiene el backend (que aquí aún no existe), recrea la base y carga el respaldo. Este script usa fijo `docker-compose.prod.yml` y `.env.prod`, sin el archivo de mínimo privilegio, lo cual basta porque solo toca la base de datos. Su último paso inicia el backend, y como en este punto no hay contenedor de backend es posible que termine con un aviso o un error en ese paso: la restauración ya se hizo antes. Comprobarlo con la consulta de revisión (`alembic_version`) y la de conteos de 8.2.2, y continuar.
+6. **Solo si se usa el rol de mínimo privilegio** (sección 3.6): volver a aplicar `scripts/sql/minimo_privilegio.sql` (paso 1 de 3.6, con la misma contraseña de `APP_DB_PASSWORD`). Restaurar borra y recrea la base, y un respaldo de `pg_dump` no conserva los permisos a nivel de base de datos (el `REVOKE` y `GRANT CONNECT ON DATABASE` del script): sin este paso la aplicación funciona, pero la base queda más abierta que antes. El script es repetible, así que no estorba si ya estaban.
+7. Levantar el stack con la versión anterior (el servicio `migrate`, si se usa, no tendrá nada que migrar):
+   ```bash
+   $COMPOSE up -d --build
+   ```
+8. Repetir la verificación 8.3: `alembic_version` debe mostrar la revisión anterior y los conteos deben coincidir con los anotados antes de actualizar.
+
+Notas del rollback:
+- Todo lo registrado entre el respaldo y el rollback se pierde; por eso el servicio se cierra durante la ventana (8.2.1).
+- Los registros de `sync_outbox` que la versión nueva alcanzó a enviar al sistema central se reenviarán: el envío es idempotente, el duplicado es inofensivo.
+- Reconstruir la versión anterior usa la caché de capas de Docker si no hay internet. No ejecutar `docker system prune` hasta haber comprobado la versión nueva.
+- Si el rollback también falla, conservar el servidor apagado y el respaldo intacto, y escalar con el equipo de desarrollo antes de borrar nada.
