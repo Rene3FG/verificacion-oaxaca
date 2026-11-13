@@ -2,8 +2,8 @@
 
 **De:** Antigravity (AI Pair Programmer)  
 **Para:** Claude (AI Assistant) & Sebas  
-**Fecha de corte:** 12 de noviembre de 2026 (Semana 8 — Jueves)  
-**Rama activa:** `frontend-impresion-central`, en paridad con René hasta `f60fc9c` (Q8: lint en CI y X5-e probado contra Postgres real; antes, Q3: 403 por tipo de estación en todas las rutas). Incluye de René el cierre de NOM-047 Opción A (inspección visual solo en Captura; Prueba recibe 403, `a8d708b`), el barrido de sesiones vencidas (X2-d, `b9cf70b`) y el retiro del symlink `backend/.venv` (`fe5348e`).  
+**Fecha de corte:** 13 de noviembre de 2026 (Semana 8 — Viernes)  
+**Rama activa:** `frontend-impresion-central`, sobre `ce3a9fc` (en paridad previa con René en `f60fc9c`: Q8 lint en CI, X5-e, Q3 403 por estación, NOM-047 Opción A en ambos lados `a8d708b`, barrido X2-d `b9cf70b` y retiro de `backend/.venv` `fe5348e`). Este corte añade las pruebas de chip de sincronización para `HU-105`/`HU-110` en `ExpedienteHeader.test.js` (406/406 Vitest), la matriz `trazabilidad_hu_2026-11-13` y el ensayo completo de rollback D10 en `qa-oaxaca` incluyendo levantamiento posterior y `HTTPS 200`.  
 **Estado upstream:** `origin/etapa1-y-siox` integrado en la rama; sin commits nuevos de René pendientes de integrar al momento del corte.  
 
 ---
@@ -79,8 +79,8 @@
    - **Instaladores de la CA para estaciones:** `scripts/instalar_ca.ps1` (Windows, `certutil`) y `scripts/instalar_ca.sh` (Linux, y `--nss` para Chrome/Chromium): validan que sea una CA vigente, comparan la huella SHA-256 y son repetibles. Probados contra un almacén de prueba del usuario en Windows y con comandos simulados en Linux; **no se han ejecutado contra el almacén `Root` de una estación real**. Uso en `scripts/README.md`, sección 7.
    - **Backend (reporte de René):** 643 pruebas aprobadas el 2026-11-09 más `test_rutas_protegidas.py` (66 casos de 403 por tipo de estación, Q3). No se re-ejecutó el backend aquí. Barrido de sesiones vencidas (X2-d) y R2 (`--workers 1`) documentado.
 
-   - **Q8 resuelto (René, `18ebe0a`):** `ruff` en el backend (`backend/ruff.toml`) y `eslint` en el frontend (`frontend/eslint.config.js`, `npm run lint`), ambos en CI antes de las pruebas; el equipo reportó `npm run lint` con 0 errores y 0 warnings y Vitest en 402/402. Tras un `git pull` hay que correr `npm --prefix frontend install` para tener el linter.
-   - **D10 documentado (2026-11-12):** el manual (secciones 7 y 8) trae el procedimiento de actualización del stack conservando datos (respaldo previo verificado, migraciones, verificación posterior y rollback restaurando el respaldo) y la sección 7 se alineó con `respaldo.sh` y `restaurar.sh`. **No se ha ensayado de punta a punta** con datos reales.
+   - **Q8 resuelto (René, `18ebe0a`):** `ruff` en el backend (`backend/ruff.toml`) y `eslint` en el frontend (`frontend/eslint.config.js`, `npm run lint`), ambos en CI antes de las pruebas; frontend verificado con `npm run lint` (0 errores, 0 warnings) y Vitest en 406/406 al 2026-11-13 (11 suites). Tras un `git pull` hay que correr `npm --prefix frontend install` para tener el linter.
+   - **D10 documentado y ensayado en ambiente aislado (2026-11-13):** el manual (secciones 7 y 8) trae el procedimiento de actualización del stack conservando datos (respaldo previo verificado, migraciones, verificación posterior y rollback restaurando el respaldo) y la sección 7 se alineó con `respaldo.sh` y `restaurar.sh`. En `qa-oaxaca` se completó el ensayo de 8.4 tras ejecutar `smoke_e2e_flujo.mjs` (17/17): respaldo `--no-owner`, restauración temporal, rollback con reaplicación de `minimo_privilegio.sql`, `up -d --wait`, `HTTPS 200`, API 200 y conteos intactos (`2` verificaciones, `5` folios, `58` filas de `sync_outbox`, `1` usuario). **Falta** ensayarlo sobre una copia de un respaldo de producción real.
 ---
 
 ## 2. Estado Actual de la Arquitectura y Árbol de Archivos
@@ -111,16 +111,16 @@ verificacion-oaxaca/
 │   │   ├── stores/session.js              # Pinia store (estacion, sesion, errorTipo, usuarioDenegado, permisosAsignados)
 │   │   ├── utils/                         # catalogos.js, estado.js, format.js
 │   │   └── views/                         # LoginView.vue, CapturaView.vue, PruebaView.vue, ImpresionView.vue, SupervisorView.vue
-│   ├── tests/                             # 11 suites Vitest (402 tests passing)
+│   ├── tests/                             # 11 suites Vitest (406 tests passing)
 │   │   ├── setup.js                       # ResizeObserver polyfill para Vuetify
-│   │   ├── session.test.js                # 25 tests del store de sesión (incluye ?estacion=; 1 it.fails)
+│   │   ├── session.test.js                # 25 tests del store de sesión (incluye ?estacion=; 0 it.fails)
 │   │   ├── LoginView.test.js              # 19 tests de LoginView (incluye HU-005, HU-006, HU-007)
 │   │   ├── CapturaView.test.js            # 18 tests de CapturaView
 │   │   ├── PruebaView.test.js             # 78 tests de PruebaView (avisos warning/success y persistencia)
 │   │   ├── SupervisorView.test.js         # 103 tests de SupervisorView
 │   │   ├── AdministracionPanel.test.js    # 61 tests de AdministracionPanel (CRUD y navegación)
 │   │   ├── ImpresionView.test.js          # 25 tests de ImpresionView (incluye HU-006 y limpieza de fallbacks)
-│   │   ├── ExpedienteHeader.test.js       # 9 tests del header
+│   │   ├── ExpedienteHeader.test.js       # 13 tests del header (incluye HU-020, HU-037, HU-105 y HU-110)
 │   │   ├── TopAppBar.test.js              # 15 tests de barra y sync (incluye HU-005, HU-006)
 │   │   ├── format.test.js                 # 7 tests de format y catalogos
 │   │   └── estado.test.js                 # 29 tests de utilería de estado
@@ -166,7 +166,7 @@ verificacion-oaxaca/
 
 ### 4.1 Qué está 100% probado y funcional
 - **Backend:** 643 pruebas en Pytest (recuento de René del 2026-11-09, más las de Q3 de `f326084`; no se re-ejecutó aquí). Head de migraciones `e1f4a8c2d5b9`.
-- **Frontend:** 402 pruebas en Vitest pasando al 100% (11 suites), re-verificadas el 2026-11-12 por el equipo (Vitest 402/402 en 11 suites, `eslint` limpio y build de 695 módulos). 100% de componentes cubiertos y sin pruebas `it.fails`.
+- **Frontend:** 406 pruebas en Vitest pasando al 100% (11 suites), re-verificadas el 2026-11-13 con el cierre de `HU-105` y `HU-110` en `ExpedienteHeader.test.js` (Vitest 406/406 en 11 suites, `eslint` limpio y build de 695 módulos). 100% de componentes cubiertos y 0 pruebas `it.fails`.
 - **Compilación:** `npm run build` genera 695 módulos limpios sin errores.
 - **Lint (Q8):** `npm run lint` en el frontend y `ruff` en el backend corren en CI; el equipo reportó el frontend con 0 errores y 0 warnings.
 - **E2E:** `scripts/smoke_e2e_flujo.mjs` (API, 17 pasos) y `scripts/smoke_e2e_ui.mjs` (interfaz, 11 pasos) corridos en verde por el equipo. El de API se alineó con NOM-047 (la inspección visual se registra desde la sesión de Captura, evitando el 403 de Prueba); el equipo reportó su corrida en verde y René lo corrió el 2026-11-11 contra el backend real con el rol de BD de mínimo privilegio (17/17); aquí solo se revisó el cambio y su sintaxis.
@@ -175,7 +175,7 @@ verificacion-oaxaca/
 ### 4.2 Siguientes Tareas Inmediatas
 
 1. **Decisiones de seguridad:** ratificar con René la aceptación de X1-b en la LAN (el bloqueo por usuario e IP es obligatorio antes del VPS; ver auditoría) y decidir si se adopta el rol de BD de mínimo privilegio (X5-e) en producción.
-2. **Ensayo completo de D10:** el respaldo, la restauración de prueba y el rollback de 8.4 se ensayaron el 2026-11-12 en un proyecto aislado; falta la actualización completa sobre una copia de un respaldo de producción real y comprobar HTTP 200 tras restaurar (ese último paso se interrumpió). El Compose de mínimo privilegio, el desbloqueo `.ps1`, la CSP y el 429 con nginx real ya están probados.
+2. **Ensayo completo de D10:** el respaldo (`--no-owner`, 111 013 bytes tras correr `smoke_e2e_flujo.mjs` 17/17), la restauración de prueba en `verificacion_prueba`, el rollback de 8.4 con `minimo_privilegio.sql` (`PUBLIC CONNECT` volvió de `t` a `f`) y el levantamiento posterior (`up -d --wait`, `migrate` en 0, `backend` `healthy`, `HTTPS 200`, API 200 y conteos intactos) ya quedaron comprobados en el proyecto aislado `qa-oaxaca` (2026-11-13); **falta** ensayar la actualización completa sobre una copia de un respaldo de producción real. El Compose de mínimo privilegio, el desbloqueo `.ps1`, la CSP y el 429 con nginx real ya están probados.
 3. **Operar TLS (X3):** instalar la CA en el almacén `Root` de una estación física con `scripts/instalar_ca.ps1` o `.sh` (comparando la huella anotada en el servidor), correr `scripts/smoke_e2e_ui.mjs` con esa CA ya confiada, anotar el vencimiento del certificado (825 días; renovar con 60 días de margen), decidir cuándo activar HSTS y probar Let's Encrypt en el VPS (falta montar `/var/www/certbot` si se usa `--webroot`).
 4. **Confirmaciones del cliente:** qué plantilla física imprime un rechazo visual y uno por emisiones (choca con `_LAYOUT_RECHAZO`; B1, B9 y S5) y si basta el `username` como respaldo del campo 001 cuando el técnico no tiene `clave_tecnico`.
 5. **Bloqueos que siguen abiertos** en `PENDIENTES`: B10(a), B2, B3, B5 (hosting: el cliente entregó una ficha de hosting compartido incompatible; se requiere un VPS Linux, que Don Rubén tiene en revisión), B9 (papel real) y los demás de terceros. Las 5 HUs en PARCIAL se cierran con el hardware del proveedor, no con más código de interfaz.
