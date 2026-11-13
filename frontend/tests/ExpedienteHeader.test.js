@@ -35,7 +35,7 @@ beforeEach(() => {
   api.get.mockResolvedValue({ data: { estado: "SINCRONIZADO", pendientes: 0, en_error: 0, sincronizados: 4 } });
 });
 
-describe("ExpedienteHeader (HU-020, HU-037, HU-105)", () => {
+describe("ExpedienteHeader (HU-020, HU-037, HU-105, HU-110)", () => {
   it("muestra los datos mínimos del expediente", async () => {
     const w = montar();
     await flushPromises();
@@ -87,4 +87,27 @@ describe("ExpedienteHeader (HU-020, HU-037, HU-105)", () => {
     await flushPromises();
     expect(api.get).toHaveBeenCalledTimes(2);
   });
+
+  it("HU-105: el chip de sincronización expone el desglose en title", async () => {
+    api.get.mockResolvedValue({
+      data: { estado: "PENDIENTE", pendientes: 2, en_error: 1, sincronizados: 3 },
+    });
+    const w = montar();
+    await flushPromises();
+    const chip = w.find('[title*="pendientes"]');
+    expect(chip.exists()).toBe(true);
+    expect(chip.attributes("title")).toBe("2 pendientes · 1 con error · 3 enviados");
+  });
+
+  it.each(["PENDIENTE", "ERROR", "SIN_REGISTROS"])(
+    "HU-110: en estado %s nunca muestra simplemente 'Guardado' ni 'Sincronizado'",
+    async (estado) => {
+      api.get.mockResolvedValue({ data: { estado, pendientes: 1, en_error: 0, sincronizados: 0 } });
+      const w = montar();
+      await flushPromises();
+      const t = w.text();
+      expect(t).not.toMatch(/\bGuardado\b/i);
+      expect(t).not.toMatch(/\bSincronizado\b/);
+    },
+  );
 });
