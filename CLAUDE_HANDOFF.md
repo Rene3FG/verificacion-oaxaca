@@ -133,6 +133,7 @@ verificacion-oaxaca/
 ├── scripts/
 │   ├── respaldo.sh / restaurar.sh         # Respaldo y restauración en Linux (producción, .sql.gz)
 │   ├── smoke_e2e_flujo.mjs                # Prueba de humo del ciclo vehicular (Node 18+)
+│   ├── smoke_carga_concurrencia.mjs       # Prueba Q4 de carga multi-línea, folios SKIP LOCKED, idempotencia y PDF concurrente
 │   ├── sql/minimo_privilegio.sql          # Rol de BD de mínimo privilegio (X5-e), opcional y sin aplicar
 │   ├── desbloquear_usuario.sh / .ps1      # Soporte: desbloquea usuarios bloqueados por intentos fallidos
 │   ├── backup_db.ps1 / restore_db.ps1     # Respaldo y restauración en Windows (desarrollo, .dump)
@@ -169,7 +170,7 @@ verificacion-oaxaca/
 - **Frontend:** 406 pruebas en Vitest pasando al 100% (11 suites), re-verificadas el 2026-11-13 con el cierre de `HU-105` y `HU-110` en `ExpedienteHeader.test.js` (Vitest 406/406 en 11 suites, `eslint` limpio y build de 695 módulos). 100% de componentes cubiertos y 0 pruebas `it.fails`.
 - **Compilación:** `npm run build` genera 695 módulos limpios sin errores.
 - **Lint (Q8):** `npm run lint` en el frontend y `ruff` en el backend corren en CI; el equipo reportó el frontend con 0 errores y 0 warnings.
-- **E2E:** `scripts/smoke_e2e_flujo.mjs` (API, 17 pasos) y `scripts/smoke_e2e_ui.mjs` (interfaz, 11 pasos) corridos en verde por el equipo. El de API se alineó con NOM-047 (la inspección visual se registra desde la sesión de Captura, evitando el 403 de Prueba); el equipo reportó su corrida en verde y René lo corrió el 2026-11-11 contra el backend real con el rol de BD de mínimo privilegio (17/17); aquí solo se revisó el cambio y su sintaxis.
+- **E2E y Carga (Q2 / Q4):** `scripts/smoke_e2e_flujo.mjs` (API, 17 pasos), `scripts/smoke_e2e_ui.mjs` (interfaz, 11 pasos) y `scripts/smoke_carga_concurrencia.mjs` (carga y concurrencia Q4) corridos en verde. El de carga validó el 2026-11-13 en `qa-oaxaca` (TLS + `verificacion_app` + `inmutables=1`) 12 expedientes en paralelo entre L1 y L2 (`9.69 s`), ráfaga atómica de 12 folios sobre lote de 10 (`1.52 s`, 10 únicos + 2 `409`), idempotencia `6×` (`504 ms`, 1 folio consumido) y 11 vistas previas PDF + 11 impresiones simultáneas (`28.0 s` / `25.8 s`, 0 `5xx` y 0 deadlocks). Note: WeasyPrint con `--workers 1` promedia ~20 s en ráfagas simultáneas de 11 PDFs. El smoke API de 17 pasos pasó también contra el backend real con mínimo privilegio (17/17).
 - **Normativa NOM-047:** B4 cerrado (operación sin internet), inspección visual en Captura antes de cerrar la captura (Opción A), rechazo directo sin emisiones, OBD antes de la prueba y campo 001 = ID del usuario. **Sin confirmar:** si las plantillas son las mismas para aprobados y rechazados (choca con `_LAYOUT_RECHAZO`, ver sección 6 de la propuesta).
 
 ### 4.2 Siguientes Tareas Inmediatas

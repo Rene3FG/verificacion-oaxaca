@@ -14,6 +14,7 @@ Este directorio contiene las herramientas ejecutables para cumplir con la polít
 | `restore_db.ps1` | Windows / PowerShell | Restauración de un `.dump` hecho con `backup_db.ps1`, con `pg_restore --clean --if-exists`. |
 | `smoke_e2e_flujo.mjs` | Node.js 18+ (cualquier SO) | Prueba de humo del ciclo vehicular completo contra la API local. Ver sección 4.1. |
 | `smoke_e2e_ui.mjs` | Node.js 18+ (Puppeteer-core / Chrome / Edge) | Prueba de humo E2E de interfaz en navegador headless (cubre las 5 vistas). Ver sección 4.2. |
+| `smoke_carga_concurrencia.mjs` | Node.js 18+ (cualquier SO) | Prueba de carga y concurrencia Q4: 2 líneas paralelas, folios atómicos (`SKIP LOCKED`), idempotencia y PDFs en ráfaga. Ver sección 4.3. |
 | `desbloquear_usuario.sh` / `.ps1` | Linux / Windows | Soporte: desbloquea a un usuario bloqueado por intentos fallidos de login (X1). Ver sección 5. |
 | `sql/minimo_privilegio.sql` | PostgreSQL (psql) | Crea el rol de BD de mínimo privilegio de la aplicación (X5-e). Opcional y no aplicado; ver el manual, sección 3.6. |
 | `generar_certificados.sh` | Linux, o Windows con Git Bash o WSL | Genera la CA local y el certificado TLS del servidor (X3). Ver sección 6. |
@@ -137,6 +138,28 @@ node scripts\smoke_e2e_ui.mjs
 $env:APP_URL = "http://localhost:5173"
 node scripts\smoke_e2e_ui.mjs
 ```
+
+---
+
+### 4.3 Carga y concurrencia realista (`smoke_carga_concurrencia.mjs`, PENDIENTES Q4)
+
+Valida el sistema bajo ráfagas concurrentes reales contra 2 líneas completas (`CAPTURA-REFORMA-L1/L2`, `PRUEBA-REFORMA-L1/L2`) e `IMPRESION-REFORMA-01` usando `fetch` nativo de Node.js 18+:
+
+1. **Preparación multi-línea en paralelo:** `CARGA_EXPEDIENTES` (por defecto `12`) expedientes recorren Captura, Inspección Visual, OBD, Prueba e identificación de certificado simultáneamente en líneas 1 y 2.
+2. **Folios atómicos (`SKIP LOCKED`) con lote menor a la demanda:** con `CARGA_FOLIOS_LOTE` (por defecto `10`) folios disponibles, dispara `12` solicitudes en `Promise.all`; exige exactamente `10` asignaciones únicas, `2` HTTP `409` y `0` colisiones o respuestas `5xx`.
+3. **Idempotencia sobre el mismo expediente (`with_for_update=True`):** tras cargar `3` folios extra, dispara `CARGA_IDEMPOTENCIA` (por defecto `6`) solicitudes simultáneas sobre un único expediente; exige `6/6` HTTP `200` con el mismo folio y que queden `2` disponibles sin consumir.
+4. **PDF y WeasyPrint concurrentes:** ejecuta vistas previas (`GET /api/impresion/vista-previa/{id}`) e impresiones definitivas (`POST /api/impresion/imprimir/{id}`) en paralelo comprobando cabeceras `%PDF-`, estado final `IMPRESO` e inventario consistente.
+
+```powershell
+# Contra stack TLS en Docker (qa-oaxaca / bootstrap_prod --lineas 2)
+$env:API_URL = "https://localhost"
+$env:NODE_EXTRA_CA_CERTS = "certs/ca/ca.crt"
+$env:SMOKE_USUARIO = "supervisor1"; $env:SMOKE_PASSWORD = "<password>"
+$env:SMOKE_SUPERVISOR = "supervisor1"; $env:SMOKE_SUPERVISOR_PASSWORD = "<password>"
+node scripts\smoke_carga_concurrencia.mjs
+```
+
+> **Medición de referencia (2026-11-13, `qa-oaxaca` con PostgreSQL 16, `verificacion_app`, `inmutables=1` y nginx TLS):** `70.7 s` totales, `0` respuestas `5xx` y `0` deadlocks (`12` expedientes en `9.69 s`; ráfaga de `12` folios en `1.52 s`; `6/6` idempotencia en `504 ms`; `11` vistas previas WeasyPrint en `28.0 s` y `11` impresiones en `25.8 s`). Dado que el backend corre con `--workers 1` (R2) y WeasyPrint renderiza síncronamente en CPU (~2.3 s por PDF en ráfaga saturada), el tope natural está en ráfagas simultáneas grandes de generación PDF; para una estación central por verificentro queda dentro del timeout de nginx (60 s).
 
 ---
 
