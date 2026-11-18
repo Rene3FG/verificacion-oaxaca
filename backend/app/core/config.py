@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # holgado que el de usuario porque en un verificentro varias estaciones
     # pueden salir por la misma IP. 0 lo apaga.
     login_max_intentos_ip: int = 20
+    # X1-b: el bloqueo de `login_max_intentos` es por pareja (usuario, IP);
+    # este es el tope global por usuario sumando todas las IP (ataque
+    # distribuido). 0 lo apaga.
+    login_max_intentos_usuario: int = 30
     # X2-a: vida máxima de una sesión aunque tenga actividad continua (un
     # turno). 0 lo apaga.
     sesion_duracion_max_h: int = 12

@@ -194,9 +194,16 @@ class LoginRequest(BaseModel):
     device_fingerprint: str | None = None
 
 
-async def _segundos_de_bloqueo(db: AsyncSession, user_id: uuid.UUID) -> int:
+async def _segundos_de_bloqueo(
+    db: AsyncSession, user_id: uuid.UUID, ip: str | None = None, maximo: int | None = None
+) -> int:
     """Segundos que le faltan al usuario para poder volver a intentar (0 si
-    no está bloqueado)."""
+    no está bloqueado). X1-b: con `ip` cuenta solo los fallos de esa pareja
+    (usuario, IP), así quien falla desde otra IP no bloquea a los demás;
+    sin `ip` cuenta todos los fallos del usuario (tope global)."""
+    maximo = settings.login_max_intentos if maximo is None else maximo
+    if maximo <= 0:
+        return 0
     # Un login correcto o un desbloqueo del supervisor reinician la cuenta.
     ultimo_ok = (
         select(func.max(AccessEvent.created_at))
@@ -219,11 +226,12 @@ async def _segundos_de_bloqueo(db: AsyncSession, user_id: uuid.UUID) -> int:
                 AccessEvent.motivo == MOTIVO_CREDENCIALES,
                 AccessEvent.created_at > desde,
                 or_(ultimo_ok.is_(None), AccessEvent.created_at > ultimo_ok),
+                *([AccessEvent.ip_address == ip] if ip else []),
             )
             .order_by(AccessEvent.created_at.desc())
         )
     ).scalars().all()
-    if len(fallos) < settings.login_max_intentos:
+    if len(fallos) < maximo:
         return 0
     restante = fallos[0] + ventana - datetime.datetime.now(datetime.timezone.utc)
     return max(int(restante.total_seconds()), 0)
@@ -265,7 +273,14 @@ async def iniciar_sesion(
     # en `access_events` (sin tabla nueva); un login correcto reinicia la
     # cuenta. Aplica aunque la contraseña ahora sea la correcta.
     if usuario is not None and settings.login_max_intentos > 0:
-        espera = await _segundos_de_bloqueo(db, usuario.id)
+        # X1-b: bloqueo por pareja (usuario, IP) + tope global por usuario
+        # (ataque distribuido), mucho más alto que el de la pareja.
+        espera = max(
+            await _segundos_de_bloqueo(db, usuario.id, ip),
+            await _segundos_de_bloqueo(
+                db, usuario.id, None, settings.login_max_intentos_usuario
+            ),
+        )
         if espera > 0:
             raise HTTPException(
                 status_code=429,

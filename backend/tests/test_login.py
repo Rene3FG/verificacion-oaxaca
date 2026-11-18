@@ -347,3 +347,39 @@ async def test_login_exitoso_reinicia_la_cuenta_de_fallos(client, db_session):
     assert (await _login(client, usuario, estacion, "clave-correcta")).status_code == 200
     # Un fallo más no debe bloquear: la cuenta volvió a cero.
     assert (await _login(client, usuario, estacion, "mala")).status_code == 401
+
+
+async def test_bloqueo_es_por_pareja_usuario_ip(client, db_session):
+    """X1-b: fallar desde una IP no bloquea al usuario desde otra IP."""
+    from app.core.config import settings
+
+    usuario, estacion = await _usuario_con_permiso(db_session)
+    cuerpo = {
+        "username": usuario.username,
+        "password": "mala",
+        "workstation_id": str(estacion.id),
+    }
+    atacante = {"X-Real-IP": "10.8.8.8"}
+    for _ in range(settings.login_max_intentos):
+        assert (await client.post("/api/estaciones/login", json=cuerpo, headers=atacante)).status_code == 401
+    assert (await client.post("/api/estaciones/login", json=cuerpo, headers=atacante)).status_code == 429
+
+    # Otra IP (el usuario legítimo) sigue pudiendo entrar.
+    ok = dict(cuerpo, password="clave-correcta")
+    resp = await client.post("/api/estaciones/login", json=ok, headers={"X-Real-IP": "10.8.8.9"})
+    assert resp.status_code == 200
+
+
+async def test_tope_global_por_usuario_ataque_distribuido(client, db_session, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "login_max_intentos_usuario", 4)
+    usuario, estacion = await _usuario_con_permiso(db_session)
+    cuerpo = {"username": usuario.username, "password": "mala", "workstation_id": str(estacion.id)}
+    for i in range(4):
+        r = await client.post("/api/estaciones/login", json=cuerpo, headers={"X-Real-IP": f"10.7.7.{i}"})
+        assert r.status_code == 401
+    r = await client.post(
+        "/api/estaciones/login", json=dict(cuerpo, password="clave-correcta"), headers={"X-Real-IP": "10.7.7.99"}
+    )
+    assert r.status_code == 429
