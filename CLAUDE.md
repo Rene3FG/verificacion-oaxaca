@@ -26,14 +26,17 @@ Sistema de control y certificación de emisiones vehiculares del Estado de Oaxac
 ## 2. Comandos Clave
 
 ```powershell
-# Pruebas de Frontend (Vitest: 11 suites, 402 tests pasando al 100%)
+# Lint y Pruebas de Frontend (ESLint 0 errores; Vitest: 11 suites, 406 tests pasando al 100%, 0 it.fails)
+npm --prefix frontend run lint
 npm --prefix frontend test
 
 # Compilación de Producción de Frontend (0 errores, 695 módulos)
 npm --prefix frontend run build
 
-# Prueba de humo del ciclo vehicular completo (requiere backend, Postgres y Redis arriba)
+# Pruebas de humo E2E y carga Q4 (requieren stack Docker / Postgres y Redis arriba)
 node scripts/smoke_e2e_flujo.mjs
+node scripts/smoke_e2e_ui.mjs
+node scripts/smoke_carga_concurrencia.mjs
 
 # Pruebas de Backend (Pytest: 643 tests pasando al 100%, según René)
 # Requiere contenedores Postgres/Redis arriba y DLLs de WeasyPrint en PATH
@@ -64,7 +67,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 
 - **Backend:** 643/643 pruebas aprobadas (reporte de René 2026-11-09; migraciones `c8d2e6f1a3b7`, `d9e3f7a2b4c8` y `e1f4a8c2d5b9`, head `e1f4a8c2d5b9`).
   - Seguridad X1 (bloqueo 429 tras 5 fallos), X2 (timeout 30 min inactividad), X6 (complejidad de contraseñas).
-  - Endurecimiento X1/X2/X4/X5/X6 (2026-11-04): tope de fallos por IP (`LOGIN_MAX_INTENTOS_IP`) y bcrypt contra hash ficticio (X1-a/c), IP desde `X-Real-IP` (X1-e), vida máxima de sesión `SESION_DURACION_MAX_H` y cierre de sesiones al cambiar permisos o contraseña (X2-a/b/c), `/docs` apagado con `APP_ENV=production` (X4-d), seeds bloqueados en producción (X5-b), contraseñas con palabras conocidas/leetspeak rechazadas (X6-a). Cerrados el 2026-11-09: X1-d, X2-e, X6-b (cambio de contraseña propio y `must_change_password`), X6-c (usuarios sin distinguir mayúsculas) y desbloqueo por supervisor. X2-d cerrado (barrido periódico, `services/sesiones_barrido.py`, `SESION_BARRIDO_INTERVALO_S`). Pendientes: X1-b (evaluado por Sebas 2026-11-11: aceptable en LAN, obligatorio antes de VPS) y X5-e (rol de BD de mínimo privilegio: probado 2026-11-11 contra Postgres real con smoke E2E, sin aplicar en producción; ver manual 3.6). Detalle en `docs/RESPUESTA_RENE_2026-11-09.md`.
+  - Endurecimiento X1/X2/X4/X5/X6 (2026-11-04): tope de fallos por IP (`LOGIN_MAX_INTENTOS_IP`) y bcrypt contra hash ficticio (X1-a/c), IP desde `X-Real-IP` (X1-e), vida máxima de sesión `SESION_DURACION_MAX_H` y cierre de sesiones al cambiar permisos o contraseña (X2-a/b/c), `/docs` apagado con `APP_ENV=production` (X4-d), seeds bloqueados en producción (X5-b), contraseñas con palabras conocidas/leetspeak rechazadas (X6-a). Cerrados el 2026-11-09: X1-d, X2-e, X6-b (cambio de contraseña propio y `must_change_password`), X6-c (usuarios sin distinguir mayúsculas) y desbloqueo por supervisor. X2-d cerrado (barrido periódico, `services/sesiones_barrido.py`, `SESION_BARRIDO_INTERVALO_S`). X3 validado en Windows real (2026-11-13: CA en `LocalMachine\Root` con `scripts/instalar_ca.ps1 -HuellaEsperada`, `curl.exe` SChannel 200, `smoke_e2e_ui.mjs` 11/11 sin `--ignore-certificate-errors` y `-Desinstalar`). X5-e validado (2026-11-11/13) contra Postgres 16 + Compose con TLS + `inmutables=1` junto con ensayo completo de rollback D10 y carga Q4 (`scripts/smoke_carga_concurrencia.mjs`); falta decidir adopción por defecto en producción. X1-b cerrado por René (2026-11-17, `26de32f`): bloqueo de 5 fallos por pareja (usuario, IP) más tope global por usuario (`LOGIN_MAX_INTENTOS_USUARIO=30`) contra ataques distribuidos (+2 pruebas en `test_login.py`). Detalle en `docs/RESPUESTA_RENE_2026-11-09.md`.
   - X7-c CERRADO: auditoría de acciones administrativas en `event_log` (usuarios, permisos, parámetros, equipos, folios) vía `app/services/auditoria_admin.py`; eventos sin expediente solo con `modulo = 'administracion'`, no se encolan a `sync_outbox`.
   - Campo 001 RESUELTO: `clave_tecnico` en `cat_usuarios` (editable en `AdministracionPanel.vue`) y congelado como `technician_id` en la proyección (`expediente_impresion_central.py`). Imprime la clave del técnico de emisiones o del técnico que rechazó la inspección visual (o su `username` de respaldo).
   - Incidencias F1/F2 (`ERROR_INTEGRACION` y reintento explícito), F9 (lotes de sync visibles) y F4 (`cat_equipos` y resolución por estación).
@@ -73,7 +76,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
   - HU-007 RESUELTO: `LoginView.vue` renderiza `permisos_asignados` en acceso denegado (Estado B).
   - Operaciones D4–D8: `scripts/respaldo.sh`/`restaurar.sh` (Linux), `backup_db.ps1`/`restore_db.ps1` (PowerShell; se retiraron los `.sh` duplicados el 2026-11-10), `python -m app.bootstrap_prod` (datos de arranque), rotación de logs en `docker-compose.prod.yml`, `README.md`. Puertos de desarrollo acotados a `127.0.0.1` (X5-d). La estación del equipo se fija con `?estacion=NOMBRE` en la URL (guardado en `localStorage`). Detalle en `docs/HISTORIAL_DETALLADO_PROYECTO.md`.
   - NOM-047 Opción A RESUELTO: Inspección visual en la caseta de Captura (`CapturaView.vue` con `InspeccionVisualCard.vue`), rechazo directo sin emisiones ante puntos en Malo; retirada de `PruebaView.vue` (2026-11-10).
-- **Frontend:** 402/402 pruebas aprobadas en Vitest (11 suites: `session`, `TopAppBar`, `ExpedienteHeader`, `format`, `estado`, `ImpresionView`, `LoginView`, `CapturaView`, `PruebaView`, `SupervisorView`, `AdministracionPanel`; 100% de componentes cubiertos).
+- **Frontend:** 406/406 pruebas aprobadas en Vitest (11 suites: `session`, `TopAppBar`, `ExpedienteHeader`, `format`, `estado`, `ImpresionView`, `LoginView`, `CapturaView`, `PruebaView`, `SupervisorView`, `AdministracionPanel`; 100% de componentes cubiertos, 0 `it.fails`) y ESLint limpio (0 errores).
 - **Build de producción:** 695 módulos compilados limpiamente en Vite (0 errores, 10.34s).
 
 ---
@@ -88,6 +91,7 @@ Para consultar detalles específicos sin sobrecargar el contexto de la sesión a
 | [`docs/HISTORIAL_DETALLADO_PROYECTO.md`](file:///c:/Users/LENOVO%20330s/OneDrive/Escritorio/verificacion-oaxaca/verificacion-oaxaca/docs/HISTORIAL_DETALLADO_PROYECTO.md) | **Historial histórico completo** de todas las sesiones de trabajo previas (agosto a octubre 2026, 197 KB). |
 | [`docs/MANUAL_INSTALACION_Y_OPERACION.md`](file:///c:/Users/LENOVO%20330s/OneDrive/Escritorio/verificacion-oaxaca/verificacion-oaxaca/docs/MANUAL_INSTALACION_Y_OPERACION.md) | **Manual de instalación y operación (D6)** para servidores de verificentro, Nginx, Compose y estaciones. |
 | [`docs/PENDIENTES_2026-10-20.md`](file:///c:/Users/LENOVO%20330s/OneDrive/Escritorio/verificacion-oaxaca/verificacion-oaxaca/docs/PENDIENTES_2026-10-20.md) | Lista de bloqueos externos (B1-B11) y supuestos de negocio reversibles (S1-S12). |
-| [`docs/trazabilidad/trazabilidad_hu_2026-10-20.md`](file:///c:/Users/LENOVO%20330s/OneDrive/Escritorio/verificacion-oaxaca/verificacion-oaxaca/docs/trazabilidad/trazabilidad_hu_2026-10-20.md) | Matriz oficial de trazabilidad de las 110 Historias de Usuario (406 SP). |
+| [`docs/trazabilidad/trazabilidad_hu_2026-11-13.md`](file:///c:/Users/LENOVO%20330s/OneDrive/Escritorio/verificacion-oaxaca/verificacion-oaxaca/docs/trazabilidad/trazabilidad_hu_2026-11-13.md) | Matriz oficial de trazabilidad de las 110 Historias de Usuario (406 SP; 101 HECHO / 89.4%). |
+| [`docs/UAT_41_PANTALLAS_FIGMA.md`](file:///c:/Users/LENOVO%20330s/OneDrive/Escritorio/verificacion-oaxaca/verificacion-oaxaca/docs/UAT_41_PANTALLAS_FIGMA.md) | Recorrido de aceptación (UAT) de las 41 pantallas contra el Figma y lista de diferencias (Q5). |
 | [`scripts/README.md`](file:///c:/Users/LENOVO%20330s/OneDrive/Escritorio/verificacion-oaxaca/verificacion-oaxaca/scripts/README.md) | Guía de uso de scripts de respaldo y restauración de PostgreSQL (D4). |
 | [`MEMORY.md`](file:///c:/Users/LENOVO%20330s/OneDrive/Escritorio/verificacion-oaxaca/verificacion-oaxaca/MEMORY.md) | Bitácora técnica persistente de continuidad y estado de git. |
