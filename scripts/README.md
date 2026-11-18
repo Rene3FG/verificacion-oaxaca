@@ -16,7 +16,7 @@ Este directorio contiene las herramientas ejecutables para cumplir con la polít
 | `smoke_e2e_ui.mjs` | Node.js 18+ (Puppeteer-core / Chrome / Edge) | Prueba de humo E2E de interfaz en navegador headless (cubre las 5 vistas). Ver sección 4.2. |
 | `smoke_carga_concurrencia.mjs` | Node.js 18+ (cualquier SO) | Prueba de carga y concurrencia Q4: 2 líneas paralelas, folios atómicos (`SKIP LOCKED`), idempotencia y PDFs en ráfaga. Ver sección 4.3. |
 | `desbloquear_usuario.sh` / `.ps1` | Linux / Windows | Soporte: desbloquea a un usuario bloqueado por intentos fallidos de login (X1). Ver sección 5. |
-| `sql/minimo_privilegio.sql` | PostgreSQL (psql) | Crea el rol de BD de mínimo privilegio de la aplicación (X5-e). Opcional y no aplicado; ver el manual, sección 3.6. |
+| `sql/minimo_privilegio.sql` | PostgreSQL (psql) | Crea el rol de BD de mínimo privilegio de la aplicación (`verificacion_app`, X5-e). Forma parte de la instalación estándar; ver el manual, sección 3.4. |
 | `generar_certificados.sh` | Linux, o Windows con Git Bash o WSL | Genera la CA local y el certificado TLS del servidor (X3). Ver sección 6. |
 | `instalar_ca.sh` / `.ps1` | Linux / Windows | Instala o quita la CA local en el almacén de confianza de las estaciones cliente (X3). Ver sección 7. |
 

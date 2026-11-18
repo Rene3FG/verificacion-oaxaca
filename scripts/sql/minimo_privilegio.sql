@@ -7,11 +7,11 @@
 -- Este script crea un rol SOLO para el tiempo de ejecución, que puede leer y
 -- escribir los datos pero no cambiar el esquema ni administrar la base.
 --
--- NO SE APLICA SOLO. Es opcional y se ejecuta a mano, una vez por base, después
--- de que las migraciones hayan corrido al menos una vez (ver
--- docs/MANUAL_INSTALACION_Y_OPERACION.md, sección "Rol de base de datos de
--- mínimo privilegio"). Es idempotente: se puede repetir (también rota la
--- contraseña del rol).
+-- NO SE APLICA SOLO. Es parte de la instalación estándar en producción (X5-e):
+-- se ejecuta a mano una vez por base, después de correr las migraciones iniciales
+-- (alembic upgrade head), como parte del despliegue en vivo (ver
+-- docs/MANUAL_INSTALACION_Y_OPERACION.md, sección 3.4). Es idempotente: se puede
+-- repetir (también rota la contraseña del rol).
 --
 -- Debe ejecutarse con el MISMO rol que corre las migraciones (POSTGRES_USER),
 -- porque ALTER DEFAULT PRIVILEGES solo cubre los objetos que cree ese rol. Así,

@@ -6,22 +6,28 @@ Una instalación atiende un verificentro con tres tipos de estación: **Captura*
 
 ## Instalación en producción
 
-Requisitos: Docker con el plugin Compose y `openssl`. El TLS lo termina el nginx del propio compose: antes de levantar hay que generar los certificados (paso 1).
+Requisitos: Docker con el plugin Compose y `openssl`. El TLS lo termina el nginx del propio compose (`scripts/generar_certificados.sh`, paso 1) y la configuración estándar separa migraciones (`migrate` como dueño) de la aplicación con el rol de mínimo privilegio `verificacion_app` (`docker-compose.minimo-privilegio.yml`, X5-e):
 
 ```bash
+COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.minimo-privilegio.yml --env-file .env.prod"
+
 scripts/generar_certificados.sh --hosts "verificentro.local,192.168.1.100"   # 1. CA local y certificado (cambiar la IP por la del servidor)
-cp .env.prod.example .env.prod        # 2. editar: contraseña de Postgres, WEB_PORT, CENTRAL_SYNC_*
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build   # 3. levantar
+cp .env.prod.example .env.prod        # 2. definir POSTGRES_PASSWORD, APP_DB_USER=verificacion_app, APP_DB_PASSWORD y CENTRAL_SYNC_*
+$COMPOSE run --rm migrate             # 3. levanta db y aplica migraciones iniciales (alembic upgrade head)
+{ printf '\\set app_user verificacion_app\n\\set app_password %s\n' "'$APP_DB_PASSWORD'"; cat scripts/sql/minimo_privilegio.sql; } \
+  | $COMPOSE exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f -'   # 4. crea verificacion_app (ver manual 3.4)
+$COMPOSE up -d --build                # 5. levanta redis, backend (verificacion_app) y web (HTTPS 443)
 ```
 
-El backend aplica `alembic upgrade head` al arrancar. Usar **un solo worker** (el bucle de sincronización es por proceso).
-El estado se revisa con `docker compose ... ps` (el contenedor del backend tiene healthcheck sobre `/health`, que nginx no expone).
+En adelante las migraciones corren automáticamente en el servicio `migrate` antes de iniciar `backend`. Usar **un solo worker** (el bucle de sincronización es por proceso). Con `APP_ENV=production` (fijo en Compose) el backend apaga `/docs`, `/redoc` y `/openapi.json` y bloquea `app.seed`.
+El estado se revisa con `$COMPOSE ps` (el contenedor del backend tiene healthcheck sobre `/health`, que nginx no expone).
 
 ### Variables de entorno principales
 
 | Variable | Qué hace | Default |
 |---|---|---|
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Base de datos | `POSTGRES_PASSWORD` es obligatoria: el compose no arranca sin ella |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Dueño de la base (migraciones y respaldos) | `POSTGRES_PASSWORD` es obligatoria: el compose no arranca sin ella |
+| `APP_DB_USER` / `APP_DB_PASSWORD` | Rol de mínimo privilegio en tiempo de ejecución (sin DDL ni `SUPERUSER`) | `verificacion_app` / obligatorio en `.env.prod` |
 | `WEB_PORT` | Puerto HTTP publicado (solo redirige a HTTPS) | 80 |
 | `WEB_TLS_PORT` | Puerto HTTPS publicado (la redirección asume 443) | 443 |
 | `CERTS_DIR` | Carpeta con `server.crt` y `server.key` | `./certs/server` |
@@ -35,7 +41,7 @@ El estado se revisa con `docker compose ... ps` (el contenedor del backend tiene
 En producción no corre ningún seed: sin este paso nadie puede iniciar sesión.
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod exec -e BOOTSTRAP_PASSWORD='...' backend \
+docker compose -f docker-compose.prod.yml -f docker-compose.minimo-privilegio.yml --env-file .env.prod exec -e BOOTSTRAP_PASSWORD='...' backend \
   python -m app.bootstrap_prod --centro reforma --lineas 2 --usuario admin --nombre "Administrador"
 ```
 
@@ -77,5 +83,5 @@ los datos de arranque reales (usuarios, estaciones, centros, lotes de folios, l�
 
 ## Operación
 
-- **Logs:** Docker los rota solos (10 MB × 5 archivos por contenedor). Ver: `docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f backend`.
+- **Logs:** Docker los rota solos (10 MB × 5 archivos por contenedor). Ver: `docker compose -f docker-compose.prod.yml -f docker-compose.minimo-privilegio.yml --env-file .env.prod logs -f backend`.
 - **Reloj y zona horaria:** los certificados llevan fecha y hora. El servidor usa `America/Mexico_City` (variable `TZ` del backend); mantener el reloj del servidor sincronizado (NTP) y revisar que las estaciones muestren la misma hora.

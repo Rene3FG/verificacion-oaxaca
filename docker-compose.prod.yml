@@ -1,6 +1,10 @@
 # Producción: sin código montado, sin --reload, Postgres y Redis solo en la red
-# interna. Uso:  cp .env.prod.example .env.prod  (editar)  y
-#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# interna. El camino estándar documentado combina este archivo con
+# docker-compose.minimo-privilegio.yml (rol verificacion_app, X5-e):
+#   cp .env.prod.example .env.prod   (definir POSTGRES_PASSWORD y APP_DB_PASSWORD)
+#   docker compose -f docker-compose.prod.yml -f docker-compose.minimo-privilegio.yml --env-file .env.prod run --rm migrate
+#   # Aplicar scripts/sql/minimo_privilegio.sql (ver manual, sección 3.4)
+#   docker compose -f docker-compose.prod.yml -f docker-compose.minimo-privilegio.yml --env-file .env.prod up -d --build
 # El TLS se termina en el nginx del servicio web (PENDIENTES X3): antes de
 # levantar, generar los certificados con scripts/generar_certificados.sh (quedan
 # en ./certs/server). El puerto 80 solo redirige a HTTPS.

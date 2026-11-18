@@ -94,6 +94,10 @@ POSTGRES_USER=verificacion
 # (no usar la de ningún ejemplo). Se genera una con:  openssl rand -base64 24
 POSTGRES_PASSWORD=
 POSTGRES_DB=verificacion
+# OBLIGATORIO en la instalación estándar (X5-e): rol de aplicación sin permisos DDL.
+# 16+ caracteres, solo letras y números para no requerir escape en la URL.
+APP_DB_USER=verificacion_app
+APP_DB_PASSWORD=
 
 # --- Puertos de Exposición Web en LAN ---
 # WEB_PORT solo redirige a HTTPS; WEB_TLS_PORT (443) es el puerto real de la aplicación.
@@ -172,84 +176,83 @@ Como la CA se reutiliza, las estaciones no cambian nada. Solo si se perdiera la 
 | El navegador dice "la conexión no es privada" | La CA no está instalada en esa estación, o se abrió con un nombre o IP que no está en el certificado |
 | `web` se reinicia en bucle | `docker compose ... logs web`; suele ser un `server.crt` y `server.key` que no corresponden (volver a generar) |
 
-### 3.4 Puesta en Marcha del Stack
-Ejecutar el comando de arranque de Docker Compose:
+### 3.4 Puesta en Marcha del Stack (Instalación Estándar con Mínimo Privilegio, X5-e)
+La instalación estándar en producción utiliza el archivo combinado `docker-compose.prod.yml` + `docker-compose.minimo-privilegio.yml`, de modo que `migrate` aplica las migraciones con el dueño (`POSTGRES_USER`) y el `backend` se ejecuta conectado como `verificacion_app` (`APP_DB_USER`, sin DDL ni `SUPERUSER` y sin recibir nunca la contraseña del dueño):
+
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.minimo-privilegio.yml --env-file .env.prod"
 ```
 
-El despliegue automático realiza las siguientes acciones:
-1. Inicia el contenedor de PostgreSQL 16 con verificación de salud (`healthcheck`).
-2. Inicia Redis 7 para colas de trabajo.
-3. Compila el contenedor backend FastAPI e invoca automáticamente las migraciones pendientes con `alembic upgrade head`.
-4. Compila el frontend Vue 3 en Nginx, que sirve la aplicación por HTTPS en el puerto `WEB_TLS_PORT` (443) y redirige el puerto `WEB_PORT` (80) a HTTPS.
+1. **Migración inicial (solo primera instalación o tras crear una base vacía):** levanta PostgreSQL en estado sano y aplica las tablas antes de crear el rol de aplicación:
+   ```bash
+   $COMPOSE run --rm --build migrate
+   ```
+2. **Crear el rol `verificacion_app` (X5-e):** pasa la misma contraseña definida en `APP_DB_PASSWORD` por entrada estándar para que no quede en el historial del shell:
+   ```bash
+   read -rsp "Contraseña del rol de la aplicación (igual a APP_DB_PASSWORD en .env.prod): " APP_DB_PASSWORD; echo
+   { printf '\\set app_user verificacion_app\n\\set app_password %s\n' "'$APP_DB_PASSWORD'"; \
+     cat scripts/sql/minimo_privilegio.sql; } \
+   | $COMPOSE exec -T db \
+       sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f -'
+   ```
+   Debe terminar con `OK: rol verificacion_app creado o actualizado con privilegios mínimos.` *(Opcional de endurecimiento adicional: agregar `\set inmutables 1` antes del `cat` para volver de solo escritura `event_log` y `access_events`; ya verificado con `qa-oaxaca`).*
+3. **Levantar el stack completo:**
+   ```bash
+   $COMPOSE up -d --build
+   ```
+4. **Cargar datos iniciales y primer supervisor (`bootstrap_prod`):** en producción no corre ningún `seed`. Ejecutar una sola vez por centro:
+   ```bash
+   $COMPOSE exec -e BOOTSTRAP_PASSWORD='<contraseña_supervisor>' backend \
+     python -m app.bootstrap_prod --centro reforma --lineas 2 --usuario admin --nombre "Administrador"
+   ```
+
+El despliegue realiza las siguientes acciones:
+1. Inicia PostgreSQL 16 (`healthy`) y Redis 7.
+2. Ejecuta `migrate` (`alembic upgrade head` como dueño) y se detiene con salida `0`.
+3. Inicia `backend` FastAPI conectado como `verificacion_app` y con `APP_ENV=production` (apaga `/docs`, `/redoc` y `/openapi.json`, y bloquea los scripts de demostración).
+4. Inicia Nginx en `web`, sirviendo el frontend por HTTPS en `WEB_TLS_PORT` (443) y redirigiendo `WEB_PORT` (80) a HTTPS.
 
 ### 3.5 Verificación del Despliegue
-Verificar que todos los servicios se encuentren en estado `Up (healthy)`:
+Verificar que `db`, `redis`, `backend` y `web` estén `Up (healthy)` (`migrate` en `Exited (0)`):
 ```bash
-docker compose -f docker-compose.prod.yml ps
+$COMPOSE ps
 ```
+Comprobar que el rol `verificacion_app` no tiene privilegios de administración:
+```bash
+echo "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = 'verificacion_app';" \
+| $COMPOSE exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+*(Las columnas booleanas deben salir en `f`.)*
+
 Comprobar que nginx responde por HTTPS con la CA local:
 ```bash
 curl --cacert certs/ca/ca.crt -I https://localhost/
 ```
 Respuesta esperada: `HTTP/2 200` (la pantalla de la aplicación) y, con `curl -I http://localhost/`, un `301` hacia `https://`. En Windows, `curl.exe` usa SChannel y exige además `--ssl-no-revoke`, porque la CA local no publica una lista de revocación (CRL).
 
-El estado de salud del backend lo informa `docker compose ... ps` (el contenedor `backend` tiene un `healthcheck` sobre `/health`, ruta interna que nginx no expone).
+El estado de salud del backend lo informa `$COMPOSE ps` (el contenedor `backend` tiene un `healthcheck` sobre `/health`, ruta interna que nginx no expone).
 
-### 3.6 Rol de base de datos de mínimo privilegio (opcional, X5-e)
+### 3.6 Arquitectura y Mantenimiento del Rol de Mínimo Privilegio (X5-e)
 
-Por defecto el backend se conecta a PostgreSQL con `POSTGRES_USER`, que es superusuario del contenedor. Si alguien lograra ejecutar código o SQL a través de la aplicación, alcanzaría toda la instancia. Esta sección reemplaza esa conexión por un rol que **solo lee y escribe datos**: no crea ni borra tablas, no administra roles y no puede vaciar tablas.
+> **Decisión vigente (2026-11-17):** `verificacion_app` con `docker-compose.minimo-privilegio.yml` es el **camino estándar por defecto desde la primera instalación en vivo** (adoptado tras validar `smoke_e2e_flujo.mjs` 17/17, `smoke_carga_concurrencia.mjs`, bloqueo/desbloqueo y rollback D10 con `inmutables=1` en PostgreSQL 16 real).
 
-> **Estado:** preparado y **no aplicado en producción**. Probado en un ambiente de pruebas: René (2026-11-11) contra PostgreSQL 16 real y el equipo (2026-11-12, proyecto aislado `qa-oaxaca` en Docker, 2026-11-12, resultado reportado por el equipo) con el Compose combinado y TLS. El script rechaza los 3 casos inválidos (sin `app_user`, contraseña corta, `app_user` = dueño), es repetible, y el rol no puede `TRUNCATE`, `DROP`, `ALTER`, `CREATE TABLE`, `CREATE ROLE` ni leer `alembic_version`. Con `docker-compose.prod.yml` más `docker-compose.minimo-privilegio.yml`: `migrate` aplicó las migraciones hasta `e1f4a8c2d5b9`, se aplicó `minimo_privilegio.sql` con `inmutables=1`, el backend con `verificacion_app` quedó `healthy` y `python -m app.bootstrap_prod` cargó los límites NOM-041 y NOM-045, las estaciones y el supervisor. El smoke E2E de API (17 pasos) pasó contra `https://localhost` con ese rol, también con `inmutables=1`, y bloqueo, desbloqueo y cierre de sesión funcionaron sin errores de permisos. Pruébalo primero en un ambiente de pruebas, con una copia de la base.
-
-Piezas:
+Piezas y notas operativas:
 
 | Archivo | Qué hace |
 |---|---|
-| `scripts/sql/minimo_privilegio.sql` | Crea (o actualiza) el rol de la aplicación y le da los permisos mínimos. Se ejecuta una vez por base; es repetible. |
-| `docker-compose.minimo-privilegio.yml` | Segundo archivo de Compose, opcional: corre las migraciones con el dueño en un servicio aparte y arranca el backend con el rol limitado. |
-| `APP_DB_USER`, `APP_DB_PASSWORD` | Variables de `.env.prod` con el rol y su contraseña (en `.env.prod.example`, comentadas). |
+| `scripts/sql/minimo_privilegio.sql` | Crea (o actualiza) `verificacion_app`, asigna permisos solo DML + `ALTER DEFAULT PRIVILEGES` para tablas futuras de migraciones y revoca `CONNECT` de `PUBLIC` y acceso a `alembic_version`. Es repetible (también sirve para rotar la contraseña). |
+| `docker-compose.minimo-privilegio.yml` | Separa el servicio `migrate` (con `POSTGRES_USER`) del `backend` (con `APP_DB_USER` / `APP_DB_PASSWORD`). |
+| `APP_DB_USER`, `APP_DB_PASSWORD` | Variables obligatorias de `.env.prod` en la instalación estándar. |
 
-**Por qué hay un servicio de migraciones aparte.** El backend normalmente ejecuta `alembic upgrade head` al arrancar, y eso exige cambiar el esquema. Con el rol limitado no puede. Con el segundo archivo de Compose, el servicio `migrate` corre las migraciones con las credenciales del dueño y termina; el backend espera a que concluya bien y no recibe nunca la contraseña del dueño. Esto no requiere modificar el código del backend (`alembic` lee `DATABASE_URL_SYNC` y la aplicación lee `DATABASE_URL`, variables distintas).
+**Consideraciones importantes**
 
-**Pasos**
-
-1. Con el stack ya instalado y las migraciones aplicadas al menos una vez, elige la contraseña del rol (16 caracteres o más, solo letras y números, para que sirva sin escapar dentro de la URL de conexión) y aplica el SQL **con el mismo usuario que corre las migraciones**:
-
-   ```bash
-   read -rsp "Contraseña del rol de la aplicación: " APP_DB_PASSWORD; echo
-   { printf '\\set app_user verificacion_app\n\\set app_password %s\n' "'$APP_DB_PASSWORD'"; \
-     cat scripts/sql/minimo_privilegio.sql; } \
-   | docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T db \
-       sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f -'
-   ```
-
-   Debe terminar con `OK: rol verificacion_app creado o actualizado con privilegios mínimos.` El script verifica los permisos y, si algo no queda como se espera, deshace todo. Para que además las bitácoras `event_log` y `access_events` queden de solo escritura, agrega la línea `\set inmutables 1` antes del `cat` (pruébalo antes con la suite completa).
-2. Agrega a `.env.prod`: `APP_DB_USER=verificacion_app` y `APP_DB_PASSWORD=` con la misma contraseña.
-3. Arranca con los dos archivos:
-
-   ```bash
-   docker compose -f docker-compose.prod.yml -f docker-compose.minimo-privilegio.yml \
-       --env-file .env.prod up -d --build
-   ```
-
-4. Comprueba que el backend funciona (inicio de sesión y un expediente de prueba) y que el rol no es superusuario:
-
-   ```bash
-   echo "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = 'verificacion_app';" \
-   | docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T db \
-       sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-   ```
-
-**Importante**
-
-- En **todos** los comandos posteriores hay que repetir los dos `-f` (o el contenedor del backend volvería al modo normal y fallaría al no tener permiso para migrar).
-- Los scripts de soporte (`respaldo.sh`, `restaurar.sh`, `desbloquear_usuario.*`) siguen usando `POSTGRES_USER`, como corresponde: son tareas de administración.
+- En **todos** los comandos posteriores (`ps`, `logs`, `up`, actualización D10) usar siempre los dos `-f` definidos en `COMPOSE` (si se omite el segundo `-f`, el `backend` arrancaría con `POSTGRES_USER`).
+- Los scripts de soporte (`respaldo.sh`, `restaurar.sh`, `desbloquear_usuario.*`) siguen usando `POSTGRES_USER`, como corresponde a tareas de administración.
+- Si se utiliza `scripts/restaurar.sh` o el rollback (sección 8.4), después de recrear la base **hay que volver a ejecutar `scripts/sql/minimo_privilegio.sql`** (el `DROP DATABASE` devuelve `CONNECT` a `PUBLIC`, aunque `ALTER ROLE` del usuario ya exista en la instancia).
 - El script quita el permiso de conexión a `PUBLIC` sobre la base. Si usas otro rol para monitoreo, concédele `CONNECT` aparte.
-- Las migraciones nuevas que agregue el equipo funcionan sin repetir el SQL: los permisos se asignan por defecto a las tablas que cree el dueño.
-- La contraseña pasa por la entrada estándar y no queda en el historial del shell, pero el SQL la recibe en claro: si activas `log_statement = all` en PostgreSQL, quedaría en el registro del servidor.
-- **Volver al modo normal:** omitir el segundo `-f` y reiniciar. El rol puede quedarse o eliminarse con `DROP OWNED BY verificacion_app; DROP ROLE verificacion_app;` ejecutado como dueño.
+- Las migraciones nuevas que agregue el equipo funcionan sin repetir el SQL: los permisos se asignan por defecto a las tablas que cree el dueño (`POSTGRES_USER`).
+- La contraseña pasa por entrada estándar (`psql -f -`), pero si activas `log_statement = all` en PostgreSQL quedaría en el registro del servidor.
+- **Contingencia (volver temporalmente al modo superusuario):** solo si una depuración extraordinaria lo requiere, omitir `-f docker-compose.minimo-privilegio.yml` y reiniciar; al volver a producción normal, usar de nuevo ambos `-f`.
 
 ---
 
@@ -337,7 +340,7 @@ Copiar los archivos **fuera del servidor** con regularidad: un respaldo en el mi
 Que el archivo esté íntegro no prueba que sirva. Se comprueba cargándolo en una base temporal, sin tocar la real:
 
 ```bash
-COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
+COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.minimo-privilegio.yml --env-file .env.prod"
 ARCHIVO=/var/respaldos/verificacion/verificacion_AAAAMMDD_HHMMSS.sql.gz
 
 $COMPOSE exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE verificacion_prueba"'
@@ -363,11 +366,11 @@ Procedimiento para pasar el servidor de una versión a otra sin perder los regis
 
 **Antes de empezar**
 - La actualización **detiene el servicio**: las estaciones no pueden operar mientras dura. Hacerla fuera del horario de verificación y avisar.
-- Todos los comandos asumen la variable `COMPOSE` de abajo. Si se usa el rol de base de datos de mínimo privilegio (sección 3.6), agregar `-f docker-compose.minimo-privilegio.yml` en **todos** los comandos `$COMPOSE`, también en el rollback (`scripts/restaurar.sh` es la excepción: usa fijo `docker-compose.prod.yml`, lo cual basta porque solo toca la base de datos).
+- Todos los comandos asumen la variable `COMPOSE` estándar de producción de abajo (que ya incluye `-f docker-compose.minimo-privilegio.yml`, también en el rollback; `scripts/restaurar.sh` es la excepción: usa fijo `docker-compose.prod.yml`, lo cual basta porque solo toca la base de datos y el contenedor `backend` ya fue creado con `verificacion_app`).
 - El servidor construye las imágenes (`--build`): necesita acceso a internet para bajar imágenes base y dependencias. Si la red del verificentro es limitada, ejecutar `$COMPOSE build` **antes** de la ventana, con el servicio aún en marcha, y dejar solo `up -d` para la ventana.
 
 ```bash
-COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
+COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.minimo-privilegio.yml --env-file .env.prod"
 VERSION=<etiqueta o rama de la versión nueva>
 ```
 
@@ -452,7 +455,7 @@ Se vuelve atrás **restaurando el respaldo previo**, no con `alembic downgrade`:
    scripts/restaurar.sh /var/respaldos/verificacion/verificacion_AAAAMMDD_HHMMSS.sql.gz
    ```
    Pide escribir `SI`, detiene el backend (que aquí aún no existe), recrea la base y carga el respaldo. Este script usa fijo `docker-compose.prod.yml` y `.env.prod`, sin el archivo de mínimo privilegio, lo cual basta porque solo toca la base de datos. Sus pasos `stop backend` y `start backend` no fallan aunque el contenedor del backend aún no exista (comprobado con Docker Compose v5.5.1 en el ensayo; en otras versiones, si el script termina con un aviso en ese último paso, la restauración ya se hizo: comprobar con la consulta de revisión y la de conteos de 8.2.2 y continuar). Como el backend no existe todavía, quedará levantado en el paso 7.
-6. **Solo si se usa el rol de mínimo privilegio** (sección 3.6): volver a aplicar `scripts/sql/minimo_privilegio.sql` (paso 1 de 3.6, con la misma contraseña de `APP_DB_PASSWORD`). Restaurar borra y recrea la base, y un respaldo de `pg_dump` no conserva los permisos a nivel de base de datos (el `REVOKE` y `GRANT CONNECT ON DATABASE` del script): sin este paso la aplicación funciona, pero la base queda más abierta que antes. En el ensayo se comprobó que, tras `DROP` y `CREATE DATABASE`, `PUBLIC` vuelve a tener `CONNECT`, y que reaplicar el script lo quita de nuevo. El script es repetible, así que no estorba si ya estaban.
+6. **Reaplicar permisos de `verificacion_app`:** volver a aplicar `scripts/sql/minimo_privilegio.sql` (paso 2 de 3.4, con la misma contraseña de `APP_DB_PASSWORD`). Restaurar borra y recrea la base, y un respaldo de `pg_dump` no conserva los permisos a nivel de base de datos (el `REVOKE` y `GRANT CONNECT ON DATABASE` del script): sin este paso la aplicación no podrá conectarse con `verificacion_app` tras `PUBLIC` cerrado o dejará `PUBLIC` abierto al revés. En el ensayo se comprobó que, tras `DROP` y `CREATE DATABASE`, `PUBLIC` vuelve a tener `CONNECT`, y que reaplicar el script lo quita de nuevo. El script es repetible, así que no estorba si ya estaban.
 7. Levantar el stack con la versión anterior (el servicio `migrate`, si se usa, no tendrá nada que migrar):
    ```bash
    $COMPOSE up -d --build
