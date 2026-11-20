@@ -130,6 +130,7 @@ verificacion-oaxaca/
 │   ├── HISTORIAL_DETALLADO_PROYECTO.md    # Historial completo previo (197 KB)
 │   ├── MANUAL_INSTALACION_Y_OPERACION.md  # Manual operativo y de instalación D6
 │   ├── PENDIENTES_2026-10-20.md           # Lista maestra de bloqueos B1-B11 (B1 RESUELTO) y supuestos S1-S12
+│   ├── CHECKLIST_ARRANQUE_VERIFICENTRO.md # Checklist operativo de primera instalación en sitio (Fase 4)
 │   └── UAT_41_PANTALLAS_FIGMA.md          # Matriz UAT de 41 pantallas Figma vs código actual (Q5)
 ├── scripts/
 │   ├── respaldo.sh / restaurar.sh         # Respaldo y restauración en Linux (producción, .sql.gz)
