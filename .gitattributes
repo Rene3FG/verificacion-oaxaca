@@ -1,0 +1,3 @@
+# Mantener saltos LF en scripts de servidor Linux y SQL incluso en clones de Windows
+*.sh text eol=lf
+*.sql text eol=lf

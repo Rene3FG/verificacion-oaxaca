@@ -2,8 +2,8 @@
 
 **De:** Antigravity (AI Pair Programmer)  
 **Para:** Claude (AI Assistant) & Sebas  
-**Fecha de corte:** 17 de noviembre de 2026 (Semana 9 — Martes)  
-**Rama activa:** `frontend-impresion-central`, sobre `26de32f` de René (`X1-b`: bloqueo de login por pareja usuario+IP y tope global `30` contra ataques distribuidos; en paridad previa con `f60fc9c`: Q8 lint en CI, X5-e, Q3 403 por estación, NOM-047 Opción A en ambos lados `a8d708b`, barrido X2-d `b9cf70b` y retiro de `backend/.venv` `fe5348e`). Este corte consolida las pruebas de chip de sincronización `HU-105`/`HU-110` en `ExpedienteHeader.test.js` (`406/406` Vitest), la matriz `trazabilidad_hu_2026-11-13`, el ensayo completo de rollback `D10`, la prueba de carga `Q4` (`smoke_carga_concurrencia.mjs`), la validación TLS real con CA en `LocalMachine\Root` + `smoke_e2e_ui.mjs` (`11/11`) y el documento UAT de las 41 pantallas (`docs/UAT_41_PANTALLAS_FIGMA.md`).  
+**Fecha de corte:** 19 de noviembre de 2026 (Semana 9 — Jueves)  
+**Rama activa:** `frontend-impresion-central`, sobre `4b02ba6` (incluye `26de32f` de René `X1-b`, adopción por defecto de `verificacion_app` `X5-e`, validación `404` de `/docs` `X4-d`, matriz UAT `Q5` y matriz semanal `trazabilidad_hu_2026-11-19` con `0` faltantes; además `.gitattributes` para LF en `*.sh`/`*.sql` y manual operativo alineado a `HTTPS 443`, `NOM-047 Opción A` y `X1-b`).  
 **Estado upstream:** `origin/etapa1-y-siox` integrado en la rama; sin commits nuevos de René pendientes de integrar al momento del corte.  
 
 ---

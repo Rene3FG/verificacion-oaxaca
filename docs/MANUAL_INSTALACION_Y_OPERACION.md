@@ -1,7 +1,7 @@
 # Manual de Instalación y Operación — Verificación Vehicular Oaxaca
 
 **Sistema de Verificación Vehicular del Estado de Oaxaca**  
-**Versión del documento:** 1.0 (Fase 4 / Corte Octubre 2026)  
+**Versión del documento:** 1.1 (Fase 4 / Corte Noviembre 2026)  
 **Clasificación:** Manual Técnico y Operativo (D6)
 
 ---
@@ -20,7 +20,7 @@ El sistema opera bajo un modelo de **alta resiliencia local con sincronización 
  │   └──────┬───────┘   └──────┬───────┘   └──────┬───────┘   └──────┬───────┘  │
  │          │                  │                  │                  │          │
  │          └──────────────────┴─────────┬────────┴──────────────────┘          │
- │                                       │ HTTP / LAN (Puerto 80)               │
+ │                                       │ HTTPS / LAN (Puerto 443; 80→443)       │
  │                                       ▼                                      │
  │                     ┌──────────────────────────────────┐                     │
  │                     │  Nginx Reverse Proxy & Frontend  │                     │
@@ -262,8 +262,8 @@ Cada equipo cliente en la red local se identifica mediante su identificador de d
 
 | Tipo de Estación | Vista Asignada | Permisos Requeridos | Responsabilidades |
 |---|---|---|---|
-| **CAPTURA** | `/captura` | Operador Captura | Búsqueda en SIOX, captura de datos vehiculares y emisión a línea. |
-| **PRUEBA** | `/prueba` | Técnico Verificador | Inspección visual, OBD, gases NOM-041 / opacidad NOM-045. |
+| **CAPTURA** | `/captura` | Operador Captura | Búsqueda en SIOX, captura de datos vehiculares, inspección visual NOM-047 (8 puntos) y envío a línea (o rechazo visual directo a Impresión Central). |
+| **PRUEBA** | `/prueba` | Técnico Verificador | Diagnóstico OBD/SBD, checklist de seguridad NOM-045 (diésel) y pruebas de emisiones NOM-041 / opacidad NOM-045. |
 | **IMPRESION** | `/impresion` | Operador Impresión | Asignación de folio, validación de tipo, impresión física y entrega. |
 | **SUPERVISION** | `/supervision` | Supervisor del Centro | Gestión de incidencias, reintentos, reimpresión, canjes y parámetros. |
 
@@ -272,23 +272,22 @@ Cada equipo cliente en la red local se identifica mediante su identificador de d
 ## 5. Manual de Operación Diaria por Estación
 
 ### 5.1 Políticas de Seguridad de Acceso (X1, X2, X6)
-1. **Complejidad de Contraseña:** Mínimo 8 caracteres, al menos una letra y un número. No se permiten contraseñas triviales ni iguales al nombre de usuario.
-2. **Bloqueo por Intentos Fallidos (X1):** Al acumular 5 contraseñas erróneas consecutivas, la cuenta queda bloqueada temporalmente durante 15 minutos (código HTTP 429).
-3. **Caducidad por Inactividad (X2):** Tras 30 minutos sin actividad interactiva, la sesión concluye automáticamente requiriendo reautenticación.
+1. **Complejidad y Cambio Inicial de Contraseña (X6):** Mínimo 8 caracteres, al menos una letra y un número; rechaza contraseñas comunes, variantes *leetspeak* o iguales al nombre de usuario (insensible a mayúsculas). Las cuentas creadas o restablecidas por un supervisor exigen cambio obligatorio de contraseña en el primer inicio (`must_change_password`).
+2. **Bloqueo por Intentos Fallidos (X1 / X1-b):** Al acumular 5 contraseñas erróneas consecutivas desde una misma pareja `(usuario, IP)`, esa pareja queda bloqueada durante 15 minutos (`HTTP 429`), con tope global de 30 fallos por usuario (`LOGIN_MAX_INTENTOS_USUARIO`) y 20 por IP (`LOGIN_MAX_INTENTOS_IP`). Un supervisor puede levantar el bloqueo desde Administración (`Desbloquear`) y, si el bloqueado es el único supervisor, soporte usa `scripts/desbloquear_usuario.*`.
+3. **Caducidad y Revocación de Sesión (X2):** Tras 30 minutos sin actividad (o al cumplir 12 horas máximas de turno), la sesión concluye automáticamente requiriendo reautenticación. Revocar permisos o restablecer la contraseña cierra de inmediato las sesiones activas del usuario.
 
 ### 5.2 Estación de Captura
 1. Iniciar sesión con usuario asignado a la estación de captura.
 2. Ingresar placa o NIV para consultar los datos vehiculares en el padrón estatal (SIOX).
-3. En caso de contingencia o vehículo foráneo sin registro previo, proceder con la captura manual fidedigna de la tarjeta de circulación.
-4. Asignar la línea operativa disponible y confirmar el envío a prueba técnica.
+3. En caso de contingencia o vehículo foráneo sin registro previo, proceder con la captura manual fidedigna de la tarjeta de circulación y confirmar la normalización de datos.
+4. Realizar la **Inspección Visual NOM-047** de 8 puntos en caseta (*Bueno*, *Malo* o *No aplica*). Si aprueba, el expediente pasa a la cola de la Estación de Prueba de su línea; si algún punto resulta *Malo*, genera **rechazo visual directo** hacia Impresión Central omitiendo las pruebas de emisiones.
 
 ### 5.3 Estación de Prueba
-1. Seleccionar el expediente formado en la cola de la línea.
-2. Realizar la **Inspección Visual** de componentes vehiculares (fugas, estado de neumáticos, escape).
-3. Registrar diagnóstico **OBD/SBD** (monitores de diagnóstico vehicular).
-4. Para vehículos a diésel, validar obligatoriamente el **Checklist NOM-045** de 6 puntos de seguridad previa.
-5. Iniciar la prueba de emisiones (dinámica o estática según corresponda).
-6. **Manejo de Falla de Equipo (HU-054 / HU-083):** Si el analizador o dinamómetro pierde comunicación durante la prueba, el expediente transiciona al estado `ERROR_INTEGRACION` y se notifica al monitor de Supervisión. La prueba queda pausada y no avanza hasta que el Supervisor autorice el reintento explícito (`POST /api/pruebas/reintentar/{id}`).
+1. Seleccionar el expediente con inspección visual aprobada en la cola de la línea.
+2. Evaluar y registrar el diagnóstico **OBD/SBD** (monitores de diagnóstico vehicular, o exención / sin comunicación cuando aplique).
+3. Para vehículos a diésel, validar obligatoriamente el **Checklist NOM-045** de 6 puntos de seguridad previa.
+4. Iniciar la prueba de emisiones (dinámica o estática gasolina NOM-041, u opacidad diésel NOM-045).
+5. **Manejo de Falla de Equipo (HU-054 / HU-083):** Si el analizador o dinamómetro pierde comunicación durante la prueba, el expediente transiciona al estado `ERROR_INTEGRACION` y se notifica al monitor de Supervisión. La prueba queda pausada y no avanza hasta que el Supervisor autorice el reintento explícito (`POST /api/pruebas/reintentar/{id}`).
 
 ### 5.4 Estación de Impresión Central
 1. Visualizar la cola central de vehículos terminados.

@@ -165,7 +165,7 @@ node scripts\smoke_carga_concurrencia.mjs
 
 ## 5. Desbloqueo de usuarios (`desbloquear_usuario.sh` y `.ps1`)
 
-Herramienta de **soporte** para destrabar a un usuario que el backend bloqueó por intentos fallidos de login (PENDIENTES X1: 5 fallos seguidos, 15 minutos). Sirve sobre todo para un **supervisor bloqueado**, que no tiene a quién pedirle el desbloqueo. Para un operador, lo habitual es esperar a que venza el bloqueo o que lo destrabe el supervisor del centro, pero esa vía todavía no existe en la API (falta `POST /api/usuarios/{id}/desbloquear`).
+Herramienta de **soporte** para destrabar a un usuario que el backend bloqueó por intentos fallidos de login (PENDIENTES X1 / X1-b: 5 fallos por pareja `(usuario, IP)`, 15 minutos, o tope global de 30 fallos por usuario). Sirve sobre todo para un **supervisor bloqueado** cuando es el único supervisor del centro. Para un operador (o si existe otro supervisor activo), la vía ordinaria es esperar a que venza el bloqueo o usar el botón *Desbloquear* desde Administración (`POST /api/usuarios/{id}/desbloquear`).
 
 **Qué hace y qué no.** No borra intentos ni inventa un login. A los intentos fallidos que hoy cuentan para el bloqueo les agrega al motivo `(desbloqueado por soporte)`. Se conservan su fecha, estación e IP, y el backend deja de contarlos. Antes de modificar muestra la lista y pide escribir `SI` (en mayúsculas); al terminar comprueba que ya no quede ningún intento vigente.
 
